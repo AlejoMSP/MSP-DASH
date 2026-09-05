@@ -1,0 +1,14 @@
+# Arduino / PlatformIO
+.pio/
+.vscode/
+*.bin
+*.elf
+build/
+
+# Nextion Editor temp/export junk
+*.HMI.bak
+Debug/
+
+# OS
+.DS_Store
+Thumbs.db
