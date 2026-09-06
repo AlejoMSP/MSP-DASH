@@ -3,7 +3,8 @@
   Production sketch: reads the FULL rusEFI CAN signal set (every signal
   in rusEFI's official DBC, base 0x200/512 decimal - see docs/CAN-map.md),
   plus GPS speed and an EGT thermocouple, and pushes everything to a
-  digital Nextion dashboard AND a live web dashboard over WiFi.
+  digital Nextion dashboard AND a live, interactive web dashboard over
+  WiFi.
 
   STATUS: RPM/MAP/TPS1/BattVolt/MCUTemp are BENCH-CONFIRMED (real
   hardware, real values matched). Every other signal comes straight from
@@ -11,26 +12,34 @@
   for the ones not physically wired yet - those read 0/default).
 
   MegaSquirt and LinkECU support has been REMOVED for now (rusEFI-only
-  focus per project decision) - to be revisited later. See git history
-  if you need to bring that code back.
+  focus per project decision) - see git history to reference/restore.
 
-  See docs/CAN-map.md for full signal tables and confirmation history.
+  Debug/Serial logging: a global toggle (OFF by default) PLUS a per-gauge
+  toggle - either turns on console output for that gauge's updates.
 
-  Debug/Serial logging is OFF by default (toggle on /config) - the
-  console doesn't get flooded with every CAN-derived value unless
-  explicitly turned on for troubleshooting.
+  Gauge display types: Number, Bar, Needle, and now Light (boolean
+  on/off style icon indicator - used for CEL, rev limiter, fuel pump,
+  fans, brake pedal, etc). Light icons come from Material Design Icons
+  (MDI, materialdesignicons.com / mdisearch.com) loaded via CDN webfont.
+  NOTE: exact MDI icon-name choices below are my best guess based on
+  common automotive icon conventions, NOT independently verified against
+  the current MDI icon set - a wrong name just renders blank (safe
+  failure), spot-check at mdisearch.com and adjust the ICON_MAP in the
+  dashboard JS if any look wrong/missing.
 
-  Every gauge has, via /config: enabled on/off, display type (number/bar/
-  needle - only applies to non-hero tile-grid gauges; the four hero
-  cluster gauges - rpm/mph/fuel/clt - stay fixed needle dials but their
-  min/max/redline are still configurable), refresh rate (ms), min/max
-  range, and an optional redline threshold.
+  Web dashboard interactivity (applies to dynamic gauges only - NOT the
+  4 fixed hero cluster gauges rpm/mph/fuel/clt, which stay a deliberately
+  fixed classic-cluster centerpiece):
+    - Close (X) button on every gauge - disables it immediately (same as
+      unchecking it on /config), persisted to flash.
+    - Drag-and-drop reordering within each display-type section.
+    - Right-click a gauge to change its display type on the fly (also
+      persisted).
 
   NOTE ON SCOPE: this does NOT let you map an arbitrary new CAN ID/byte
-  offset to a brand-new gauge via the web UI - that would be a separate,
-  larger "generic CAN signal editor" feature. What's configurable here is
-  the DISPLAY of every rusEFI signal already wired into this code (which
-  is now all of them).
+  offset to a brand-new gauge via the web UI - only the DISPLAY of
+  signals already wired into this code (all of rusEFI's DBC) is
+  configurable/interactive.
 */
 
 
@@ -50,22 +59,18 @@
 // pin / wiring configuration
 // =====================================================================
 
-// CAN transceiver (SN65HVD230 or MCP2551 + level shifting on RX)
 #define CAN_TX_PIN GPIO_NUM_21
 #define CAN_RX_PIN GPIO_NUM_22
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
 
-// Nextion display, UART2
 #define NEXTION_RX_PIN 16
 #define NEXTION_TX_PIN 17
 #define NEXTION_BAUD 115200 // must match Nextion project's baud= startup setting
 
-// GPS module (GT-U7 / NEO-6M chipset), UART1
-#define GPS_RX_PIN 4  // ESP32 pin receiving GPS module's TX
-#define GPS_TX_PIN 5  // ESP32 pin driving GPS module's RX
+#define GPS_RX_PIN 4
+#define GPS_TX_PIN 5
 #define GPS_BAUD 9600
 
-// EGT (MAX6675 + K-type thermocouple), bit-banged 3-wire interface
 #define MAX6675_CS  32
 #define MAX6675_SCK 33
 #define MAX6675_SO  34 // input-only pin - fits since this is read-only
@@ -99,31 +104,30 @@
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 unsigned long lastGpsSend = 0;
-const unsigned long GPS_SEND_INTERVAL_MS = 250; // ~4Hz display update, independent of GPS fix rate
+const unsigned long GPS_SEND_INTERVAL_MS = 250;
 
-const unsigned long STALE_MS = 2000; // blocks round-robin at different rates; reserved for future staleness check
+const unsigned long STALE_MS = 2000; // reserved for future staleness check
 
 AsyncWebServer webServer(80);
 AsyncWebSocket ws("/ws");
 Preferences gaugePrefs;
 Preferences sysPrefs;
 
-bool debugLoggingEnabled = false; // OFF by default - toggle on /config
+bool debugLoggingEnabled = false; // global OFF by default - toggle on /config
 
 
 // =====================================================================
-// gauge config - persisted in flash (NVS), edited via /config page.
-// Disabling a gauge (or its refresh throttle) affects BOTH the Nextion
-// display and the web dashboard, since they share nextionSend().
+// gauge config - persisted in flash (NVS), edited via /config OR live
+// on the dashboard (close/move/right-click-type-change).
 // =====================================================================
 
-enum DisplayType { DISPLAY_NUMBER = 0, DISPLAY_BAR = 1, DISPLAY_NEEDLE = 2 };
+enum DisplayType { DISPLAY_NUMBER = 0, DISPLAY_BAR = 1, DISPLAY_NEEDLE = 2, DISPLAY_LIGHT = 3 };
 
 struct GaugeConfig {
-  const char* key;    // field name, matches what nextionSend() parses out
-  const char* label;  // human-readable name for the config page
-  const char* ecu;    // "rusefi" | "aem" | "gps" | "aux" - for grouping on /config
-  bool isHero;        // true = fixed needle dial in the cluster (rpm/mph/fuel/clt)
+  const char* key;
+  const char* label;
+  const char* ecu;    // "rusefi" | "gps" | "aux" - for grouping on /config
+  bool isHero;         // true = fixed needle dial in the cluster (rpm/mph/fuel/clt)
   bool enabled;
   uint8_t displayType; // only meaningful when isHero==false
   unsigned long refreshMs;
@@ -131,111 +135,113 @@ struct GaugeConfig {
   float maxVal;
   bool hasRedline;
   float redline;
+  bool debugEnabled;  // per-gauge console logging, separate from the global toggle
+  int order;          // sort position within its display-type section; defaults to array index
   unsigned long lastSentMs; // runtime only, not persisted
 };
 
 GaugeConfig gaugeConfigs[] = {
-  // --- hero cluster ---
-  { "rpm",       "RPM",                 "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    8000,   true,  6800, 0 },
-  { "mph",       "Speed (GPS)",         "gps",    true,  true, DISPLAY_NEEDLE, 0,   0,    140,    false, 0,    0 },
-  { "fuel",      "Fuel Level",          "rusefi", true,  true, DISPLAY_NEEDLE, 250, 0,    100,    false, 0,    0 },
-  { "clt",       "Coolant Temp",        "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    260,    false, 0,    0 },
+  // --- hero cluster (fixed layout, not draggable/closable/right-click) ---
+  { "rpm",       "RPM",                 "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    8000,   true,  6800, false, 0, 0 },
+  { "mph",       "Speed (GPS)",         "gps",    true,  true, DISPLAY_NEEDLE, 0,   0,    140,    false, 0,    false, 1, 0 },
+  { "fuel",      "Fuel Level",          "rusefi", true,  true, DISPLAY_NEEDLE, 250, 0,    100,    false, 0,    false, 2, 0 },
+  { "clt",       "Coolant Temp",        "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    260,    false, 0,    false, 3, 0 },
 
   // --- BASE1: RPM group extras ---
-  { "igntim",    "Ignition Timing",     "rusefi", false, true, DISPLAY_NUMBER, 0,   -20,  50,     false, 0,    0 },
-  { "injduty",   "Injector Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
-  { "ignduty",   "Ignition Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
-  { "vss",       "Vehicle Speed (CAN)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    0 },
-  { "eth",       "Ethanol %",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "igntim",    "Ignition Timing",     "rusefi", false, true, DISPLAY_NUMBER, 0,   -20,  50,     false, 0,    false, 4, 0 },
+  { "injduty",   "Injector Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 5, 0 },
+  { "ignduty",   "Ignition Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 6, 0 },
+  { "vss",       "Vehicle Speed (CAN)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    false, 7, 0 },
+  { "eth",       "Ethanol %",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 8, 0 },
 
   // --- BASE2: throttle group ---
-  { "pps",       "Pedal Position",      "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
-  { "tps",       "TPS1 (bar)",          "rusefi", false, true, DISPLAY_BAR,    0,   0,    100,    false, 0,    0 },
-  { "tpst",      "TPS1 (text)",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
-  { "tps2",      "TPS2",                "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
-  { "wastegate", "Wastegate",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "pps",       "Pedal Position",      "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 9,  0 },
+  { "tps",       "TPS1 (bar)",          "rusefi", false, true, DISPLAY_BAR,    0,   0,    100,    false, 0,    false, 10, 0 },
+  { "tpst",      "TPS1 (text)",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 11, 0 },
+  { "tps2",      "TPS2",                "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 12, 0 },
+  { "wastegate", "Wastegate",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    false, 13, 0 },
 
   // --- BASE3: MAP/temps group ---
-  { "map",       "MAP",                 "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    0 },
-  { "boost",     "Boost",               "rusefi", false, true, DISPLAY_NUMBER, 0,   -15,  25,     false, 0,    0 },
-  { "mat",       "Intake Air Temp",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
-  { "aux1t",     "AUX1 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
-  { "aux2t",     "AUX2 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
-  { "mcut",      "MCU Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+  { "map",       "MAP",                 "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    false, 14, 0 },
+  { "boost",     "Boost",               "rusefi", false, true, DISPLAY_NUMBER, 0,   -15,  25,     false, 0,    false, 15, 0 },
+  { "mat",       "Intake Air Temp",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    false, 16, 0 },
+  { "aux1t",     "AUX1 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    false, 17, 0 },
+  { "aux2t",     "AUX2 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    false, 18, 0 },
+  { "mcut",      "MCU Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    false, 19, 0 },
 
   // --- BASE4: oil/fuel/batt group ---
-  { "oilp",      "Oil Pressure",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    700,    false, 0,    0 },
-  { "oilt",      "Oil Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    300,    false, 0,    0 },
-  { "fuelt",     "Fuel Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
-  { "battv",     "Battery Voltage",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    16,     false, 0,    0 },
+  { "oilp",      "Oil Pressure",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    700,    false, 0,    false, 20, 0 },
+  { "oilt",      "Oil Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    300,    false, 0,    false, 21, 0 },
+  { "fuelt",     "Fuel Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    false, 22, 0 },
+  { "battv",     "Battery Voltage",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    16,     false, 0,    false, 23, 0 },
 
   // --- BASE5: load/knock group ---
-  { "cylam",     "Cyl Air Mass",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    0 },
-  { "estmaf",    "Est. MAF",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    0 },
-  { "injpw",     "Injector Pulsewidth", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    0 },
-  { "knockct",   "Knock Count",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    65535,  false, 0,    0 },
+  { "cylam",     "Cyl Air Mass",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    false, 24, 0 },
+  { "estmaf",    "Est. MAF",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    false, 25, 0 },
+  { "injpw",     "Injector Pulsewidth", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    false, 26, 0 },
+  { "knockct",   "Knock Count",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    65535,  false, 0,    false, 27, 0 },
 
   // --- BASE6: fuel usage/trims group ---
-  { "fuelused",  "Fuel Used",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100000, false, 0,    0 },
-  { "fuelflow",  "Fuel Flow",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    0 },
-  { "trim1",     "Fuel Trim 1",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    0 },
-  { "trim2",     "Fuel Trim 2",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    0 },
+  { "fuelused",  "Fuel Used",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100000, false, 0,    false, 28, 0 },
+  { "fuelflow",  "Fuel Flow",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    false, 29, 0 },
+  { "trim1",     "Fuel Trim 1",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    false, 30, 0 },
+  { "trim2",     "Fuel Trim 2",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    false, 31, 0 },
 
   // --- BASE7: fueling group ---
-  { "ego",       "AFR (Lam1)",          "rusefi", false, true, DISPLAY_NUMBER, 0,   10,   20,     false, 0,    0 },
-  { "lam2",      "Lambda 2",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2,      false, 0,    0 },
-  { "fuelp",     "Fuel Pressure (Low)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    500,    false, 0,    0 },
-  { "fphigh",    "Fuel Pressure (High)","rusefi", false, true, DISPLAY_NUMBER, 0,   0,    10,     false, 0,    0 },
+  { "ego",       "AFR (Lam1)",          "rusefi", false, true, DISPLAY_NUMBER, 0,   10,   20,     false, 0,    false, 32, 0 },
+  { "lam2",      "Lambda 2",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2,      false, 0,    false, 33, 0 },
+  { "fuelp",     "Fuel Pressure (Low)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    500,    false, 0,    false, 34, 0 },
+  { "fphigh",    "Fuel Pressure (High)","rusefi", false, true, DISPLAY_NUMBER, 0,   0,    10,     false, 0,    false, 35, 0 },
 
   // --- BASE8: cam timing group ---
-  { "vvt",       "Cam1 Intake (VVT)",  "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  60,     false, 0,    0 },
-  { "cam1itar",  "Cam1 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam1e",     "Cam1 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam1etar",  "Cam1 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam2i",     "Cam2 Intake",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam2itar",  "Cam2 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam2e",     "Cam2 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
-  { "cam2etar",  "Cam2 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "vvt",       "Cam1 Intake (VVT)",  "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  60,     false, 0,    false, 36, 0 },
+  { "cam1itar",  "Cam1 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 37, 0 },
+  { "cam1e",     "Cam1 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 38, 0 },
+  { "cam1etar",  "Cam1 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 39, 0 },
+  { "cam2i",     "Cam2 Intake",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 40, 0 },
+  { "cam2itar",  "Cam2 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 41, 0 },
+  { "cam2e",     "Cam2 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 42, 0 },
+  { "cam2etar",  "Cam2 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    false, 43, 0 },
 
-  // --- BASE9: ECU-reported EGT (8ch) - distinct from the physical MAX6675 probe's "egt" key ---
-  { "ecuegt1",   "ECU EGT 1",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt2",   "ECU EGT 2",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt3",   "ECU EGT 3",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt4",   "ECU EGT 4",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt5",   "ECU EGT 5",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt6",   "ECU EGT 6",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt7",   "ECU EGT 7",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
-  { "ecuegt8",   "ECU EGT 8",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  // --- BASE9: ECU-reported EGT (8ch) ---
+  { "ecuegt1",   "ECU EGT 1",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 44, 0 },
+  { "ecuegt2",   "ECU EGT 2",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 45, 0 },
+  { "ecuegt3",   "ECU EGT 3",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 46, 0 },
+  { "ecuegt4",   "ECU EGT 4",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 47, 0 },
+  { "ecuegt5",   "ECU EGT 5",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 48, 0 },
+  { "ecuegt6",   "ECU EGT 6",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 49, 0 },
+  { "ecuegt7",   "ECU EGT 7",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 50, 0 },
+  { "ecuegt8",   "ECU EGT 8",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    false, 51, 0 },
 
   // --- BASE10: per-cylinder knock (8ch) ---
-  { "knock0",    "Knock Cyl 1",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock1",    "Knock Cyl 2",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock2",    "Knock Cyl 3",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock3",    "Knock Cyl 4",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock4",    "Knock Cyl 5",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock5",    "Knock Cyl 6",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock6",    "Knock Cyl 7",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
-  { "knock7",    "Knock Cyl 8",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock0",    "Knock Cyl 1",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 52, 0 },
+  { "knock1",    "Knock Cyl 2",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 53, 0 },
+  { "knock2",    "Knock Cyl 3",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 54, 0 },
+  { "knock3",    "Knock Cyl 4",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 55, 0 },
+  { "knock4",    "Knock Cyl 5",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 56, 0 },
+  { "knock5",    "Knock Cyl 6",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 57, 0 },
+  { "knock6",    "Knock Cyl 7",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 58, 0 },
+  { "knock7",    "Knock Cyl 8",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    false, 59, 0 },
 
-  // --- BASE0: status/diagnostic group ---
-  { "warncnt",   "Warning Counter",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    0 },
-  { "lasterr",   "Last Error Code",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    0 },
-  { "revlim",    "Rev Limiter Active", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "mainrelay", "Main Relay Active",  "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "fuelpump",  "Fuel Pump Active",   "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "cel",       "Check Engine Light", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "egoheat",   "EGO Heater Active",  "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "lambdaprot","Lambda Protect",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "fan1",      "Fan 1 Active",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "fan2",      "Fan 2 Active",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
-  { "gear",      "Current Gear",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    8,      false, 0,    0 },
-  { "odo",       "Distance Traveled",  "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    999999, false, 0,    0 },
+  // --- BASE0: status/diagnostic group - most of these are now LIGHT type ---
+  { "warncnt",   "Warning Counter",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    false, 60, 0 },
+  { "lasterr",   "Last Error Code",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    false, 61, 0 },
+  { "revlim",    "Rev Limiter",        "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 62, 0 },
+  { "mainrelay", "Main Relay",         "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 63, 0 },
+  { "fuelpump",  "Fuel Pump",          "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 64, 0 },
+  { "cel",       "Check Engine",       "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 65, 0 },
+  { "egoheat",   "EGO Heater",         "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 66, 0 },
+  { "lambdaprot","Lambda Protect",     "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 67, 0 },
+  { "fan1",      "Fan 1",              "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 68, 0 },
+  { "fan2",      "Fan 2",              "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 69, 0 },
+  { "gear",      "Current Gear",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    8,      false, 0,    false, 70, 0 },
+  { "odo",       "Distance Traveled",  "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    999999, false, 0,    false, 71, 0 },
 
   // --- BASE11 ---
-  { "brake",     "Brake Pedal",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "brake",     "Brake Pedal",        "rusefi", false, true, DISPLAY_LIGHT,  0,   0,    1,      false, 0,    false, 72, 0 },
 
-  // --- Auxiliary sensors (not from rusEFI CAN) ---
-  { "egt",       "EGT (probe)",        "aux",    false, true, DISPLAY_NUMBER, 0,   0,    1800,   false, 0,    0 },
+  // --- Auxiliary sensors ---
+  { "egt",       "EGT (probe)",        "aux",    false, true, DISPLAY_NUMBER, 0,   0,    1800,   false, 0,    false, 73, 0 },
 };
 const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
 
@@ -246,11 +252,9 @@ int findGaugeIndex(const String &field) {
   return -1;
 }
 
-// Returns true and updates lastSentMs if this field should actually be
-// sent right now (enabled AND its refresh interval has elapsed).
 bool gaugeReadyToSend(const String &field) {
   int idx = findGaugeIndex(field);
-  if (idx < 0) return true; // unrecognized field - default to allowed
+  if (idx < 0) return true;
   GaugeConfig &g = gaugeConfigs[idx];
   if (!g.enabled) return false;
   unsigned long now = millis();
@@ -259,17 +263,25 @@ bool gaugeReadyToSend(const String &field) {
   return true;
 }
 
+bool gaugeDebugOn(const String &field) {
+  int idx = findGaugeIndex(field);
+  if (idx < 0) return false;
+  return gaugeConfigs[idx].debugEnabled;
+}
+
 void loadGaugeConfig() {
   for (int i = 0; i < NUM_GAUGES; i++) {
     GaugeConfig &g = gaugeConfigs[i];
     String k = String(g.key);
-    g.enabled     = gaugePrefs.getBool((k + "_en").c_str(), g.enabled);
-    g.displayType = gaugePrefs.getUChar((k + "_dt").c_str(), g.displayType);
-    g.refreshMs   = gaugePrefs.getULong((k + "_rf").c_str(), g.refreshMs);
-    g.minVal      = gaugePrefs.getFloat((k + "_mn").c_str(), g.minVal);
-    g.maxVal      = gaugePrefs.getFloat((k + "_mx").c_str(), g.maxVal);
-    g.hasRedline  = gaugePrefs.getBool((k + "_hr").c_str(), g.hasRedline);
-    g.redline     = gaugePrefs.getFloat((k + "_rl").c_str(), g.redline);
+    g.enabled      = gaugePrefs.getBool((k + "_en").c_str(), g.enabled);
+    g.displayType  = gaugePrefs.getUChar((k + "_dt").c_str(), g.displayType);
+    g.refreshMs    = gaugePrefs.getULong((k + "_rf").c_str(), g.refreshMs);
+    g.minVal       = gaugePrefs.getFloat((k + "_mn").c_str(), g.minVal);
+    g.maxVal       = gaugePrefs.getFloat((k + "_mx").c_str(), g.maxVal);
+    g.hasRedline   = gaugePrefs.getBool((k + "_hr").c_str(), g.hasRedline);
+    g.redline      = gaugePrefs.getFloat((k + "_rl").c_str(), g.redline);
+    g.debugEnabled = gaugePrefs.getBool((k + "_dbg").c_str(), g.debugEnabled);
+    g.order        = gaugePrefs.getInt((k + "_or").c_str(), g.order);
   }
   debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
 }
@@ -306,13 +318,15 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
       g.redline = request->getParam((k + "_rl").c_str(), true)->value().toFloat();
       gaugePrefs.putFloat((k + "_rl").c_str(), g.redline);
     }
+    bool dbg = request->hasParam((k + "_dbg").c_str(), true);
+    g.debugEnabled = dbg;
+    gaugePrefs.putBool((k + "_dbg").c_str(), dbg);
   }
 
   debugLoggingEnabled = request->hasParam("dbglog", true);
   sysPrefs.putBool("dbglog", debugLoggingEnabled);
 }
 
-// JSON array of all gauge configs, for the dashboard JS to fetch at load
 String buildGaugeApiJson() {
   String json = "[";
   for (int i = 0; i < NUM_GAUGES; i++) {
@@ -326,7 +340,8 @@ String buildGaugeApiJson() {
     json += "\"min\":" + String(g.minVal, 2) + ",";
     json += "\"max\":" + String(g.maxVal, 2) + ",";
     json += "\"hasRedline\":" + String(g.hasRedline ? "true" : "false") + ",";
-    json += "\"redline\":" + String(g.redline, 2);
+    json += "\"redline\":" + String(g.redline, 2) + ",";
+    json += "\"order\":" + String(g.order);
     json += "}";
   }
   json += "]";
@@ -336,9 +351,6 @@ String buildGaugeApiJson() {
 
 // =====================================================================
 // web dashboard - served HTML page
-// Hero cluster (fuel/rpm/lcd/mph/clt) stays a fixed classic-instrument
-// layout; all other gauges render dynamically as number/bar/needle-mini
-// based on config fetched from /api/gauges at page load.
 // =====================================================================
 
 static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
@@ -348,6 +360,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MSP-DASH Live</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
   <style>
     * { box-sizing: border-box; }
     body {
@@ -364,7 +377,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                   border-radius:6px; padding:6px 14px; }
 
     .cluster { display:flex; align-items:center; justify-content:center; flex-wrap:wrap;
-               gap: 6px; margin-bottom: 24px; }
+               gap: 6px; margin-bottom: 10px; }
     .gauge-wrap { position:relative; }
     .gauge-wrap svg { display:block; }
     .needle {
@@ -392,13 +405,22 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     .lcd { width:120px; height:180px; background:#111; border-radius:8px; border:3px solid #333;
            display:flex; flex-direction:column; align-items:center; justify-content:center;
            box-shadow: inset 0 0 10px rgba(0,0,0,0.8); }
-    .lcd-label { color:#4dd0e1; font-size:0.6em; text-transform:uppercase; letter-spacing:1px;
-                 font-family:monospace; }
+    .lcd-label { color:#4dd0e1; font-size:0.6em; text-transform:uppercase; letter-spacing:1px; font-family:monospace; }
     .lcd-value { color:#4caf50; font-size:1.5em; font-family:monospace; font-weight:700;
                  text-shadow: 0 0 6px rgba(76,175,80,0.6); margin:6px 0; }
     .lcd-unit { color:#4caf50; font-size:0.65em; font-family:monospace; opacity:0.7; }
 
-    .bar-section-generic { max-width: 500px; margin: 0 auto 12px auto; }
+    /* Warning light strip - sits just under the hero cluster */
+    .light-strip { display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+                   max-width:900px; margin: 0 auto 24px auto; }
+    .light-box { position:relative; width:64px; height:64px; background:#111; border:1px solid #2a2a30;
+                 border-radius:8px; display:flex; flex-direction:column; align-items:center;
+                 justify-content:center; cursor:grab; }
+    .light-box .mdi { font-size:24px; color:#333; transition: color 0.2s ease, text-shadow 0.2s ease; }
+    .light-box.lit .mdi { color:#e74c3c; text-shadow: 0 0 8px rgba(231,76,60,0.9); }
+    .light-box .light-label { font-size:0.5em; color:#888; text-transform:uppercase; margin-top:2px; }
+
+    .bar-section-generic { max-width: 500px; margin: 0 auto 12px auto; position:relative; }
     .bar-label { display: flex; justify-content: space-between; font-size: 0.8em; color: #888;
                  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
     .bar-track { background: #1a1a1f; border-radius: 8px; height: 22px; overflow: hidden;
@@ -409,12 +431,25 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px;
             max-width: 1000px; margin: 0 auto; }
     .tile { background: #16161a; border: 1px solid #2a2a30; border-radius: 8px;
-            padding: 12px 8px; text-align: center; }
+            padding: 12px 8px; text-align: center; position:relative; cursor:grab; }
     .tile .label { color: #4dd0e1; font-size: 0.65em; text-transform: uppercase; letter-spacing: 1px; }
     .tile .value { font-size: 1.3em; font-weight: 600; margin-top: 4px; }
 
     .mini-gauges { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:1000px;
                    margin: 0 auto 20px auto; }
+
+    /* Close button, appears on all draggable/interactive gauges */
+    .close-btn { position:absolute; top:2px; right:4px; font-size:0.7em; color:#666;
+                 cursor:pointer; line-height:1; padding:2px 4px; }
+    .close-btn:hover { color:#e74c3c; }
+
+    .dragging { opacity: 0.4; }
+
+    /* Right-click context menu */
+    #ctxMenu { position:fixed; display:none; background:#16161a; border:1px solid #2a2a30;
+               border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.6); z-index:1000; overflow:hidden; }
+    #ctxMenu div { padding:10px 16px; font-size:0.85em; cursor:pointer; }
+    #ctxMenu div:hover { background:#2a2a30; }
   </style>
 </head>
 <body>
@@ -423,12 +458,29 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <div class="cfg-link"><a href="/config">&#9881; Configure Gauges</a></div>
 
   <div class="cluster" id="cluster"></div>
+  <div class="light-strip" id="lightStrip"></div>
   <div class="mini-gauges" id="miniGauges"></div>
   <div id="genericBars"></div>
   <div class="grid" id="grid"></div>
+  <div id="ctxMenu"></div>
 
   <script>
-    // ---- SVG gauge face generator, shared by hero + mini needle gauges ----
+    // Best-guess MDI icon names per light-type gauge - NOT independently
+    // verified against the current MDI icon set. Spot-check at
+    // mdisearch.com; a wrong name just renders blank, nothing breaks.
+    const ICON_MAP = {
+      cel:        'engine',
+      revlim:     'speedometer',
+      mainrelay:  'flash',
+      fuelpump:   'gas-station',
+      egoheat:    'thermometer',
+      lambdaprot: 'shield-alert',
+      fan1:       'fan',
+      fan2:       'fan',
+      brake:      'car-brake-alert'
+    };
+    const DEFAULT_ICON = 'alert-circle-outline';
+
     function buildGaugeFace(size, maxVal, minVal, redlineFrom, hasRedline) {
       const cx = size / 2, cy = size / 2, r = size * 0.42;
       const startDeg = -135, sweepDeg = 270;
@@ -479,7 +531,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       return wrap;
     }
 
-    let gaugeConfig = {}; // key -> config object, filled from /api/gauges
+    let gaugeConfig = {};
     const lastValues = {};
 
     function updateNeedle(field, value) {
@@ -497,12 +549,8 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     function buildHeroCluster() {
       const cluster = document.getElementById('cluster');
       cluster.innerHTML = '';
-      if (gaugeConfig['fuel'] && gaugeConfig['fuel'].enabled) {
-        cluster.appendChild(makeGauge('fuel', 110, gaugeConfig['fuel'], true));
-      }
-      if (gaugeConfig['rpm'] && gaugeConfig['rpm'].enabled) {
-        cluster.appendChild(makeGauge('rpm', 220, gaugeConfig['rpm'], false));
-      }
+      if (gaugeConfig['fuel'] && gaugeConfig['fuel'].enabled) cluster.appendChild(makeGauge('fuel', 110, gaugeConfig['fuel'], true));
+      if (gaugeConfig['rpm'] && gaugeConfig['rpm'].enabled) cluster.appendChild(makeGauge('rpm', 220, gaugeConfig['rpm'], false));
 
       const lcd = document.createElement('div');
       lcd.className = 'lcd';
@@ -519,9 +567,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
         mphWrap.appendChild(gpsDot);
         cluster.appendChild(mphWrap);
       }
-      if (gaugeConfig['clt'] && gaugeConfig['clt'].enabled) {
-        cluster.appendChild(makeGauge('clt', 110, gaugeConfig['clt'], true));
-      }
+      if (gaugeConfig['clt'] && gaugeConfig['clt'].enabled) cluster.appendChild(makeGauge('clt', 110, gaugeConfig['clt'], true));
     }
 
     const lcdStats = [
@@ -543,32 +589,120 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     }
     setInterval(refreshLcd, 3000);
 
+    // ---- live gauge actions: close / drag reorder / right-click type change ----
+    function closeGauge(key) {
+      fetch('/api/gauge/set?key=' + key + '&enabled=0');
+      gaugeConfig[key].enabled = false;
+      buildDynamicGauges();
+    }
+
+    function setGaugeType(key, type) {
+      fetch('/api/gauge/type?key=' + key + '&type=' + type);
+      gaugeConfig[key].displayType = type;
+      buildDynamicGauges();
+    }
+
+    function persistOrder(container) {
+      const keys = Array.from(container.children).map(el => el.dataset.key).filter(Boolean);
+      keys.forEach((k, i) => { if (gaugeConfig[k]) gaugeConfig[k].order = i; });
+      fetch('/api/gauge/order?list=' + keys.join(','));
+    }
+
+    function makeInteractive(el, key, container) {
+      el.dataset.key = key;
+      el.draggable = true;
+
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'close-btn';
+      closeBtn.textContent = '\u2715';
+      closeBtn.onclick = (e) => { e.stopPropagation(); closeGauge(key); };
+      el.appendChild(closeBtn);
+
+      el.addEventListener('dragstart', () => el.classList.add('dragging'));
+      el.addEventListener('dragend', () => { el.classList.remove('dragging'); persistOrder(container); });
+
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showCtxMenu(e.clientX, e.clientY, key);
+      });
+    }
+
+    function showCtxMenu(x, y, key) {
+      const menu = document.getElementById('ctxMenu');
+      const types = [
+        { n: 0, label: 'Number' },
+        { n: 1, label: 'Bar' },
+        { n: 2, label: 'Needle' },
+        { n: 3, label: 'Light' }
+      ];
+      menu.innerHTML = types.map(t => '<div data-type="' + t.n + '">' + t.label + '</div>').join('');
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+      menu.style.display = 'block';
+      Array.from(menu.children).forEach(child => {
+        child.onclick = () => { setGaugeType(key, child.dataset.type); menu.style.display = 'none'; };
+      });
+    }
+    document.addEventListener('click', () => { document.getElementById('ctxMenu').style.display = 'none'; });
+
+    function enableDragSort(container) {
+      container.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const dragging = container.querySelector('.dragging');
+        if (!dragging) return;
+        const afterEl = [...container.children].find(child => {
+          if (child === dragging) return false;
+          const rect = child.getBoundingClientRect();
+          return e.clientY < rect.top + rect.height / 2 || e.clientX < rect.left + rect.width / 2;
+        });
+        if (afterEl) container.insertBefore(dragging, afterEl);
+        else container.appendChild(dragging);
+      });
+    }
+
     function buildDynamicGauges() {
       const miniWrap = document.getElementById('miniGauges');
       const barsWrap = document.getElementById('genericBars');
       const grid = document.getElementById('grid');
-      miniWrap.innerHTML = ''; barsWrap.innerHTML = ''; grid.innerHTML = '';
+      const lightStrip = document.getElementById('lightStrip');
+      miniWrap.innerHTML = ''; barsWrap.innerHTML = ''; grid.innerHTML = ''; lightStrip.innerHTML = '';
 
-      Object.keys(gaugeConfig).forEach(key => {
-        if (heroKeys.includes(key)) return; // hero gauges handled separately
+      const sorted = Object.keys(gaugeConfig)
+        .filter(k => !heroKeys.includes(k))
+        .sort((a, b) => (gaugeConfig[a].order || 0) - (gaugeConfig[b].order || 0));
+
+      sorted.forEach(key => {
         const cfg = gaugeConfig[key];
         if (!cfg.enabled) return;
 
-        if (cfg.displayType === 2) { // needle mini gauge
-          miniWrap.appendChild(makeGauge(key, 100, cfg, true));
+        if (cfg.displayType === 3) { // light
+          const box = document.createElement('div');
+          box.className = 'light-box';
+          const icon = ICON_MAP[key] || DEFAULT_ICON;
+          box.innerHTML = '<span class="mdi mdi-' + icon + '"></span><div class="light-label">' + cfg.label + '</div>';
+          makeInteractive(box, key, lightStrip);
+          lightStrip.appendChild(box);
+        } else if (cfg.displayType === 2) { // needle mini gauge
+          const g = makeGauge(key, 100, cfg, true);
+          makeInteractive(g, key, miniWrap);
+          miniWrap.appendChild(g);
         } else if (cfg.displayType === 1) { // bar
           const section = document.createElement('div');
           section.className = 'bar-section-generic';
           section.innerHTML = '<div class="bar-label"><span>' + cfg.label + '</span><span id="v_' + key + '">--</span></div>' +
                                '<div class="bar-track"><div class="bar-fill" id="bar_' + key + '"></div></div>';
+          makeInteractive(section, key, barsWrap);
           barsWrap.appendChild(section);
         } else { // number tile
           const tile = document.createElement('div');
           tile.className = 'tile';
           tile.innerHTML = '<div class="label">' + cfg.label + '</div><div class="value" id="v_' + key + '">--</div>';
+          makeInteractive(tile, key, grid);
           grid.appendChild(tile);
         }
       });
+
+      [miniWrap, barsWrap, grid, lightStrip].forEach(enableDragSort);
     }
 
     function handleField(field, value) {
@@ -580,7 +714,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
 
       if (cfg) {
         const num = parseFloat(value);
-        if (!isNaN(num)) {
+        if (cfg.displayType === 3) { // light
+          const box = document.querySelector('.light-box[data-key="' + field + '"]');
+          if (box) box.classList.toggle('lit', value === '1' || num === 1);
+        } else if (!isNaN(num)) {
           if (cfg.isHero || cfg.displayType === 2) {
             updateNeedle(field, num);
           } else if (cfg.displayType === 1) {
@@ -646,15 +783,13 @@ int16_t readS16LE(uint8_t* data, int offset) {
   return (int16_t)(data[offset] | (data[offset + 1] << 8));
 }
 
-// rusEFI's DBC confirms its temp signals are degC - this conversion is
-// well-defined for every temp field in this sketch.
 float cToF(float c) {
   return c * 9.0f / 5.0f + 32.0f;
 }
 
 
 // =====================================================================
-// gauge config page - built dynamically, grouped per signal block
+// gauge config page
 // =====================================================================
 
 String gaugeRowHtml(GaugeConfig &g) {
@@ -669,6 +804,7 @@ String gaugeRowHtml(GaugeConfig &g) {
     row += "<option value='0'" + String(g.displayType == 0 ? " selected" : "") + ">Number</option>";
     row += "<option value='1'" + String(g.displayType == 1 ? " selected" : "") + ">Bar</option>";
     row += "<option value='2'" + String(g.displayType == 2 ? " selected" : "") + ">Needle</option>";
+    row += "<option value='3'" + String(g.displayType == 3 ? " selected" : "") + ">Light</option>";
     row += "</select></label>";
   }
   row += "<label>Refresh (ms)<input type='number' name='" + String(g.key) + "_rf' value='" + String(g.refreshMs) + "'></label>";
@@ -677,6 +813,9 @@ String gaugeRowHtml(GaugeConfig &g) {
   row += "<label class='rl'><input type='checkbox' name='" + String(g.key) + "_hr'";
   if (g.hasRedline) row += " checked";
   row += "> Redline<input type='number' step='any' name='" + String(g.key) + "_rl' value='" + String(g.redline, 2) + "'></label>";
+  row += "<label class='rl'><input type='checkbox' name='" + String(g.key) + "_dbg'";
+  if (g.debugEnabled) row += " checked";
+  row += "> Log to console</label>";
   row += "</div></div>";
   return row;
 }
@@ -710,9 +849,10 @@ String buildConfigPage() {
     "</style></head><body>"
     "<a href='/'>&larr; Back to Dashboard</a>"
     "<h1>Configuration</h1>"
+    "<p style='font-size:0.75em;color:#888;'>Tip: on the dashboard itself, you can close a gauge with its X, drag to reorder, or right-click to change its type instantly - this page is for the full config including refresh rate, limits, redlines, and per-gauge console logging.</p>"
     "<form method='POST' action='/config'>"
     "<h2>System</h2>"
-    "<div class='sys-row'><span>Serial Debug Logging</span>"
+    "<div class='sys-row'><span>Serial Debug Logging (all gauges)</span>"
     "<input type='checkbox' name='dbglog'"
   );
   if (debugLoggingEnabled) html += " checked";
@@ -741,22 +881,19 @@ String buildConfigPage() {
 // =====================================================================
 
 void nextionSend(const String &cmd) {
-  // Parse "field.txt=\"value\"" or "field.val=value" out of the command
-  // string up front, so a disabled/throttled gauge can be skipped
-  // entirely - no Nextion write, no debug print, no web broadcast.
   int dot = cmd.indexOf('.');
   int eq = cmd.indexOf('=');
-  if (dot <= 0 || eq <= dot) return; // malformed command, nothing to parse - drop silently
+  if (dot <= 0 || eq <= dot) return;
 
   String field = cmd.substring(0, dot);
-  if (!gaugeReadyToSend(field)) return; // disabled via /config, or refresh interval not elapsed yet
+  if (!gaugeReadyToSend(field)) return;
 
   Serial2.print(cmd);
   Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
-  if (debugLoggingEnabled) Serial.println(cmd); // OFF by default - toggle on /config
+  if (debugLoggingEnabled || gaugeDebugOn(field)) Serial.println(cmd);
 
   String value = cmd.substring(eq + 1);
-  value.replace("\"", ""); // strip quotes if present (text fields)
+  value.replace("\"", "");
   String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
   ws.textAll(json);
 }
@@ -771,7 +908,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
     case RUSEFI_BASE0: {
       uint16_t warnCntV = readU16LE(d, 0);
       uint16_t lastErrV = readU16LE(d, 2);
-      uint8_t flags = d[4]; // bit0=RevLimAct,1=MainRelayAct,2=FuelPumpAct,3=CELAct,4=EGOHeatAct,5=LambdaProtectAct,6=Fan,7=Fan2
+      uint8_t flags = d[4];
       uint8_t gearV = d[5];
       uint16_t distRaw = readU16LE(d, 6);
       float distV = distRaw * 0.1f;
@@ -798,8 +935,8 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float injDuty = injDutyRaw * 0.5f;
       uint8_t ignDutyRaw = d[5];
       float ignDuty = ignDutyRaw * 0.5f;
-      uint8_t vssRaw = d[6]; // kph
-      uint8_t flexPct = d[7]; // FlexPct: %
+      uint8_t vssRaw = d[6];
+      uint8_t flexPct = d[7];
 
       nextionSend("rpm.txt=\"" + String(rpm) + "\"");
       nextionSend("igntim.txt=\"" + String(ignTim, 1) + "\"");
@@ -812,7 +949,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
     case RUSEFI_BASE2: {
       int16_t ppsRaw = readS16LE(d, 0);
       float ppsV = ppsRaw * 0.01f;
-      int16_t tpsRaw = readS16LE(d, 2); // TPS1
+      int16_t tpsRaw = readS16LE(d, 2);
       float tps = tpsRaw * 0.01f;
       int16_t tps2Raw = readS16LE(d, 4);
       float tps2V = tps2Raw * 0.01f;
@@ -820,7 +957,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float wgV = wgRaw * 0.01f;
 
       nextionSend("pps.txt=\"" + String(ppsV, 1) + "\"");
-      nextionSend("tps.val=" + String((int)tps)); // progress bar, native 0-100 range
+      nextionSend("tps.val=" + String((int)tps));
       nextionSend("tpst.txt=\"" + String(tps, 1) + "\"");
       nextionSend("tps2.txt=\"" + String(tps2V, 1) + "\"");
       nextionSend("wastegate.txt=\"" + String(wgV, 1) + "\"");
@@ -829,7 +966,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
     case RUSEFI_BASE3: {
       uint16_t mapRaw = readU16LE(d, 0);
       float mapKpa = mapRaw * 0.0333333f;
-      float boost = mapKpa - ASSUMED_BARO_KPA; // no baro signal in rusEFI DBC - fixed assumption
+      float boost = mapKpa - ASSUMED_BARO_KPA;
       int8_t cltRaw = (int8_t)d[2];
       float clt = cToF(cltRaw - 40);
       int8_t matRaw = (int8_t)d[3];
@@ -840,7 +977,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float aux2V = cToF(aux2Raw - 40);
       int8_t mcuRaw = (int8_t)d[6];
       float mcuV = cToF(mcuRaw - 40);
-      uint8_t fuelRaw = d[7]; // FuelLevel: x0.5, %
+      uint8_t fuelRaw = d[7];
       float fuel = fuelRaw * 0.5f;
 
       nextionSend("map.txt=\"" + String(mapKpa, 1) + "\"");
@@ -854,13 +991,13 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       break;
     }
     case RUSEFI_BASE4: {
-      uint16_t oilPressRaw = readU16LE(d, 2); // OilPress: byte2-3
+      uint16_t oilPressRaw = readU16LE(d, 2);
       float oilPressKpa = oilPressRaw * 0.0333333f;
       int8_t oilTempRaw = (int8_t)d[4];
       float oilTemp = cToF(oilTempRaw - 40);
       int8_t fuelTRaw = (int8_t)d[5];
       float fuelTV = cToF(fuelTRaw - 40);
-      uint16_t battRaw = readU16LE(d, 6); // BattVolt: byte6-7
+      uint16_t battRaw = readU16LE(d, 6);
       float battV = battRaw * 0.001f;
 
       nextionSend("oilp.txt=\"" + String(oilPressKpa, 1) + "\"");
@@ -901,7 +1038,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
     case RUSEFI_BASE7: {
       uint16_t lam1Raw = readU16LE(d, 0);
       float lambda = lam1Raw * 0.0001f;
-      float afr = lambda * 14.7f; // gasoline stoich - adjust if E85/flex
+      float afr = lambda * 14.7f;
       uint16_t lam2Raw = readU16LE(d, 2);
       float lam2V = lam2Raw * 0.0001f;
       uint16_t fpLowRaw = readU16LE(d, 4);
@@ -925,7 +1062,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       int8_t cam2eRaw = (int8_t)d[6];
       int8_t cam2etarRaw = (int8_t)d[7];
 
-      nextionSend("vvt.txt=\"" + String(cam1iRaw) + "\""); // kept as "vvt" - matches existing Nextion HMI component
+      nextionSend("vvt.txt=\"" + String(cam1iRaw) + "\"");
       nextionSend("cam1itar.txt=\"" + String(cam1itarRaw) + "\"");
       nextionSend("cam1e.txt=\"" + String(cam1eRaw) + "\"");
       nextionSend("cam1etar.txt=\"" + String(cam1etarRaw) + "\"");
@@ -936,7 +1073,6 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       break;
     }
     case RUSEFI_BASE9: {
-      // Egt1-8: raw x5 = degC directly (DBC scale 5, offset 0)
       const char* keys[8] = {"ecuegt1","ecuegt2","ecuegt3","ecuegt4","ecuegt5","ecuegt6","ecuegt7","ecuegt8"};
       for (int i = 0; i < 8; i++) {
         float egtC = d[i] * 5.0f;
@@ -964,8 +1100,6 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
 
 // =====================================================================
 // EGT (MAX6675 + K-type thermocouple)
-// Bit-banged per MAX6675 datasheet: CS low, clock out 16 bits MSB-first,
-// CS high. Needs ~220ms between reads per datasheet - timed accordingly.
 // =====================================================================
 
 unsigned long lastEgtRead = 0;
@@ -986,12 +1120,9 @@ double readThermocoupleC() {
 
   digitalWrite(MAX6675_CS, HIGH);
 
-  if (v & 0x4) {
-    return NAN; // bit 2 set = thermocouple open/disconnected
-  }
-
-  v >>= 3; // discard 3 status bits
-  return v * 0.25; // 0.25 degC per count
+  if (v & 0x4) return NAN;
+  v >>= 3;
+  return v * 0.25;
 }
 
 void updateEgt() {
@@ -1001,11 +1132,11 @@ void updateEgt() {
 
   double egtC = readThermocoupleC();
   if (isnan(egtC)) {
-    if (debugLoggingEnabled) Serial.println("EGT: thermocouple open/disconnected");
+    if (debugLoggingEnabled || gaugeDebugOn("egt")) Serial.println("EGT: thermocouple open/disconnected");
     nextionSend("egt.txt=\"--\"");
   } else {
     double egtF = egtC * 9.0 / 5.0 + 32.0;
-    if (debugLoggingEnabled) Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
+    if (debugLoggingEnabled || gaugeDebugOn("egt")) Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
     nextionSend("egt.txt=\"" + String(egtF, 1) + "\"");
   }
 }
@@ -1015,9 +1146,6 @@ void updateEgt() {
 // GPS handling
 // =====================================================================
 
-// For system status indicators (not user-toggleable sensor gauges) -
-// broadcasts straight to the web dashboard, skipping the Nextion write
-// and the /config on/off gate entirely.
 void broadcastStatus(const String &field, const String &value) {
   String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
   ws.textAll(json);
@@ -1035,7 +1163,7 @@ void updateGps() {
       nextionSend("mph.txt=\"" + String(gps.speed.mph(), 0) + "\"");
       broadcastStatus("gpsfix", "1");
     } else {
-      nextionSend("mph.txt=\"--\""); // no GPS fix yet
+      nextionSend("mph.txt=\"--\"");
       broadcastStatus("gpsfix", "0");
     }
   }
@@ -1050,8 +1178,8 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX_PIN, NEXTION_TX_PIN);
 
-  gaugePrefs.begin("gauges", false); // NVS namespace "gauges" - persists across reboots
-  sysPrefs.begin("sysconf", false);  // NVS namespace "sysconf" - debug logging setting
+  gaugePrefs.begin("gauges", false);
+  sysPrefs.begin("sysconf", false);
   loadGaugeConfig();
 
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
@@ -1062,7 +1190,6 @@ void setup() {
 
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
-  // WiFi + web dashboard
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to WiFi");
@@ -1088,6 +1215,7 @@ void setup() {
     }
   });
   webServer.addHandler(&ws);
+
   webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", DASHBOARD_HTML);
   });
@@ -1101,9 +1229,54 @@ void setup() {
     saveGaugeConfig(request);
     request->redirect("/config");
   });
+
+  // Live dashboard actions: close, right-click type change, drag reorder
+  webServer.on("/api/gauge/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("key") && request->hasParam("enabled")) {
+      int idx = findGaugeIndex(request->getParam("key")->value());
+      if (idx >= 0) {
+        bool en = request->getParam("enabled")->value().toInt() != 0;
+        gaugeConfigs[idx].enabled = en;
+        gaugePrefs.putBool((String(gaugeConfigs[idx].key) + "_en").c_str(), en);
+      }
+    }
+    request->send(200, "text/plain", "ok");
+  });
+  webServer.on("/api/gauge/type", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("key") && request->hasParam("type")) {
+      int idx = findGaugeIndex(request->getParam("key")->value());
+      if (idx >= 0 && !gaugeConfigs[idx].isHero) {
+        uint8_t t = request->getParam("type")->value().toInt();
+        gaugeConfigs[idx].displayType = t;
+        gaugePrefs.putUChar((String(gaugeConfigs[idx].key) + "_dt").c_str(), t);
+      }
+    }
+    request->send(200, "text/plain", "ok");
+  });
+  webServer.on("/api/gauge/order", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("list")) {
+      String list = request->getParam("list")->value();
+      int order = 0;
+      int start = 0;
+      while (start < (int)list.length()) {
+        int comma = list.indexOf(',', start);
+        String key = (comma == -1) ? list.substring(start) : list.substring(start, comma);
+        int idx = findGaugeIndex(key);
+        if (idx >= 0) {
+          gaugeConfigs[idx].order = order;
+          gaugePrefs.putInt((String(gaugeConfigs[idx].key) + "_or").c_str(), order);
+        }
+        order++;
+        if (comma == -1) break;
+        start = comma + 1;
+      }
+    }
+    request->send(200, "text/plain", "ok");
+  });
+
   webServer.begin();
 
-  Serial.println("esp32-main running - rusEFI (full DBC) + GPS -> Nextion + web dashboard");
+  Serial.println("esp32-main running - rusEFI (full DBC) + GPS -> Nextion + interactive web dashboard");
 }
 
 void loop() {

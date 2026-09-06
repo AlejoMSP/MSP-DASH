@@ -333,3 +333,56 @@ activeSecondaryProtocol selector, the /config protocol dropdown) has been
 deleted from the sketch. If this is revisited later, the git history
 (commits around 2026-09-06, before this one) has a working implementation
 to reference or restore.
+
+## Interactive dashboard: Light type, MDI icons, per-gauge debug, close/drag/right-click (2026-09-06)
+
+### New "Light" display type
+A 4th gauge display type alongside Number/Bar/Needle - a boolean on/off
+icon indicator. All the naturally-boolean rusEFI signals now default to
+this: RevLimAct, MainRelayAct, FuelPumpAct, CELAct (Check Engine),
+EGOHeatAct, LambdaProtectAct, Fan, Fan2, BrakePedal - 9 total light gauges.
+They render in a dedicated "warning light strip" just under the hero
+cluster, similar to a real instrument cluster's telltale row.
+
+### MDI icons - UNVERIFIED icon-name choices
+Icons come from Material Design Icons (materialdesignicons.com /
+mdisearch.com), loaded via CDN webfont
+(https://cdn.jsdelivr.net/npm/@mdi/font). Icon name choices per light
+(cel->engine, revlim->speedometer, mainrelay->flash, fuelpump->gas-station,
+egoheat->thermometer, lambdaprot->shield-alert, fan1/fan2->fan,
+brake->car-brake-alert) are my best guess based on common automotive icon
+conventions - NOT independently verified against the current MDI icon
+set. A wrong/missing name just renders blank (safe failure). Spot-check
+at mdisearch.com and edit the ICON_MAP object in the dashboard's
+JavaScript if any need correcting.
+
+### Per-gauge console debug logging
+Alongside the existing global debug toggle, each gauge now has its own
+"Log to console" checkbox on /config. Either the global toggle OR a
+gauge's own flag being on causes that gauge's Serial output to print -
+lets you debug one specific signal without flooding the console with
+everything.
+
+### Dashboard interactivity (dynamic gauges only - NOT the 4 fixed hero
+cluster gauges rpm/mph/fuel/clt, which stay a deliberately fixed
+classic-cluster centerpiece)
+- **Close (X)**: every light/bar/tile/mini-needle gauge has a small X in
+  its corner. Clicking it disables that gauge immediately (same as
+  unchecking it on /config) via GET /api/gauge/set?key=X&enabled=0,
+  persisted to flash.
+- **Drag-and-drop reorder**: gauges can be dragged within their own
+  display-type section (lights stay with lights, bars with bars, etc).
+  New order persists via GET /api/gauge/order?list=key1,key2,...
+- **Right-click type change**: right-clicking any dynamic gauge shows a
+  small menu (Number/Bar/Needle/Light); picking one changes that gauge's
+  display type immediately via GET /api/gauge/type?key=X&type=N,
+  persisted to flash. Note: since gauges keep their existing "order"
+  value when their type changes, they may appear in a slightly
+  unexpected position within their new section until manually reordered
+  again - a minor accepted tradeoff for keeping this simple.
+
+New GaugeConfig fields: debugEnabled (persisted "_dbg"), order (persisted
+"_or", defaults to array declaration index). New live-action API
+endpoints: GET /api/gauge/set, GET /api/gauge/type, GET /api/gauge/order
+- all separate from the full /config form POST, so the dashboard can make
+lightweight live changes without a full page reload.
