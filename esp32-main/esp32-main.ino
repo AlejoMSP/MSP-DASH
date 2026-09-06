@@ -54,6 +54,7 @@
 #include <Preferences.h>
 #include <SD.h>
 #include <SPI.h>
+#include <Update.h>
 #include "wifi_config.h" // create from wifi_config.h.example - not tracked in git
 
 
@@ -474,7 +475,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
 <body>
   <h1>MSP-DASH Live</h1>
   <div id="status">connecting...</div>
-  <div class="cfg-link"><a href="/config">&#9881; Configure Gauges</a></div>
+  <div class="cfg-link"><a href="/config">&#9881; Configure Gauges</a> &nbsp; <a href="/update">&#8593; Firmware Update</a></div>
 
   <div class="cluster" id="cluster"></div>
   <div class="light-strip" id="lightStrip"></div>
@@ -1365,6 +1366,66 @@ void setup() {
     saveGaugeConfig(request);
     request->redirect("/config");
   });
+
+  // OTA firmware update - upload a compiled .bin from any browser instead
+  // of needing a USB cable + arduino-cli. Uses the ESP32 core's built-in
+  // Update library (no external dependency).
+  webServer.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html",
+      "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+      "<title>MSP-DASH Firmware Update</title><style>"
+      "body{background:#0a0a0d;color:#eee;font-family:'Segoe UI',system-ui,sans-serif;"
+      "margin:0;padding:20px;max-width:500px;margin:0 auto;}"
+      "h1{color:#4dd0e1;font-size:1.1em;letter-spacing:2px;text-transform:uppercase;}"
+      "a{color:#4dd0e1;font-size:0.85em;text-decoration:none;}"
+      "input[type=file]{background:#16161a;border:1px solid #2a2a30;color:#eee;"
+      "border-radius:8px;padding:12px;width:100%;margin:16px 0;}"
+      "button{background:#4dd0e1;color:#0a0a0d;border:none;border-radius:8px;"
+      "padding:12px 20px;font-size:1em;font-weight:600;width:100%;}"
+      "</style></head><body>"
+      "<a href='/'>&larr; Back to Dashboard</a>"
+      "<h1>Firmware Update</h1>"
+      "<p style='font-size:0.8em;color:#888;'>Upload a compiled esp32-main.ino.bin file. "
+      "Generate one with: arduino-cli compile --fqbn esp32:esp32:esp32 --export-binaries esp32-main "
+      "(the .bin ends up in esp32-main/build/esp32.esp32.esp32/). Device will reboot automatically when done.</p>"
+      "<form method='POST' action='/update' enctype='multipart/form-data'>"
+      "<input type='file' name='update' accept='.bin' required>"
+      "<button type='submit'>Upload &amp; Flash</button>"
+      "</form></body></html>"
+    );
+  });
+  webServer.on("/update", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *response = request->beginResponse(200, "text/plain",
+        ok ? "Update OK - rebooting..." : "Update FAILED - check Serial for details, device not rebooting");
+      response->addHeader("Connection", "close");
+      request->send(response);
+      if (ok) {
+        delay(500);
+        ESP.restart();
+      }
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (index == 0) {
+        Serial.printf("OTA update starting: %s\n", filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+          Update.printError(Serial);
+        }
+      }
+      if (Update.write(data, len) != len) {
+        Update.printError(Serial);
+      }
+      if (final) {
+        if (Update.end(true)) {
+          Serial.printf("OTA update complete: %u bytes\n", index + len);
+        } else {
+          Update.printError(Serial);
+        }
+      }
+    }
+  );
 
   // Live dashboard actions: close, right-click type change, drag reorder
   webServer.on("/api/gauge/set", HTTP_GET, [](AsyncWebServerRequest *request) {

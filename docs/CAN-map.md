@@ -430,3 +430,32 @@ all 74 gauge values) is appended - opened/closed per write rather than
 keeping a file handle open continuously, trading some write performance
 for better resilience against an unclean power loss (common on a car
 bench/ignition-switched setup).
+
+## OTA firmware updates + config-persistence clarification (2026-09-06)
+
+### Config persistence
+NVS (where all gauge config, debug flags, SD toggle, etc. live) is a
+separate flash partition from the application code - a normal
+`arduino-cli compile` + `arduino-cli upload` does NOT touch it. What
+looked like "config lost on every flash" was actually an artifact of the
+gauge schema changing rapidly across many consecutive feature additions
+in this project (new keys/fields with no prior saved NVS entry fall back
+to their new hardcoded default, which looks like a reset even though
+unrelated saved keys were untouched). Now that schema changes have
+slowed down, settings should reliably survive normal reflashes going
+forward. Only a full `esptool erase_flash` (or a partition table change)
+would genuinely wipe NVS.
+
+### OTA firmware updates
+New /update page (linked from the dashboard) lets you upload a compiled
+.bin directly from any browser instead of needing a USB cable. Uses the
+ESP32 core's built-in Update library (no external dependency).
+
+To generate a .bin file:
+```
+arduino-cli compile --fqbn esp32:esp32:esp32 --export-binaries esp32-main
+```
+The .bin ends up in `esp32-main/build/esp32.esp32.esp32/`. Upload it at
+http://<esp32-ip>/update - the device reboots automatically once the
+flash completes successfully. NVS/config is untouched by this process,
+same as a USB reflash.
