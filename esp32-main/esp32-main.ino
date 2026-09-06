@@ -61,6 +61,11 @@ void updateGauge(const char* gaugeName, const char* textName, float realValue, f
   angle = constrain(angle, 0, angleMax);
   nextionSend(String(gaugeName) + ".val=" + String(angle));
   nextionSend(String(textName) + ".txt=\"" + String(realValue, 1) + "\"");
+
+  // Debug output so this is verifiable on Serial Monitor without the
+  // Nextion display connected yet. Remove or comment out once the
+  // display is wired up and confirmed working, to reduce serial noise.
+  Serial.printf("%s = %.2f (angle %d)\n", textName, realValue, angle);
 }
 
 void setup() {
@@ -73,6 +78,8 @@ void setup() {
 
   twai_driver_install(&g_config, &t_config, &f_config);
   twai_start();
+
+  Serial.println("esp32-main running - decoding rusEFI CAN + pushing to Nextion");
 }
 
 void loop() {
@@ -109,6 +116,7 @@ void loop() {
         updateGauge("g_oilpress", "t_oilpress", oilPressKpa, 0, 700); // kPa range placeholder, adjust to your sensor's real range
         // BattVolt available as t_battv.txt if you add a battery voltage field to the HMI
         nextionSend("t_battv.txt=\"" + String(battV, 2) + "\"");
+        Serial.printf("BattVolt = %.2fV\n", battV);
         lastSeenOil = now;
         break;
       }
