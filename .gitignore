@@ -12,3 +12,6 @@ Debug/
 # OS
 .DS_Store
 Thumbs.db
+
+# WiFi credentials - never commit real network passwords
+esp32-main/wifi_config.h
