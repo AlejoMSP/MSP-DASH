@@ -244,3 +244,54 @@ said "F" but the underlying value being pushed was still Celsius.
   happens.
 
 New shared helper: cToF(float c) in the byte-reading-helpers section.
+
+## Major config system overhaul + LinkECU + AEM scaffold (2026-09-06)
+
+### Key discovery: LinkECU and MegaSquirt likely share one CAN format
+Going back through this project, the "MegaSquirt" reference sketch's
+block labels ("Seconds,PW1,PW2,RPM" / "BARO,MAP,MAT,CLT" / "TPS,BATT,EGO")
+are IDENTICAL to Link's own PCLink CAN Setup labels seen at the very start
+of this project. Both use base ID 1520 decimal (0x5F0). Given this, both
+ECUs are handled by ONE shared parser (handleSecondaryEcuFrame, renamed
+from handleMegasquirtFrame) - the /config "Active Secondary ECU" selector
+only changes labeling, not parsing, since they can't be told apart by
+CAN ID range (unlike rusEFI, which has its own distinct 0x200+ range).
+Reasonably high confidence but NOT independently bench-verified for
+either brand - sniff-and-compare before fully trusting.
+
+### AEM X-Series wideband - scaffolded, UNCONFIRMED
+handleAemFrame() listens on a commonly-cited CAN ID (0x180) but the byte
+layout is NOT parsed - it just dumps raw bytes to Serial (when debug
+logging is on) so you can compare against the AEM unit's own display and
+work out the real format. OFF by default (/config toggle). Do NOT trust
+any value from this path until it's been sniffed and confirmed the same
+way rusEFI was.
+
+### Debug logging now OFF by default
+Every nextionSend() call used to unconditionally print to Serial. Now
+gated behind a debugLoggingEnabled flag (persisted, toggle on /config).
+EGT's per-read Serial prints are gated the same way. Startup/WiFi
+connection messages still print unconditionally (one-time boot info,
+not the per-message flood this was meant to fix).
+
+### Full per-gauge configurability
+Every gauge's GaugeConfig struct now includes: ecu (grouping tag for the
+config page), isHero (true for rpm/mph/fuel/clt - fixed needle dials in
+the cluster, type selector hidden for these), enabled, displayType
+(Number/Bar/Needle - only meaningful for non-hero gauges), refreshMs
+(throttles how often a value is actually sent even if CAN data arrives
+faster), minVal/maxVal, hasRedline/redline. All persisted in NVS flash,
+edited via a rebuilt /config page grouped by ECU (rusEFI / secondary ECU
+/ AEM / GPS / Auxiliary Sensors).
+
+New GET /api/gauges JSON endpoint - the dashboard page fetches this at
+load and builds itself dynamically: hero cluster gauges read their
+min/max/redline from here instead of hardcoded JS; every other enabled
+gauge renders as a number tile, a bar, or a small needle gauge based on
+its configured displayType.
+
+### Explicit scope boundary
+This does NOT let you map a brand-new arbitrary CAN ID/byte offset to a
+new gauge via the web UI - only the DISPLAY of gauges already wired into
+this code is configurable. A true "add any CAN signal from a UI" system
+would be a separate, larger feature (essentially a mini DBC editor).

@@ -1,36 +1,53 @@
 /*
   esp32-main
-  Production sketch: reads CAN frames from EITHER rusEFI OR MegaSquirt
-  (no mode switch needed - their CAN ID ranges don't overlap, so whichever
-  ECU is actually connected is simply the one whose frames show up), plus
-  GPS speed, and pushes all values to a digital 7-segment style Nextion
-  dashboard (12 numeric readouts: rpm, mph, tps/tpst, eth, ego, fuelp,
-  oilp, oilt, map, clt, mat, vvt).
+  Production sketch: reads CAN frames from rusEFI, and/or MegaSquirt/LinkECU
+  (shared CAN format - see note below), plus an optional AEM X-Series
+  wideband tap, plus GPS speed, and pushes everything to a digital
+  7-segment Nextion dashboard AND a live web dashboard over WiFi.
 
   STATUS:
-    rusEFI  - RPM/MAP/TPS1/BattVolt/MCUTemp are BENCH-CONFIRMED (real
-              hardware, real values matched). CoolantTemp/OilPress/OilTemp/
-              Lambda/IntakeTemp/FpLow/VVT come straight from the official
-              DBC (high confidence, not yet bench-verified with live
-              sensors - those fields read 0/default until wired).
-    MegaSquirt - scale factors (/10, big-endian) and block layout are taken
-              from a previously working reference sketch, not independently
-              bench-verified in THIS project. Reasonably high confidence,
-              but if you switch to MegaSquirt, running the CAN sniffer
-              against it once (same sniff-and-compare method used for
-              rusEFI) is worth doing before fully trusting these values.
+    rusEFI     - RPM/MAP/TPS1/BattVolt/MCUTemp are BENCH-CONFIRMED (real
+                 hardware, real values matched). CoolantTemp/OilPress/
+                 OilTemp/Lambda/IntakeTemp/FpLow/VVT/FuelLevel come
+                 straight from the official DBC (high confidence, not
+                 bench-verified with live sensors yet for the ones not
+                 wired).
+    MegaSquirt/LinkECU - scale factors (/10, big-endian) and block layout
+                 come from a working reference sketch. Its block labels
+                 ("Seconds,PW1,PW2,RPM" / "BARO,MAP,MAT,CLT" / "TPS,BATT,
+                 EGO") are IDENTICAL to Link's own PCLink CAN Setup labels
+                 seen earlier in this project - strong evidence Link and
+                 MegaSquirt share this exact broadcast format. Because of
+                 that, both protocols use the SAME CAN ID range (1520+
+                 decimal) and are handled by ONE shared parser
+                 (handleSecondaryEcuFrame) - the "Active Secondary ECU"
+                 setting on /config only changes labeling, not parsing.
+                 NOT independently bench-verified for either brand in
+                 THIS project - sniff-and-compare before fully trusting.
+    AEM X-Series - UNCONFIRMED. I don't have a bench-verified byte layout
+                 for AEM's wideband CAN broadcast in this project. A
+                 listener is scaffolded on a commonly-cited CAN ID, OFF
+                 by default. Run the CAN sniffer against the actual AEM
+                 unit and compare to its display before trusting this.
 
   See docs/CAN-map.md for full signal tables and confirmation history.
 
-  Also reads EGT via a MAX6675 + K-type thermocouple (bit-banged,
-  console-only + web dashboard for now - not yet on the Nextion display).
+  Debug/Serial logging is now OFF by default (toggle on /config) - the
+  console no longer gets flooded with every CAN-derived value on every
+  message unless explicitly turned on for troubleshooting.
 
-  Also hosts a live web dashboard over WiFi (join existing network, per
-  wifi_config.h - see wifi_config.h.example) using ESP Async WebServer +
-  Async TCP, pushing every value over WebSocket as it's parsed. The web
-  page shows more fields than the physical Nextion display (which is
-  fixed at 12 slots) - EGT and BattVolt included, since Nextion silently
-  ignores field names it has no component for.
+  Every gauge now has, via /config: enabled on/off, display type (number/
+  bar/needle - display type only applies to the non-hero tile-grid
+  gauges; the four hero cluster gauges - rpm/mph/fuel/clt - stay as fixed
+  needle dials but their min/max/redline are configurable same as
+  everything else), refresh rate (ms, throttles how often a value is
+  actually pushed out even if CAN data arrives faster), min/max range,
+  and an optional redline threshold.
+
+  NOTE ON SCOPE: this does NOT let you map an arbitrary new CAN ID/byte
+  offset to a brand-new gauge via the web UI - that would be a much
+  larger "generic CAN signal editor" feature. What's configurable here is
+  the DISPLAY of gauges already wired into this code.
 */
 
 
@@ -87,19 +104,29 @@
 
 
 // =====================================================================
-// MegaSquirt CAN IDs (base 1520 decimal / 0x5F0, from working reference
-// sketch - see docs/CAN-map.md for the source and confidence caveat)
-// Byte order: BIG-ENDIAN
+// MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0)
+// Byte order: BIG-ENDIAN. See header note - both brands appear to share
+// this exact format, so one parser (handleSecondaryEcuFrame) covers both.
 // =====================================================================
 
-#define MS_BASE      1520        // 0x5F0
-#define MS_BLOCK0    (MS_BASE+0) // Seconds, PW1, PW2, RPM
-#define MS_BLOCK2    (MS_BASE+2) // BARO, MAP, MAT, CLT
-#define MS_BLOCK3    (MS_BASE+3) // TPS, BATT, EGO1
-#define MS_BLOCK13   (MS_BASE+13)// FUELP, OILP, OILT
-#define MS_BLOCK42   (MS_BASE+42)// VSS1 (not used - mph is GPS-sourced)
-#define MS_BLOCK44   (MS_BASE+44)// VVT angle
-#define MS_BLOCK47   (MS_BASE+47)// Ethanol %
+#define SEC_BASE      1520        // 0x5F0
+#define SEC_BLOCK0    (SEC_BASE+0) // Seconds, PW1, PW2, RPM
+#define SEC_BLOCK2    (SEC_BASE+2) // BARO, MAP, MAT, CLT
+#define SEC_BLOCK3    (SEC_BASE+3) // TPS, BATT, EGO1
+#define SEC_BLOCK13   (SEC_BASE+13)// FUELP, OILP, OILT
+#define SEC_BLOCK44   (SEC_BASE+44)// VVT angle
+#define SEC_BLOCK47   (SEC_BASE+47)// Ethanol %
+
+enum SecondaryProtocol { SEC_PROTO_MEGASQUIRT = 0, SEC_PROTO_LINKECU = 1 };
+SecondaryProtocol activeSecondaryProtocol = SEC_PROTO_MEGASQUIRT; // label only - parsing is identical
+
+
+// =====================================================================
+// AEM X-Series wideband CAN tap - UNCONFIRMED, off by default
+// =====================================================================
+
+#define AEM_CAN_ID 0x180 // commonly-cited AEMnet ID - NOT bench-verified in this project
+bool aemEnabled = false;
 
 
 // =====================================================================
@@ -116,67 +143,165 @@ const unsigned long STALE_MS = 2000; // blocks round-robin at different rates (r
 AsyncWebServer webServer(80);
 AsyncWebSocket ws("/ws");
 Preferences gaugePrefs;
+Preferences sysPrefs;
+
+bool debugLoggingEnabled = false; // OFF by default - toggle on /config
 
 
 // =====================================================================
-// gauge on/off config - persisted in flash (NVS), toggled via /config page
-// Disabling a gauge stops it from updating BOTH the Nextion display and
-// the web dashboard, since they share the same nextionSend() output path.
+// gauge config - persisted in flash (NVS), edited via /config page.
+// Disabling a gauge (or its refresh throttle) affects BOTH the Nextion
+// display and the web dashboard, since they share nextionSend().
 // =====================================================================
+
+enum DisplayType { DISPLAY_NUMBER = 0, DISPLAY_BAR = 1, DISPLAY_NEEDLE = 2 };
 
 struct GaugeConfig {
-  const char* key;   // field name, matches what nextionSend() parses out
-  const char* label; // human-readable name for the config page
+  const char* key;    // field name, matches what nextionSend() parses out
+  const char* label;  // human-readable name for the config page
+  const char* ecu;    // "rusefi" | "secondary" | "aem" | "gps" - for grouping on /config
+  bool isHero;        // true = fixed needle dial in the cluster (rpm/mph/fuel/clt); type selector hidden for these
   bool enabled;
+  uint8_t displayType; // only meaningful when isHero==false
+  unsigned long refreshMs;
+  float minVal;
+  float maxVal;
+  bool hasRedline;
+  float redline;
+  unsigned long lastSentMs; // runtime only, not persisted
 };
 
 GaugeConfig gaugeConfigs[] = {
-  { "rpm",    "RPM",              true },
-  { "boost",  "Boost",            true },
-  { "tps",    "TPS (bar)",        true },
-  { "tpst",   "TPS (text)",       true },
-  { "eth",    "Ethanol %",        true },
-  { "ego",    "AFR",              true },
-  { "fuelp",  "Fuel Pressure",    true },
-  { "oilp",   "Oil Pressure",     true },
-  { "oilt",   "Oil Temp",         true },
-  { "map",    "MAP",              true },
-  { "clt",    "Coolant Temp",     true },
-  { "mat",    "Intake Air Temp",  true },
-  { "vvt",    "VVT Angle",        true },
-  { "battv",  "Battery Voltage",  true },
-  { "egt",    "EGT",              true },
-  { "mph",    "Speed (GPS)",      true },
-  { "fuel",   "Fuel Level",       true },
+  { "rpm",   "RPM",              "rusefi",    true,  true, DISPLAY_NEEDLE, 0,   0,    8000, true,  6800, 0 },
+  { "mph",   "Speed (GPS)",      "gps",       true,  true, DISPLAY_NEEDLE, 0,   0,    140,  false, 0,    0 },
+  { "fuel",  "Fuel Level",       "rusefi",    true,  true, DISPLAY_NEEDLE, 250, 0,    100,  false, 0,    0 },
+  { "clt",   "Coolant Temp",     "rusefi",    true,  true, DISPLAY_NEEDLE, 0,   0,    260,  false, 0,    0 },
+  { "boost", "Boost",            "rusefi",    false, true, DISPLAY_NUMBER, 0,   -15,  25,   false, 0,    0 },
+  { "tps",   "TPS (bar)",        "rusefi",    false, true, DISPLAY_BAR,    0,   0,    100,  false, 0,    0 },
+  { "tpst",  "TPS (text)",       "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    100,  false, 0,    0 },
+  { "eth",   "Ethanol %",        "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    100,  false, 0,    0 },
+  { "ego",   "AFR",              "rusefi",    false, true, DISPLAY_NUMBER, 0,   10,   20,   false, 0,    0 },
+  { "fuelp", "Fuel Pressure",    "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    500,  false, 0,    0 },
+  { "oilp",  "Oil Pressure",     "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    700,  false, 0,    0 },
+  { "oilt",  "Oil Temp",         "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    300,  false, 0,    0 },
+  { "map",   "MAP",              "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    250,  false, 0,    0 },
+  { "mat",   "Intake Air Temp",  "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    260,  false, 0,    0 },
+  { "vvt",   "VVT Angle",        "rusefi",    false, true, DISPLAY_NUMBER, 0,   -60,  60,   false, 0,    0 },
+  { "battv", "Battery Voltage",  "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    16,   false, 0,    0 },
+  { "egt",   "EGT",              "aux",       false, true, DISPLAY_NUMBER, 0,   0,    1800, false, 0,    0 },
 };
 const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
 
-bool isGaugeEnabled(const String &field) {
+int findGaugeIndex(const String &field) {
   for (int i = 0; i < NUM_GAUGES; i++) {
-    if (field == gaugeConfigs[i].key) return gaugeConfigs[i].enabled;
+    if (field == gaugeConfigs[i].key) return i;
   }
-  return true; // unrecognized field - default to allowed rather than silently dropping something new
+  return -1;
+}
+
+// Returns true and updates lastSentMs if this field should actually be
+// sent right now (enabled AND its refresh interval has elapsed).
+bool gaugeReadyToSend(const String &field) {
+  int idx = findGaugeIndex(field);
+  if (idx < 0) return true; // unrecognized field - default to allowed
+  GaugeConfig &g = gaugeConfigs[idx];
+  if (!g.enabled) return false;
+  unsigned long now = millis();
+  if (g.refreshMs > 0 && (now - g.lastSentMs) < g.refreshMs) return false;
+  g.lastSentMs = now;
+  return true;
 }
 
 void loadGaugeConfig() {
   for (int i = 0; i < NUM_GAUGES; i++) {
-    gaugeConfigs[i].enabled = gaugePrefs.getBool(gaugeConfigs[i].key, true);
+    GaugeConfig &g = gaugeConfigs[i];
+    String k = String(g.key);
+    g.enabled     = gaugePrefs.getBool((k + "_en").c_str(), g.enabled);
+    g.displayType = gaugePrefs.getUChar((k + "_dt").c_str(), g.displayType);
+    g.refreshMs   = gaugePrefs.getULong((k + "_rf").c_str(), g.refreshMs);
+    g.minVal      = gaugePrefs.getFloat((k + "_mn").c_str(), g.minVal);
+    g.maxVal      = gaugePrefs.getFloat((k + "_mx").c_str(), g.maxVal);
+    g.hasRedline  = gaugePrefs.getBool((k + "_hr").c_str(), g.hasRedline);
+    g.redline     = gaugePrefs.getFloat((k + "_rl").c_str(), g.redline);
   }
+  debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
+  activeSecondaryProtocol = (SecondaryProtocol)sysPrefs.getUChar("secproto", SEC_PROTO_MEGASQUIRT);
+  aemEnabled = sysPrefs.getBool("aemon", false);
 }
 
 void saveGaugeConfig(AsyncWebServerRequest *request) {
   for (int i = 0; i < NUM_GAUGES; i++) {
-    bool checked = request->hasParam(gaugeConfigs[i].key, true); // checkbox present in POST body = checked
-    gaugeConfigs[i].enabled = checked;
-    gaugePrefs.putBool(gaugeConfigs[i].key, checked);
+    GaugeConfig &g = gaugeConfigs[i];
+    String k = String(g.key);
+
+    bool checked = request->hasParam((k + "_en").c_str(), true);
+    g.enabled = checked;
+    gaugePrefs.putBool((k + "_en").c_str(), checked);
+
+    if (!g.isHero && request->hasParam((k + "_dt").c_str(), true)) {
+      g.displayType = request->getParam((k + "_dt").c_str(), true)->value().toInt();
+      gaugePrefs.putUChar((k + "_dt").c_str(), g.displayType);
+    }
+    if (request->hasParam((k + "_rf").c_str(), true)) {
+      g.refreshMs = request->getParam((k + "_rf").c_str(), true)->value().toInt();
+      gaugePrefs.putULong((k + "_rf").c_str(), g.refreshMs);
+    }
+    if (request->hasParam((k + "_mn").c_str(), true)) {
+      g.minVal = request->getParam((k + "_mn").c_str(), true)->value().toFloat();
+      gaugePrefs.putFloat((k + "_mn").c_str(), g.minVal);
+    }
+    if (request->hasParam((k + "_mx").c_str(), true)) {
+      g.maxVal = request->getParam((k + "_mx").c_str(), true)->value().toFloat();
+      gaugePrefs.putFloat((k + "_mx").c_str(), g.maxVal);
+    }
+    bool hasRl = request->hasParam((k + "_hr").c_str(), true);
+    g.hasRedline = hasRl;
+    gaugePrefs.putBool((k + "_hr").c_str(), hasRl);
+    if (request->hasParam((k + "_rl").c_str(), true)) {
+      g.redline = request->getParam((k + "_rl").c_str(), true)->value().toFloat();
+      gaugePrefs.putFloat((k + "_rl").c_str(), g.redline);
+    }
   }
+
+  debugLoggingEnabled = request->hasParam("dbglog", true);
+  sysPrefs.putBool("dbglog", debugLoggingEnabled);
+
+  if (request->hasParam("secproto", true)) {
+    activeSecondaryProtocol = (SecondaryProtocol)request->getParam("secproto", true)->value().toInt();
+    sysPrefs.putUChar("secproto", activeSecondaryProtocol);
+  }
+
+  aemEnabled = request->hasParam("aemon", true);
+  sysPrefs.putBool("aemon", aemEnabled);
+}
+
+// JSON array of all gauge configs, for the dashboard JS to fetch at load
+String buildGaugeApiJson() {
+  String json = "[";
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    GaugeConfig &g = gaugeConfigs[i];
+    if (i > 0) json += ",";
+    json += "{\"key\":\"" + String(g.key) + "\",";
+    json += "\"label\":\"" + String(g.label) + "\",";
+    json += "\"isHero\":" + String(g.isHero ? "true" : "false") + ",";
+    json += "\"enabled\":" + String(g.enabled ? "true" : "false") + ",";
+    json += "\"displayType\":" + String(g.displayType) + ",";
+    json += "\"min\":" + String(g.minVal, 2) + ",";
+    json += "\"max\":" + String(g.maxVal, 2) + ",";
+    json += "\"hasRedline\":" + String(g.hasRedline ? "true" : "false") + ",";
+    json += "\"redline\":" + String(g.redline, 2);
+    json += "}";
+  }
+  json += "]";
+  return json;
 }
 
 
 // =====================================================================
 // web dashboard - served HTML page
-// Shows more fields than the physical Nextion display (fixed at 12
-// slots): includes egt and battv, which have no Nextion component yet.
+// Hero cluster (fuel/rpm/lcd/mph/clt) stays a fixed classic-instrument
+// layout; all other gauges render dynamically as number/bar/needle-mini
+// based on config fetched from /api/gauges at page load.
 // =====================================================================
 
 static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
@@ -201,7 +326,6 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     .cfg-link a { color:#4dd0e1; font-size:0.8em; text-decoration:none; border:1px solid #2a2a30;
                   border-radius:6px; padding:6px 14px; }
 
-    /* Cluster layout: fuel | tach | center-lcd | speedo | temp */
     .cluster { display:flex; align-items:center; justify-content:center; flex-wrap:wrap;
                gap: 6px; margin-bottom: 24px; }
     .gauge-wrap { position:relative; }
@@ -237,7 +361,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                  text-shadow: 0 0 6px rgba(76,175,80,0.6); margin:6px 0; }
     .lcd-unit { color:#4caf50; font-size:0.65em; font-family:monospace; opacity:0.7; }
 
-    .bar-section { max-width: 500px; margin: 0 auto 24px auto; }
+    .bar-section-generic { max-width: 500px; margin: 0 auto 12px auto; }
     .bar-label { display: flex; justify-content: space-between; font-size: 0.8em; color: #888;
                  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
     .bar-track { background: #1a1a1f; border-radius: 8px; height: 22px; overflow: hidden;
@@ -251,6 +375,9 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
             padding: 12px 8px; text-align: center; }
     .tile .label { color: #4dd0e1; font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; }
     .tile .value { font-size: 1.4em; font-weight: 600; margin-top: 4px; }
+
+    .mini-gauges { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:900px;
+                   margin: 0 auto 20px auto; }
   </style>
 </head>
 <body>
@@ -259,28 +386,22 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <div class="cfg-link"><a href="/config">&#9881; Configure Gauges</a></div>
 
   <div class="cluster" id="cluster"></div>
-
-  <div class="bar-section">
-    <div class="bar-label"><span>Throttle</span><span id="v_tpst">0.0%</span></div>
-    <div class="bar-track"><div class="bar-fill" id="bar_tps"></div></div>
-  </div>
-
+  <div class="mini-gauges" id="miniGauges"></div>
+  <div id="genericBars"></div>
   <div class="grid" id="grid"></div>
 
   <script>
-    // ---- Gauge face generator (SVG background + CSS-rotated needle overlay) ----
-    // Sweep convention: 0 at -135deg (bottom-left), max at +135deg (bottom-right),
-    // 270deg total, matching classic automotive gauge layout.
-    function buildGaugeFace(size, maxVal, majorStep, redlineFrom) {
+    // ---- SVG gauge face generator, shared by hero + mini needle gauges ----
+    function buildGaugeFace(size, maxVal, minVal, redlineFrom, hasRedline) {
       const cx = size / 2, cy = size / 2, r = size * 0.42;
       const startDeg = -135, sweepDeg = 270;
+      const range = maxVal - minVal;
       let svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
       svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r + 6) + '" fill="#111" stroke="#555" stroke-width="2"/>';
       svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#f5f2ea"/>';
 
-      // redline arc (if given)
-      if (redlineFrom !== undefined) {
-        const fFrom = redlineFrom / maxVal;
+      if (hasRedline) {
+        const fFrom = (redlineFrom - minVal) / range;
         const aFrom = (startDeg + fFrom * sweepDeg) * Math.PI / 180;
         const aTo = (startDeg + sweepDeg) * Math.PI / 180;
         const x1 = cx + r * Math.sin(aFrom), y1 = cy - r * Math.cos(aFrom);
@@ -290,11 +411,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                '" fill="none" stroke="#c0392b" stroke-width="6" opacity="0.85"/>';
       }
 
-      // ticks + labels
-      const steps = maxVal / majorStep;
-      for (let i = 0; i <= steps; i++) {
-        const val = i * majorStep;
-        const frac = val / maxVal;
+      const majorStep = range / 8;
+      for (let i = 0; i <= 8; i++) {
+        const val = minVal + i * majorStep;
+        const frac = (val - minVal) / range;
         const ang = (startDeg + frac * sweepDeg) * Math.PI / 180;
         const rOuter = r - 4, rInner = r - 14;
         const x1 = cx + rOuter * Math.sin(ang), y1 = cy - rOuter * Math.cos(ang);
@@ -303,123 +423,162 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
         const rLabel = r - 24;
         const lx = cx + rLabel * Math.sin(ang), ly = cy - rLabel * Math.cos(ang);
         svg += '<text x="' + lx + '" y="' + (ly + 4) + '" font-size="' + (size * 0.07) + '" fill="#222" ' +
-               'text-anchor="middle" font-family="monospace" font-weight="bold">' + val + '</text>';
-
-        // minor tick (halfway to next major)
-        if (i < steps) {
-          const midFrac = (val + majorStep / 2) / maxVal;
-          const midAng = (startDeg + midFrac * sweepDeg) * Math.PI / 180;
-          const mx1 = cx + rOuter * Math.sin(midAng), my1 = cy - rOuter * Math.cos(midAng);
-          const mx2 = cx + (r - 9) * Math.sin(midAng), my2 = cy - (r - 9) * Math.cos(midAng);
-          svg += '<line x1="' + mx1 + '" y1="' + my1 + '" x2="' + mx2 + '" y2="' + my2 + '" stroke="#555" stroke-width="1.5"/>';
-        }
+               'text-anchor="middle" font-family="monospace" font-weight="bold">' + Math.round(val) + '</text>';
       }
       svg += '</svg>';
       return svg;
     }
 
-    function makeGauge(id, size, maxVal, majorStep, title, unit, redlineFrom, small) {
+    function makeGauge(id, size, cfg, small) {
       const wrap = document.createElement('div');
       wrap.className = 'gauge-wrap';
       wrap.style.width = size + 'px';
       wrap.style.height = size + 'px';
-      wrap.innerHTML = buildGaugeFace(size, maxVal, majorStep, redlineFrom) +
+      wrap.innerHTML = buildGaugeFace(size, cfg.max, cfg.min, cfg.redline, cfg.hasRedline) +
         '<div class="needle' + (small ? ' needle-small' : '') + '" id="needle_' + id + '"></div>' +
         '<div class="hub"></div>' +
-        '<div class="gauge-title">' + title + '</div>' +
+        '<div class="gauge-title">' + cfg.label.toUpperCase() + '</div>' +
         '<div class="gauge-value" id="v_' + id + '">0</div>';
       return wrap;
     }
 
-    const gaugeRanges = {
-      rpm:   { max: 8000, major: 1000, redline: 6800 },
-      mph:   { max: 140,  major: 20 },
-      fuel:  { max: 100,  major: 25 },
-      clt:   { max: 260,  major: 65 }
-    };
-
-    const cluster = document.getElementById('cluster');
-    cluster.appendChild(makeGauge('fuel', 110, gaugeRanges.fuel.max, gaugeRanges.fuel.major, 'FUEL', '%', undefined, true));
-    cluster.appendChild(makeGauge('rpm', 220, gaugeRanges.rpm.max, gaugeRanges.rpm.major, 'RPM', '', gaugeRanges.rpm.redline, false));
-
-    const lcd = document.createElement('div');
-    lcd.className = 'lcd';
-    lcd.innerHTML = '<div class="lcd-label" id="lcd_label">BOOST</div>' +
-                     '<div class="lcd-value" id="lcd_value">0.0</div>' +
-                     '<div class="lcd-unit" id="lcd_unit">kPa</div>';
-    cluster.appendChild(lcd);
-
-    cluster.appendChild(makeGauge('mph', 220, gaugeRanges.mph.max, gaugeRanges.mph.major, 'MPH', '', undefined, false));
-    // GPS fix status dot, appended after the mph gauge is in the DOM
-    const mphWrap = cluster.lastElementChild;
-    const gpsDot = document.createElement('div');
-    gpsDot.className = 'gps-dot';
-    gpsDot.id = 'gps_dot';
-    mphWrap.appendChild(gpsDot);
-    cluster.appendChild(makeGauge('clt', 110, gaugeRanges.clt.max, gaugeRanges.clt.major, 'TEMP', 'F', undefined, true));
+    let gaugeConfig = {}; // key -> config object, filled from /api/gauges
+    const lastValues = {};
 
     function updateNeedle(field, value) {
-      const range = gaugeRanges[field];
-      if (!range) return;
-      let frac = value / range.max;
+      const cfg = gaugeConfig[field];
+      if (!cfg) return;
+      let frac = (value - cfg.min) / (cfg.max - cfg.min);
       frac = Math.max(0, Math.min(1, frac));
       const deg = -135 + frac * 270;
       const needle = document.getElementById('needle_' + field);
       if (needle) needle.style.transform = 'translate(-50%,-100%) rotate(' + deg + 'deg)';
     }
 
-    // Center LCD cycles through secondary stats every 3s
+    const heroKeys = ['fuel', 'rpm', 'mph', 'clt'];
+
+    function buildHeroCluster() {
+      const cluster = document.getElementById('cluster');
+      cluster.innerHTML = '';
+      if (gaugeConfig['fuel'] && gaugeConfig['fuel'].enabled) {
+        cluster.appendChild(makeGauge('fuel', 110, gaugeConfig['fuel'], true));
+      }
+      if (gaugeConfig['rpm'] && gaugeConfig['rpm'].enabled) {
+        cluster.appendChild(makeGauge('rpm', 220, gaugeConfig['rpm'], false));
+      }
+
+      const lcd = document.createElement('div');
+      lcd.className = 'lcd';
+      lcd.innerHTML = '<div class="lcd-label" id="lcd_label">BOOST</div>' +
+                       '<div class="lcd-value" id="lcd_value">0.0</div>' +
+                       '<div class="lcd-unit" id="lcd_unit">kPa</div>';
+      cluster.appendChild(lcd);
+
+      if (gaugeConfig['mph'] && gaugeConfig['mph'].enabled) {
+        const mphWrap = makeGauge('mph', 220, gaugeConfig['mph'], false);
+        const gpsDot = document.createElement('div');
+        gpsDot.className = 'gps-dot';
+        gpsDot.id = 'gps_dot';
+        mphWrap.appendChild(gpsDot);
+        cluster.appendChild(mphWrap);
+      }
+      if (gaugeConfig['clt'] && gaugeConfig['clt'].enabled) {
+        cluster.appendChild(makeGauge('clt', 110, gaugeConfig['clt'], true));
+      }
+    }
+
     const lcdStats = [
       { field: 'boost', label: 'BOOST', unit: 'kPa' },
       { field: 'oilp',  label: 'OIL PRESS', unit: 'kPa' },
       { field: 'ego',   label: 'AFR', unit: '' },
-      { field: 'egt',   label: 'EGT', unit: 'C' }
+      { field: 'egt',   label: 'EGT', unit: 'F' }
     ];
     let lcdIndex = 0;
-    const lastValues = {};
     function refreshLcd() {
       const stat = lcdStats[lcdIndex];
-      document.getElementById('lcd_label').textContent = stat.label;
-      document.getElementById('lcd_value').textContent = lastValues[stat.field] !== undefined ? lastValues[stat.field] : '--';
-      document.getElementById('lcd_unit').textContent = stat.unit;
+      const lbl = document.getElementById('lcd_label');
+      if (lbl) {
+        lbl.textContent = stat.label;
+        document.getElementById('lcd_value').textContent = lastValues[stat.field] !== undefined ? lastValues[stat.field] : '--';
+        document.getElementById('lcd_unit').textContent = stat.unit;
+      }
       lcdIndex = (lcdIndex + 1) % lcdStats.length;
     }
     setInterval(refreshLcd, 3000);
-    refreshLcd();
 
-    // Secondary tiles (everything not shown as a cluster gauge or bar).
-    // tpst mirrors the tps bar's own numeric label above, so it's excluded.
-    const tileFields = ["eth","ego","fuelp","oilp","oilt","map","boost","mat","vvt","battv","egt"];
-    const grid = document.getElementById("grid");
-    tileFields.forEach(f => {
-      const tile = document.createElement("div");
-      tile.className = "tile";
-      tile.innerHTML = '<div class="label">' + f + '</div><div class="value" id="v_' + f + '">--</div>';
-      grid.appendChild(tile);
-    });
+    function buildDynamicGauges() {
+      const miniWrap = document.getElementById('miniGauges');
+      const barsWrap = document.getElementById('genericBars');
+      const grid = document.getElementById('grid');
+      miniWrap.innerHTML = ''; barsWrap.innerHTML = ''; grid.innerHTML = '';
+
+      Object.keys(gaugeConfig).forEach(key => {
+        if (heroKeys.includes(key)) return; // hero gauges handled separately
+        const cfg = gaugeConfig[key];
+        if (!cfg.enabled) return;
+
+        if (cfg.displayType === 2) { // needle mini gauge
+          miniWrap.appendChild(makeGauge(key, 100, cfg, true));
+        } else if (cfg.displayType === 1) { // bar
+          const section = document.createElement('div');
+          section.className = 'bar-section-generic';
+          section.innerHTML = '<div class="bar-label"><span>' + cfg.label + '</span><span id="v_' + key + '">--</span></div>' +
+                               '<div class="bar-track"><div class="bar-fill" id="bar_' + key + '"></div></div>';
+          barsWrap.appendChild(section);
+        } else { // number tile
+          const tile = document.createElement('div');
+          tile.className = 'tile';
+          tile.innerHTML = '<div class="label">' + cfg.label + '</div><div class="value" id="v_' + key + '">--</div>';
+          grid.appendChild(tile);
+        }
+      });
+    }
 
     function handleField(field, value) {
       lastValues[field] = value;
+      const cfg = gaugeConfig[field];
 
       const el = document.getElementById("v_" + field);
       if (el) el.textContent = value;
 
-      if (gaugeRanges[field]) {
+      if (cfg) {
         const num = parseFloat(value);
-        if (!isNaN(num)) updateNeedle(field, num);
+        if (!isNaN(num)) {
+          if (cfg.isHero || cfg.displayType === 2) {
+            updateNeedle(field, num);
+          } else if (cfg.displayType === 1) {
+            const barEl = document.getElementById("bar_" + field);
+            if (barEl) {
+              let pct = ((num - cfg.min) / (cfg.max - cfg.min)) * 100;
+              pct = Math.max(0, Math.min(100, pct));
+              barEl.style.width = pct + "%";
+            }
+          }
+        }
       }
-      if (field === "tps") {
-        const num = parseFloat(value);
-        if (!isNaN(num)) document.getElementById("bar_tps").style.width = Math.max(0, Math.min(100, num)) + "%";
-      }
+
       if (field === "tpst") {
-        const el2 = document.getElementById("v_tpst");
-        if (el2) el2.textContent = value + "%";
+        // tps bar's own numeric readout - tps itself is a hero-adjacent
+        // bar handled generically above via its own displayType
       }
       if (field === "gpsfix") {
         const dot = document.getElementById("gps_dot");
         if (dot) dot.classList.toggle("fix", value === "1");
       }
+    }
+
+    async function loadConfigAndStart() {
+      try {
+        const resp = await fetch('/api/gauges');
+        const list = await resp.json();
+        list.forEach(g => { gaugeConfig[g.key] = g; });
+      } catch (e) {
+        console.error('Failed to load gauge config', e);
+      }
+      buildHeroCluster();
+      refreshLcd();
+      buildDynamicGauges();
+      connect();
     }
 
     let ws;
@@ -436,7 +595,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
         } catch (e) { /* ignore malformed messages */ }
       };
     }
-    connect();
+    loadConfigAndStart();
   </script>
 </body>
 </html>
@@ -455,7 +614,7 @@ int16_t readS16LE(uint8_t* data, int offset) {
   return (int16_t)(data[offset] | (data[offset + 1] << 8));
 }
 
-// MegaSquirt: big-endian
+// MegaSquirt/LinkECU: big-endian
 uint16_t readU16BE(uint8_t* data, int offset) {
   return (data[offset] << 8) | data[offset + 1];
 }
@@ -463,21 +622,42 @@ int16_t readS16BE(uint8_t* data, int offset) {
   return (int16_t)((data[offset] << 8) | data[offset + 1]);
 }
 
-// Shared C->F conversion. All temp fields pushed to Nextion/web are now
-// Fahrenheit - rusEFI's DBC confirms its temp signals are degC, so this
-// conversion is well-defined there. MegaSquirt's temp units depend on how
-// the ECU itself is configured (PCLink can output either C or F) - this
-// assumes Celsius input for MegaSquirt too, which is the common default,
-// but has NOT been bench-confirmed for MegaSquirt in this project.
+// Shared C->F conversion. rusEFI's DBC confirms its temp signals are
+// degC, so this conversion is well-defined there. MegaSquirt/LinkECU's
+// temp units depend on ECU configuration - this assumes Celsius input,
+// which is the common default, but has NOT been bench-confirmed.
 float cToF(float c) {
   return c * 9.0f / 5.0f + 32.0f;
 }
 
 
 // =====================================================================
-// gauge config page - built dynamically so checkbox states always
-// reflect current config (a static PROGMEM page can't do this)
+// gauge config page - built dynamically, grouped per ECU
 // =====================================================================
+
+String gaugeRowHtml(GaugeConfig &g) {
+  String row = "<div class='gauge-row'>";
+  row += "<div class='gr-head'><label><input type='checkbox' name='" + String(g.key) + "_en'";
+  if (g.enabled) row += " checked";
+  row += "> " + String(g.label) + "</label></div>";
+
+  row += "<div class='gr-fields'>";
+  if (!g.isHero) {
+    row += "<label>Type<select name='" + String(g.key) + "_dt'>";
+    row += "<option value='0'" + String(g.displayType == 0 ? " selected" : "") + ">Number</option>";
+    row += "<option value='1'" + String(g.displayType == 1 ? " selected" : "") + ">Bar</option>";
+    row += "<option value='2'" + String(g.displayType == 2 ? " selected" : "") + ">Needle</option>";
+    row += "</select></label>";
+  }
+  row += "<label>Refresh (ms)<input type='number' name='" + String(g.key) + "_rf' value='" + String(g.refreshMs) + "'></label>";
+  row += "<label>Min<input type='number' step='any' name='" + String(g.key) + "_mn' value='" + String(g.minVal, 2) + "'></label>";
+  row += "<label>Max<input type='number' step='any' name='" + String(g.key) + "_mx' value='" + String(g.maxVal, 2) + "'></label>";
+  row += "<label class='rl'><input type='checkbox' name='" + String(g.key) + "_hr'";
+  if (g.hasRedline) row += " checked";
+  row += "> Redline<input type='number' step='any' name='" + String(g.key) + "_rl' value='" + String(g.redline, 2) + "'></label>";
+  row += "</div></div>";
+  return row;
+}
 
 String buildConfigPage() {
   String html = F(
@@ -485,26 +665,66 @@ String buildConfigPage() {
     "<meta name='viewport' content='width=device-width, initial-scale=1'>"
     "<title>MSP-DASH Config</title><style>"
     "body{background:#0a0a0d;color:#eee;font-family:'Segoe UI',system-ui,sans-serif;"
-    "margin:0;padding:20px;max-width:500px;margin:0 auto;}"
+    "margin:0;padding:20px;max-width:640px;margin:0 auto;}"
     "h1{color:#4dd0e1;font-size:1.1em;letter-spacing:2px;text-transform:uppercase;}"
+    "h2{color:#4dd0e1;font-size:0.9em;letter-spacing:1px;text-transform:uppercase;"
+    "border-bottom:1px solid #2a2a30;padding-bottom:6px;margin-top:28px;}"
     "a{color:#4dd0e1;font-size:0.85em;text-decoration:none;}"
-    ".row{display:flex;justify-content:space-between;align-items:center;"
+    ".sys-row{display:flex;justify-content:space-between;align-items:center;"
     "background:#16161a;border:1px solid #2a2a30;border-radius:8px;"
     "padding:12px 16px;margin-bottom:8px;}"
-    "input[type=checkbox]{width:20px;height:20px;}"
+    ".gauge-row{background:#16161a;border:1px solid #2a2a30;border-radius:8px;"
+    "padding:10px 14px;margin-bottom:8px;}"
+    ".gr-head label{font-weight:600;}"
+    ".gr-fields{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:0.8em;color:#999;}"
+    ".gr-fields label{display:flex;flex-direction:column;gap:2px;}"
+    ".gr-fields input[type=number]{width:70px;background:#0a0a0d;border:1px solid #2a2a30;"
+    "color:#eee;border-radius:4px;padding:4px;}"
+    ".gr-fields select{background:#0a0a0d;border:1px solid #2a2a30;color:#eee;border-radius:4px;padding:4px;}"
+    ".rl{flex-direction:row !important;align-items:center;}"
+    "input[type=checkbox]{width:18px;height:18px;}"
+    "select{padding:6px;border-radius:6px;background:#0a0a0d;color:#eee;border:1px solid #2a2a30;}"
     "button{background:#4dd0e1;color:#0a0a0d;border:none;border-radius:8px;"
-    "padding:12px 20px;font-size:1em;font-weight:600;margin-top:16px;width:100%;}"
+    "padding:12px 20px;font-size:1em;font-weight:600;margin-top:20px;width:100%;}"
     "</style></head><body>"
     "<a href='/'>&larr; Back to Dashboard</a>"
-    "<h1>Configure Gauges</h1>"
+    "<h1>Configuration</h1>"
     "<form method='POST' action='/config'>"
+    "<h2>System</h2>"
+    "<div class='sys-row'><span>Serial Debug Logging</span>"
+    "<input type='checkbox' name='dbglog'"
   );
+  if (debugLoggingEnabled) html += " checked";
+  html += F("></div>"
+    "<div class='sys-row'><span>Active Secondary ECU (shares CAN ID range 1520+)</span>"
+    "<select name='secproto'>"
+    "<option value='0'"
+  );
+  if (activeSecondaryProtocol == SEC_PROTO_MEGASQUIRT) html += " selected";
+  html += F(">MegaSquirt</option><option value='1'");
+  if (activeSecondaryProtocol == SEC_PROTO_LINKECU) html += " selected";
+  html += F(">LinkECU</option></select></div>"
+    "<div class='sys-row'><span>AEM X-Series Wideband Tap (UNCONFIRMED protocol - verify with sniffer first)</span>"
+    "<input type='checkbox' name='aemon'"
+  );
+  if (aemEnabled) html += " checked";
+  html += F("></div>");
 
+  html += "<h2>rusEFI</h2>";
   for (int i = 0; i < NUM_GAUGES; i++) {
-    html += "<div class='row'><span>" + String(gaugeConfigs[i].label) + "</span>";
-    html += "<input type='checkbox' name='" + String(gaugeConfigs[i].key) + "'";
-    if (gaugeConfigs[i].enabled) html += " checked";
-    html += "></div>";
+    if (String(gaugeConfigs[i].ecu) == "rusefi") html += gaugeRowHtml(gaugeConfigs[i]);
+  }
+  html += "<h2>MegaSquirt / LinkECU (secondary ECU)</h2>";
+  html += "<p style='font-size:0.75em;color:#888;'>Same underlying data as rusEFI where fields overlap (rpm, map, clt, etc.) - this ECU writes to the same gauge keys, so no separate section needed here beyond the protocol selector above.</p>";
+  html += "<h2>AEM X-Series</h2>";
+  html += "<p style='font-size:0.75em;color:#888;'>No gauges wired yet - protocol byte layout is unconfirmed. Enable the tap above once you've sniffed and confirmed the real CAN ID/format, then this section will list its gauges.</p>";
+  html += "<h2>GPS</h2>";
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    if (String(gaugeConfigs[i].ecu) == "gps") html += gaugeRowHtml(gaugeConfigs[i]);
+  }
+  html += "<h2>Auxiliary Sensors (EGT, etc.)</h2>";
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    if (String(gaugeConfigs[i].ecu) == "aux") html += gaugeRowHtml(gaugeConfigs[i]);
   }
 
   html += F("<button type='submit'>Save</button></form></body></html>");
@@ -518,18 +738,18 @@ String buildConfigPage() {
 
 void nextionSend(const String &cmd) {
   // Parse "field.txt=\"value\"" or "field.val=value" out of the command
-  // string up front, so a disabled gauge can be skipped entirely - no
-  // Nextion write, no debug print, no web broadcast.
+  // string up front, so a disabled/throttled gauge can be skipped
+  // entirely - no Nextion write, no debug print, no web broadcast.
   int dot = cmd.indexOf('.');
   int eq = cmd.indexOf('=');
   if (dot <= 0 || eq <= dot) return; // malformed command, nothing to parse - drop silently
 
   String field = cmd.substring(0, dot);
-  if (!isGaugeEnabled(field)) return; // gauge turned off via /config - suppress entirely
+  if (!gaugeReadyToSend(field)) return; // disabled via /config, or refresh interval not elapsed yet
 
   Serial2.print(cmd);
   Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
-  Serial.println(cmd); // debug mirror - remove once display confirmed working
+  if (debugLoggingEnabled) Serial.println(cmd); // OFF by default - toggle on /config
 
   String value = cmd.substring(eq + 1);
   value.replace("\"", ""); // strip quotes if present (text fields)
@@ -576,7 +796,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
-      nextionSend("fuel.txt=\"" + String(fuel, 1) + "\""); // no Nextion component yet - web dashboard only. MegaSquirt path doesn't provide this signal.
+      nextionSend("fuel.txt=\"" + String(fuel, 1) + "\""); // no Nextion component yet - web dashboard only
       break;
     }
     case RUSEFI_BASE4: {
@@ -613,17 +833,20 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
 
 
 // =====================================================================
-// MegaSquirt frame handling
+// MegaSquirt / LinkECU shared frame handling
+// activeSecondaryProtocol only changes labeling on /config - the actual
+// parsing is identical for both, per the format-overlap noted in the
+// file header.
 // =====================================================================
 
-void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
+void handleSecondaryEcuFrame(uint32_t id, uint8_t* d) {
   switch (id) {
-    case MS_BLOCK0: {
+    case SEC_BLOCK0: {
       float rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
       nextionSend("rpm.txt=\"" + String((int)rpm) + "\"");
       break;
     }
-    case MS_BLOCK2: {
+    case SEC_BLOCK2: {
       float baro = readU16BE(d, 0) / 10.0f; // word0
       float map_ = readU16BE(d, 2) / 10.0f; // word1
       float mat  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
@@ -636,7 +859,7 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       break;
     }
-    case MS_BLOCK3: {
+    case SEC_BLOCK3: {
       float tps  = readU16BE(d, 0) / 10.0f; // word0
       float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per source sketch, not lambda
 
@@ -645,7 +868,7 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
       nextionSend("ego.txt=\"" + String(ego1, 1) + "\"");
       break;
     }
-    case MS_BLOCK13: {
+    case SEC_BLOCK13: {
       float fuelp = readU16BE(d, 0) / 10.0f; // word0
       float oilp  = readU16BE(d, 2) / 10.0f; // word1
       float oilt  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
@@ -655,12 +878,12 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
       nextionSend("oilt.txt=\"" + String(oilt, 1) + "\"");
       break;
     }
-    case MS_BLOCK44: {
+    case SEC_BLOCK44: {
       float vvt = readU16BE(d, 0) / 10.0f; // word0
       nextionSend("vvt.txt=\"" + String(vvt, 1) + "\"");
       break;
     }
-    case MS_BLOCK47: {
+    case SEC_BLOCK47: {
       float eth = readU16BE(d, 0) / 10.0f; // word0
       nextionSend("eth.txt=\"" + String(eth, 1) + "\"");
       break;
@@ -670,8 +893,25 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
 
 
 // =====================================================================
+// AEM X-Series wideband - UNCONFIRMED protocol, scaffolded only.
+// Do NOT trust these values without first running the CAN sniffer
+// against the actual AEM unit and comparing to its own display.
+// =====================================================================
+
+void handleAemFrame(uint32_t id, uint8_t* d) {
+  if (id != AEM_CAN_ID) return;
+  if (debugLoggingEnabled) {
+    Serial.print("AEM frame (UNCONFIRMED format) - raw bytes:");
+    for (int i = 0; i < 8; i++) Serial.printf(" %02X", d[i]);
+    Serial.println();
+  }
+  // TODO: once sniffed and confirmed, parse AFR/lambda here and
+  // nextionSend() it under a new "aem_afr" gauge key.
+}
+
+
+// =====================================================================
 // EGT (MAX6675 + K-type thermocouple)
-// Console-only for now, not yet on the Nextion display.
 // Bit-banged per MAX6675 datasheet: CS low, clock out 16 bits MSB-first,
 // CS high. Needs ~220ms between reads per datasheet - timed accordingly.
 // =====================================================================
@@ -709,11 +949,11 @@ void updateEgt() {
 
   double egtC = readThermocoupleC();
   if (isnan(egtC)) {
-    Serial.println("EGT: thermocouple open/disconnected");
+    if (debugLoggingEnabled) Serial.println("EGT: thermocouple open/disconnected");
     nextionSend("egt.txt=\"--\""); // web dashboard shows disconnected state too
   } else {
     double egtF = egtC * 9.0 / 5.0 + 32.0;
-    Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
+    if (debugLoggingEnabled) Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
     nextionSend("egt.txt=\"" + String(egtF, 1) + "\""); // no Nextion component yet - web dashboard only
   }
 }
@@ -759,6 +999,7 @@ void setup() {
   Serial2.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX_PIN, NEXTION_TX_PIN);
 
   gaugePrefs.begin("gauges", false); // NVS namespace "gauges" - persists across reboots
+  sysPrefs.begin("sysconf", false);  // NVS namespace "sysconf" - debug/protocol/aem settings
   loadGaugeConfig();
 
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
@@ -798,6 +1039,9 @@ void setup() {
   webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", DASHBOARD_HTML);
   });
+  webServer.on("/api/gauges", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", buildGaugeApiJson());
+  });
   webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/html", buildConfigPage());
   });
@@ -807,7 +1051,7 @@ void setup() {
   });
   webServer.begin();
 
-  Serial.println("esp32-main running - rusEFI + MegaSquirt + GPS -> Nextion digital dashboard + web");
+  Serial.println("esp32-main running - rusEFI + secondary ECU + GPS -> Nextion + web dashboard");
 }
 
 void loop() {
@@ -819,7 +1063,9 @@ void loop() {
     if (id >= 0x200 && id <= 0x20B) {
       handleRusefiFrame(id, d);
     } else if (id >= 1520 && id <= 1520 + 52) {
-      handleMegasquirtFrame(id, d);
+      handleSecondaryEcuFrame(id, d);
+    } else if (aemEnabled && id == AEM_CAN_ID) {
+      handleAemFrame(id, d);
     }
   }
 
