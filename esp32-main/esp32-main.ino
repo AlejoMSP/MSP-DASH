@@ -51,7 +51,7 @@ void nextionSend(const String &cmd) {
 
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(9600, SERIAL_8N1, 16, 17); // adjust RX/TX pins to your wiring
+  Serial2.begin(115200, SERIAL_8N1, 16, 17); // matches Nextion project's baud=115200 startup setting
 
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   twai_timing_config_t t_config = CAN_BITRATE;
