@@ -147,6 +147,7 @@ GaugeConfig gaugeConfigs[] = {
   { "battv",  "Battery Voltage",  true },
   { "egt",    "EGT",              true },
   { "mph",    "Speed (GPS)",      true },
+  { "fuel",   "Fuel Level",       true },
 };
 const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
 
@@ -188,36 +189,49 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <style>
     * { box-sizing: border-box; }
     body {
-      background: radial-gradient(circle at 50% 0%, #1a1a1f 0%, #0a0a0d 60%);
+      background: #05050a;
       color: #eee; font-family: 'Segoe UI', system-ui, sans-serif;
       margin: 0; padding: 16px; min-height: 100vh;
     }
     h1 { color: #4dd0e1; font-size: 1.1em; letter-spacing: 2px; text-transform: uppercase;
-         margin: 0 0 4px 0; font-weight: 600; }
-    #status { font-size: 0.75em; color: #666; margin-bottom: 18px; }
+         margin: 0 0 4px 0; font-weight: 600; text-align:center; }
+    #status { font-size: 0.75em; color: #666; margin-bottom: 10px; text-align:center; }
     #status.connected { color: #4caf50; }
+    .cfg-link { text-align:center; margin-bottom:16px; }
+    .cfg-link a { color:#4dd0e1; font-size:0.8em; text-decoration:none; border:1px solid #2a2a30;
+                  border-radius:6px; padding:6px 14px; }
 
-    .hero-row { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+    /* Cluster layout: fuel | tach | center-lcd | speedo | temp */
+    .cluster { display:flex; align-items:center; justify-content:center; flex-wrap:wrap;
+               gap: 6px; margin-bottom: 24px; }
+    .gauge-wrap { position:relative; }
+    .gauge-wrap svg { display:block; }
+    .needle {
+      position:absolute; top:50%; left:50%; width:4px; height:38%;
+      background: linear-gradient(to top, #c0392b, #e74c3c);
+      transform-origin: bottom center; transform: translate(-50%,-100%) rotate(-135deg);
+      border-radius: 3px 3px 0 0; box-shadow: 0 0 4px rgba(231,76,60,0.6);
+      transition: transform 0.15s ease-out;
+    }
+    .needle-small { height:32%; width:3px; }
+    .hub {
+      position:absolute; top:50%; left:50%; width:14px; height:14px; border-radius:50%;
+      background: radial-gradient(circle at 35% 35%, #888, #222); transform: translate(-50%,-50%);
+      box-shadow: 0 0 4px rgba(0,0,0,0.8);
+    }
+    .gauge-title { position:absolute; bottom:26%; left:50%; transform:translateX(-50%);
+                   font-size:0.7em; font-weight:700; color:#222; letter-spacing:1px; }
+    .gauge-value { position:absolute; bottom:14%; left:50%; transform:translateX(-50%);
+                   font-size:0.85em; font-weight:700; color:#000; font-family:monospace; }
 
-    .dial {
-      --pct: 0;
-      width: 180px; height: 180px; border-radius: 50%;
-      background: conic-gradient(from 225deg,
-        var(--dial-color, #4dd0e1) calc(var(--pct) * 2.7deg),
-        #222 calc(var(--pct) * 2.7deg) 270deg,
-        transparent 270deg 360deg);
-      display: flex; align-items: center; justify-content: center;
-      position: relative;
-      box-shadow: 0 0 24px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.6);
-    }
-    .dial::before {
-      content: ""; position: absolute; width: 148px; height: 148px; border-radius: 50%;
-      background: #0d0d10;
-    }
-    .dial-inner { position: relative; text-align: center; z-index: 1; }
-    .dial-value { font-size: 2.1em; font-weight: 700; line-height: 1; }
-    .dial-unit { font-size: 0.7em; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-    .dial-label { font-size: 0.75em; color: #4dd0e1; text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+    .lcd { width:120px; height:180px; background:#111; border-radius:8px; border:3px solid #333;
+           display:flex; flex-direction:column; align-items:center; justify-content:center;
+           box-shadow: inset 0 0 10px rgba(0,0,0,0.8); }
+    .lcd-label { color:#4dd0e1; font-size:0.6em; text-transform:uppercase; letter-spacing:1px;
+                 font-family:monospace; }
+    .lcd-value { color:#4caf50; font-size:1.5em; font-family:monospace; font-weight:700;
+                 text-shadow: 0 0 6px rgba(76,175,80,0.6); margin:6px 0; }
+    .lcd-unit { color:#4caf50; font-size:0.65em; font-family:monospace; opacity:0.7; }
 
     .bar-section { max-width: 500px; margin: 0 auto 24px auto; }
     .bar-label { display: flex; justify-content: space-between; font-size: 0.8em; color: #888;
@@ -238,26 +252,9 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
 <body>
   <h1>MSP-DASH Live</h1>
   <div id="status">connecting...</div>
-  <div style="text-align:center; margin-bottom:16px;">
-    <a href="/config" style="color:#4dd0e1; font-size:0.8em; text-decoration:none; border:1px solid #2a2a30; border-radius:6px; padding:6px 14px;">&#9881; Configure Gauges</a>
-  </div>
+  <div class="cfg-link"><a href="/config">&#9881; Configure Gauges</a></div>
 
-  <div class="hero-row">
-    <div class="dial" id="dial_rpm" style="--dial-color:#4dd0e1;">
-      <div class="dial-inner">
-        <div class="dial-value" id="v_rpm">0</div>
-        <div class="dial-unit">rpm</div>
-        <div class="dial-label">RPM</div>
-      </div>
-    </div>
-    <div class="dial" id="dial_boost" style="--dial-color:#ff8a65;">
-      <div class="dial-inner">
-        <div class="dial-value" id="v_boost">0.0</div>
-        <div class="dial-unit">psi/kpa</div>
-        <div class="dial-label">Boost</div>
-      </div>
-    </div>
-  </div>
+  <div class="cluster" id="cluster"></div>
 
   <div class="bar-section">
     <div class="bar-label"><span>Throttle</span><span id="v_tpst">0.0%</span></div>
@@ -267,10 +264,122 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <div class="grid" id="grid"></div>
 
   <script>
-    // Secondary tiles (everything not shown as a hero dial or bar).
-    // tpst mirrors the tps bar's own numeric label above, so it's excluded
-    // from this grid to avoid showing the same value twice.
-    const tileFields = ["mph","eth","ego","fuelp","oilp","oilt","map","clt","mat","vvt","battv","egt"];
+    // ---- Gauge face generator (SVG background + CSS-rotated needle overlay) ----
+    // Sweep convention: 0 at -135deg (bottom-left), max at +135deg (bottom-right),
+    // 270deg total, matching classic automotive gauge layout.
+    function buildGaugeFace(size, maxVal, majorStep, redlineFrom) {
+      const cx = size / 2, cy = size / 2, r = size * 0.42;
+      const startDeg = -135, sweepDeg = 270;
+      let svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
+      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r + 6) + '" fill="#111" stroke="#555" stroke-width="2"/>';
+      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#f5f2ea"/>';
+
+      // redline arc (if given)
+      if (redlineFrom !== undefined) {
+        const fFrom = redlineFrom / maxVal;
+        const aFrom = (startDeg + fFrom * sweepDeg) * Math.PI / 180;
+        const aTo = (startDeg + sweepDeg) * Math.PI / 180;
+        const x1 = cx + r * Math.sin(aFrom), y1 = cy - r * Math.cos(aFrom);
+        const x2 = cx + r * Math.sin(aTo), y2 = cy - r * Math.cos(aTo);
+        const largeArc = (sweepDeg * (1 - fFrom)) > 180 ? 1 : 0;
+        svg += '<path d="M ' + x1 + ' ' + y1 + ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 +
+               '" fill="none" stroke="#c0392b" stroke-width="6" opacity="0.85"/>';
+      }
+
+      // ticks + labels
+      const steps = maxVal / majorStep;
+      for (let i = 0; i <= steps; i++) {
+        const val = i * majorStep;
+        const frac = val / maxVal;
+        const ang = (startDeg + frac * sweepDeg) * Math.PI / 180;
+        const rOuter = r - 4, rInner = r - 14;
+        const x1 = cx + rOuter * Math.sin(ang), y1 = cy - rOuter * Math.cos(ang);
+        const x2 = cx + rInner * Math.sin(ang), y2 = cy - rInner * Math.cos(ang);
+        svg += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#222" stroke-width="2.5"/>';
+        const rLabel = r - 24;
+        const lx = cx + rLabel * Math.sin(ang), ly = cy - rLabel * Math.cos(ang);
+        svg += '<text x="' + lx + '" y="' + (ly + 4) + '" font-size="' + (size * 0.07) + '" fill="#222" ' +
+               'text-anchor="middle" font-family="monospace" font-weight="bold">' + val + '</text>';
+
+        // minor tick (halfway to next major)
+        if (i < steps) {
+          const midFrac = (val + majorStep / 2) / maxVal;
+          const midAng = (startDeg + midFrac * sweepDeg) * Math.PI / 180;
+          const mx1 = cx + rOuter * Math.sin(midAng), my1 = cy - rOuter * Math.cos(midAng);
+          const mx2 = cx + (r - 9) * Math.sin(midAng), my2 = cy - (r - 9) * Math.cos(midAng);
+          svg += '<line x1="' + mx1 + '" y1="' + my1 + '" x2="' + mx2 + '" y2="' + my2 + '" stroke="#555" stroke-width="1.5"/>';
+        }
+      }
+      svg += '</svg>';
+      return svg;
+    }
+
+    function makeGauge(id, size, maxVal, majorStep, title, unit, redlineFrom, small) {
+      const wrap = document.createElement('div');
+      wrap.className = 'gauge-wrap';
+      wrap.style.width = size + 'px';
+      wrap.style.height = size + 'px';
+      wrap.innerHTML = buildGaugeFace(size, maxVal, majorStep, redlineFrom) +
+        '<div class="needle' + (small ? ' needle-small' : '') + '" id="needle_' + id + '"></div>' +
+        '<div class="hub"></div>' +
+        '<div class="gauge-title">' + title + '</div>' +
+        '<div class="gauge-value" id="v_' + id + '">0</div>';
+      return wrap;
+    }
+
+    const gaugeRanges = {
+      rpm:   { max: 8000, major: 1000, redline: 6800 },
+      mph:   { max: 140,  major: 20 },
+      fuel:  { max: 100,  major: 25 },
+      clt:   { max: 260,  major: 65 }
+    };
+
+    const cluster = document.getElementById('cluster');
+    cluster.appendChild(makeGauge('fuel', 110, gaugeRanges.fuel.max, gaugeRanges.fuel.major, 'FUEL', '%', undefined, true));
+    cluster.appendChild(makeGauge('rpm', 220, gaugeRanges.rpm.max, gaugeRanges.rpm.major, 'RPM', '', gaugeRanges.rpm.redline, false));
+
+    const lcd = document.createElement('div');
+    lcd.className = 'lcd';
+    lcd.innerHTML = '<div class="lcd-label" id="lcd_label">BOOST</div>' +
+                     '<div class="lcd-value" id="lcd_value">0.0</div>' +
+                     '<div class="lcd-unit" id="lcd_unit">kPa</div>';
+    cluster.appendChild(lcd);
+
+    cluster.appendChild(makeGauge('mph', 220, gaugeRanges.mph.max, gaugeRanges.mph.major, 'MPH', '', undefined, false));
+    cluster.appendChild(makeGauge('clt', 110, gaugeRanges.clt.max, gaugeRanges.clt.major, 'TEMP', 'F', undefined, true));
+
+    function updateNeedle(field, value) {
+      const range = gaugeRanges[field];
+      if (!range) return;
+      let frac = value / range.max;
+      frac = Math.max(0, Math.min(1, frac));
+      const deg = -135 + frac * 270;
+      const needle = document.getElementById('needle_' + field);
+      if (needle) needle.style.transform = 'translate(-50%,-100%) rotate(' + deg + 'deg)';
+    }
+
+    // Center LCD cycles through secondary stats every 3s
+    const lcdStats = [
+      { field: 'boost', label: 'BOOST', unit: 'kPa' },
+      { field: 'oilp',  label: 'OIL PRESS', unit: 'kPa' },
+      { field: 'ego',   label: 'AFR', unit: '' },
+      { field: 'egt',   label: 'EGT', unit: 'C' }
+    ];
+    let lcdIndex = 0;
+    const lastValues = {};
+    function refreshLcd() {
+      const stat = lcdStats[lcdIndex];
+      document.getElementById('lcd_label').textContent = stat.label;
+      document.getElementById('lcd_value').textContent = lastValues[stat.field] !== undefined ? lastValues[stat.field] : '--';
+      document.getElementById('lcd_unit').textContent = stat.unit;
+      lcdIndex = (lcdIndex + 1) % lcdStats.length;
+    }
+    setInterval(refreshLcd, 3000);
+    refreshLcd();
+
+    // Secondary tiles (everything not shown as a cluster gauge or bar).
+    // tpst mirrors the tps bar's own numeric label above, so it's excluded.
+    const tileFields = ["eth","ego","fuelp","oilp","oilt","map","boost","mat","vvt","battv","egt"];
     const grid = document.getElementById("grid");
     tileFields.forEach(f => {
       const tile = document.createElement("div");
@@ -279,28 +388,15 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       grid.appendChild(tile);
     });
 
-    // Dial ranges: [min, max] mapped to the 0-270deg conic-gradient sweep
-    const dialRanges = {
-      rpm:   [0, 8000],
-      boost: [-15, 25]
-    };
-
-    function updateDial(field, value) {
-      const range = dialRanges[field];
-      if (!range) return;
-      const [min, max] = range;
-      let pct = ((value - min) / (max - min)) * 100;
-      pct = Math.max(0, Math.min(100, pct));
-      document.getElementById("dial_" + field).style.setProperty("--pct", pct);
-    }
-
     function handleField(field, value) {
+      lastValues[field] = value;
+
       const el = document.getElementById("v_" + field);
       if (el) el.textContent = value;
 
-      if (field === "rpm" || field === "boost") {
+      if (gaugeRanges[field]) {
         const num = parseFloat(value);
-        if (!isNaN(num)) updateDial(field, num);
+        if (!isNaN(num)) updateNeedle(field, num);
       }
       if (field === "tps") {
         const num = parseFloat(value);
@@ -449,11 +545,14 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float clt = cltRaw - 40;
       int8_t matRaw = (int8_t)d[3];
       float mat = matRaw - 40;
+      uint8_t fuelRaw = d[7]; // FuelLevel: byte7, x0.5, %
+      float fuel = fuelRaw * 0.5f;
 
       nextionSend("map.txt=\"" + String(mapKpa, 1) + "\"");
       nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
+      nextionSend("fuel.txt=\"" + String(fuel, 1) + "\""); // no Nextion component yet - web dashboard only. MegaSquirt path doesn't provide this signal.
       break;
     }
     case RUSEFI_BASE4: {

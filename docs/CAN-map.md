@@ -197,3 +197,26 @@ what's implemented in code - it is NOT the full set of ~40+ signals
 available in the rusEFI DBC (see the "all rusEFI CAN messages" summary
 elsewhere in this doc for the complete signal list, most of which aren't
 parsed into the sketch yet).
+
+## Classic instrument cluster redesign (2026-09-06)
+Web dashboard rebuilt to look like a classic analog OEM instrument cluster
+(white-faced dials, black tick marks, red needle, small trip-computer LCD)
+rather than the earlier dark tech-style dials. Pure SVG + CSS, no external
+libraries.
+
+Layout: small Fuel gauge (left) | large Tachometer (RPM) | center LCD
+panel (cycles every 3s through Boost/Oil Pressure/AFR/EGT) | large
+Speedometer (GPS mph) | small Coolant Temp gauge (right). Everything else
+(TPS bar, ethanol, fuel pressure, oil temp, MAP, boost, MAT, VVT, battery
+voltage, EGT) remains in the tile grid below, same as before.
+
+Added FuelLevel signal (rusEFI DBC, BASE3 byte7, raw x0.5 = %) - not
+previously parsed. Registered as a new toggleable "fuel" gauge in
+/config. NOTE: MegaSquirt's mapped blocks in this project don't include
+a fuel level signal, so the fuel gauge stays at its last/default value
+when running MegaSquirt instead of rusEFI.
+
+Gauge sweep convention: -135deg (bottom-left, value=0) to +135deg
+(bottom-right, value=max), 270deg total - standard automotive gauge
+layout. Needle rotation via CSS transform on an absolutely-positioned
+div overlaid on the SVG face, updated per WebSocket message.
