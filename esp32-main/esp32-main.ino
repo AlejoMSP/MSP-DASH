@@ -21,6 +21,9 @@
               rusEFI) is worth doing before fully trusting these values.
 
   See docs/CAN-map.md for full signal tables and confirmation history.
+
+  Also reads EGT via a MAX6675 + K-type thermocouple (bit-banged,
+  console-only for now - not yet on the Nextion display).
 */
 
 
@@ -50,6 +53,11 @@
 #define GPS_RX_PIN 4  // ESP32 pin receiving GPS module's TX
 #define GPS_TX_PIN 5  // ESP32 pin driving GPS module's RX
 #define GPS_BAUD 9600
+
+// EGT (MAX6675 + K-type thermocouple), bit-banged 3-wire interface
+#define MAX6675_CS  32
+#define MAX6675_SCK 33
+#define MAX6675_SO  34 // input-only pin - fits since this is read-only
 
 
 // =====================================================================
@@ -251,6 +259,54 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
 
 
 // =====================================================================
+// EGT (MAX6675 + K-type thermocouple)
+// Console-only for now, not yet on the Nextion display.
+// Bit-banged per MAX6675 datasheet: CS low, clock out 16 bits MSB-first,
+// CS high. Needs ~220ms between reads per datasheet - timed accordingly.
+// =====================================================================
+
+unsigned long lastEgtRead = 0;
+const unsigned long EGT_READ_INTERVAL_MS = 500;
+
+double readThermocoupleC() {
+  uint16_t v;
+  pinMode(MAX6675_CS, OUTPUT);
+  pinMode(MAX6675_SO, INPUT);
+  pinMode(MAX6675_SCK, OUTPUT);
+
+  digitalWrite(MAX6675_CS, LOW);
+  delay(1);
+
+  v = shiftIn(MAX6675_SO, MAX6675_SCK, MSBFIRST);
+  v <<= 8;
+  v |= shiftIn(MAX6675_SO, MAX6675_SCK, MSBFIRST);
+
+  digitalWrite(MAX6675_CS, HIGH);
+
+  if (v & 0x4) {
+    return NAN; // bit 2 set = thermocouple open/disconnected
+  }
+
+  v >>= 3; // discard 3 status bits
+  return v * 0.25; // 0.25 degC per count
+}
+
+void updateEgt() {
+  unsigned long now = millis();
+  if (now - lastEgtRead < EGT_READ_INTERVAL_MS) return;
+  lastEgtRead = now;
+
+  double egtC = readThermocoupleC();
+  if (isnan(egtC)) {
+    Serial.println("EGT: thermocouple open/disconnected");
+  } else {
+    double egtF = egtC * 9.0 / 5.0 + 32.0;
+    Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
+  }
+}
+
+
+// =====================================================================
 // GPS handling
 // =====================================================================
 
@@ -304,6 +360,7 @@ void loop() {
   }
 
   updateGps();
+  updateEgt();
 
   // TODO: check per-block millis() timestamps vs STALE_MS and show a
   // "no data" indicator on the Nextion side if a channel goes stale.

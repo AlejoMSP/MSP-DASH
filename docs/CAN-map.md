@@ -127,3 +127,16 @@ Nextion output, rusEFI frame handling, MegaSquirt frame handling, GPS
 handling, setup/loop. Frame parsing for each ECU lives in its own function
 (handleRusefiFrame / handleMegasquirtFrame) called from loop() based on
 the incoming CAN ID range.
+
+## EGT added (2026-09-06)
+HiLetgo MAX6675 module + K-type thermocouple, bit-banged 3-wire interface
+(not full SPI - MAX6675 is read-only, no MOSI needed).
+
+Wiring: SCK->GPIO33, CS->GPIO32, SO->GPIO34 (input-only pin, fits since
+this is a read-only data line).
+
+Console-only for now (Serial.printf, not pushed to Nextion) - display
+integration deferred until a field/page is designated for it. Reads every
+500ms (MAX6675 needs ~220ms minimum between conversions per datasheet).
+Reports NAN / "thermocouple open/disconnected" if bit 2 of the raw read
+is set, per MAX6675's open-circuit detection.
