@@ -130,40 +130,140 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MSP-DASH Live</title>
   <style>
-    body { background:#111; color:#0f0; font-family: monospace; margin:0; padding:16px; }
-    h1 { color:#0ff; font-size:1.2em; margin:0 0 16px 0; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
-    .tile { background:#000; border:1px solid #0f0; border-radius:6px; padding:10px; text-align:center; }
-    .label { color:#0ff; font-size:0.8em; text-transform:uppercase; }
-    .value { font-size:1.6em; margin-top:4px; }
-    #status { font-size:0.8em; color:#888; margin-bottom:10px; }
+    * { box-sizing: border-box; }
+    body {
+      background: radial-gradient(circle at 50% 0%, #1a1a1f 0%, #0a0a0d 60%);
+      color: #eee; font-family: 'Segoe UI', system-ui, sans-serif;
+      margin: 0; padding: 16px; min-height: 100vh;
+    }
+    h1 { color: #4dd0e1; font-size: 1.1em; letter-spacing: 2px; text-transform: uppercase;
+         margin: 0 0 4px 0; font-weight: 600; }
+    #status { font-size: 0.75em; color: #666; margin-bottom: 18px; }
+    #status.connected { color: #4caf50; }
+
+    .hero-row { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+
+    .dial {
+      --pct: 0;
+      width: 180px; height: 180px; border-radius: 50%;
+      background: conic-gradient(from 225deg,
+        var(--dial-color, #4dd0e1) calc(var(--pct) * 2.7deg),
+        #222 calc(var(--pct) * 2.7deg) 270deg,
+        transparent 270deg 360deg);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      box-shadow: 0 0 24px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.6);
+    }
+    .dial::before {
+      content: ""; position: absolute; width: 148px; height: 148px; border-radius: 50%;
+      background: #0d0d10;
+    }
+    .dial-inner { position: relative; text-align: center; z-index: 1; }
+    .dial-value { font-size: 2.1em; font-weight: 700; line-height: 1; }
+    .dial-unit { font-size: 0.7em; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .dial-label { font-size: 0.75em; color: #4dd0e1; text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+
+    .bar-section { max-width: 500px; margin: 0 auto 24px auto; }
+    .bar-label { display: flex; justify-content: space-between; font-size: 0.8em; color: #888;
+                 text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .bar-track { background: #1a1a1f; border-radius: 8px; height: 22px; overflow: hidden;
+                 box-shadow: inset 0 0 8px rgba(0,0,0,0.6); }
+    .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #4dd0e1, #26c6da);
+                border-radius: 8px; transition: width 0.2s ease; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px;
+            max-width: 900px; margin: 0 auto; }
+    .tile { background: #16161a; border: 1px solid #2a2a30; border-radius: 8px;
+            padding: 12px 8px; text-align: center; }
+    .tile .label { color: #4dd0e1; font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; }
+    .tile .value { font-size: 1.4em; font-weight: 600; margin-top: 4px; }
   </style>
 </head>
 <body>
   <h1>MSP-DASH Live</h1>
   <div id="status">connecting...</div>
+
+  <div class="hero-row">
+    <div class="dial" id="dial_rpm" style="--dial-color:#4dd0e1;">
+      <div class="dial-inner">
+        <div class="dial-value" id="v_rpm">0</div>
+        <div class="dial-unit">rpm</div>
+        <div class="dial-label">RPM</div>
+      </div>
+    </div>
+    <div class="dial" id="dial_boost" style="--dial-color:#ff8a65;">
+      <div class="dial-inner">
+        <div class="dial-value" id="v_boost">0.0</div>
+        <div class="dial-unit">psi/kpa</div>
+        <div class="dial-label">Boost</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar-section">
+    <div class="bar-label"><span>Throttle</span><span id="v_tpst">0.0%</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar_tps"></div></div>
+  </div>
+
   <div class="grid" id="grid"></div>
+
   <script>
-    const fields = ["rpm","mph","tps","tpst","eth","ego","fuelp","oilp","oilt","map","clt","mat","vvt","battv","egt"];
+    // Secondary tiles (everything not shown as a hero dial or bar).
+    // tpst mirrors the tps bar's own numeric label above, so it's excluded
+    // from this grid to avoid showing the same value twice.
+    const tileFields = ["mph","eth","ego","fuelp","oilp","oilt","map","clt","mat","vvt","battv","egt"];
     const grid = document.getElementById("grid");
-    fields.forEach(f => {
+    tileFields.forEach(f => {
       const tile = document.createElement("div");
       tile.className = "tile";
       tile.innerHTML = '<div class="label">' + f + '</div><div class="value" id="v_' + f + '">--</div>';
       grid.appendChild(tile);
     });
 
+    // Dial ranges: [min, max] mapped to the 0-270deg conic-gradient sweep
+    const dialRanges = {
+      rpm:   [0, 8000],
+      boost: [-15, 25]
+    };
+
+    function updateDial(field, value) {
+      const range = dialRanges[field];
+      if (!range) return;
+      const [min, max] = range;
+      let pct = ((value - min) / (max - min)) * 100;
+      pct = Math.max(0, Math.min(100, pct));
+      document.getElementById("dial_" + field).style.setProperty("--pct", pct);
+    }
+
+    function handleField(field, value) {
+      const el = document.getElementById("v_" + field);
+      if (el) el.textContent = value;
+
+      if (field === "rpm" || field === "boost") {
+        const num = parseFloat(value);
+        if (!isNaN(num)) updateDial(field, num);
+      }
+      if (field === "tps") {
+        const num = parseFloat(value);
+        if (!isNaN(num)) document.getElementById("bar_tps").style.width = Math.max(0, Math.min(100, num)) + "%";
+      }
+      if (field === "tpst") {
+        const el2 = document.getElementById("v_tpst");
+        if (el2) el2.textContent = value + "%";
+      }
+    }
+
     let ws;
     function connect() {
       ws = new WebSocket("ws://" + location.host + "/ws");
-      ws.onopen = () => { document.getElementById("status").textContent = "connected"; };
-      ws.onclose = () => { document.getElementById("status").textContent = "disconnected - retrying..."; setTimeout(connect, 2000); };
+      const status = document.getElementById("status");
+      ws.onopen = () => { status.textContent = "connected"; status.className = "connected"; };
+      ws.onclose = () => { status.textContent = "disconnected - retrying..."; status.className = ""; setTimeout(connect, 2000); };
       ws.onerror = () => ws.close();
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
-          const el = document.getElementById("v_" + msg.field);
-          if (el) el.textContent = msg.value;
+          handleField(msg.field, msg.value);
         } catch (e) { /* ignore malformed messages */ }
       };
     }
@@ -252,6 +352,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float mat = matRaw - 40;
 
       nextionSend("map.txt=\"" + String(mapKpa, 1) + "\"");
+      nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
       break;
@@ -308,6 +409,7 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
       float boost = map_ - baro; // real baro available here, unlike rusEFI
 
       nextionSend("map.txt=\"" + String(map_, 1) + "\"");
+      nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
       nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       break;

@@ -157,3 +157,19 @@ web dashboard even though neither has a Nextion component yet (Nextion
 silently ignores field names it doesn't recognize, so this is safe).
 
 Web page auto-reconnects on WebSocket disconnect (2s retry loop).
+
+## Web dashboard redesign (2026-09-06)
+Replaced the plain grid-of-boxes web page with a proper dashboard:
+- RPM and Boost shown as CSS conic-gradient dial gauges (0-270deg sweep,
+  no external libraries - pure CSS custom property driven by JS)
+- TPS shown as a horizontal progress bar with live percentage label
+- Everything else (mph, eth, ego, fuelp, oilp, oilt, map, clt, mat, vvt,
+  battv, egt) remains as a clean tile grid below
+
+Added a "boost" field broadcast (computed internally before, but never
+actually sent) alongside "map" in both the rusEFI and MegaSquirt MAP
+handlers, specifically so the new dashboard has a value to drive the
+boost dial. No Nextion component for "boost" exists yet - web-only for now,
+same pattern as egt/battv.
+
+Dial ranges (in dashboard JS, easy to adjust): RPM 0-8000, Boost -15 to 25.
