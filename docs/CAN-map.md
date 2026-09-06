@@ -220,3 +220,27 @@ Gauge sweep convention: -135deg (bottom-left, value=0) to +135deg
 (bottom-right, value=max), 270deg total - standard automotive gauge
 layout. Needle rotation via CSS transform on an absolutely-positioned
 div overlaid on the SVG face, updated per WebSocket message.
+
+## GPS status light + all temps converted to Fahrenheit (2026-09-06)
+GPS status dot added on the dashboard's speedometer gauge (top of the
+dial): gray when no fix, glowing green when gps.speed.isValid(). Sent via
+a new broadcastStatus() helper that skips both the Nextion write and the
+/config on/off gate - this is a system status indicator, not a
+user-toggleable sensor gauge, and has no Nextion component.
+
+All temperature fields (clt, mat, oilt, egt) now convert to Fahrenheit
+before being pushed anywhere (Nextion, web dashboard, Serial debug).
+Fixes a real inconsistency: the coolant-temp gauge's unit label already
+said "F" but the underlying value being pushed was still Celsius.
+
+- rusEFI: DBC explicitly states these signals are degC, so the conversion
+  is well-defined and safe.
+- MegaSquirt: temp units depend on how the ECU itself is configured
+  (PCLink can output either C or F). The conversion ASSUMES Celsius
+  source config (matching the common default) - this has NOT been
+  bench-confirmed for MegaSquirt in this project. If your MegaSquirt is
+  actually configured for Fahrenheit output, this would double-convert
+  and show wrong values - worth checking once MegaSquirt bench testing
+  happens.
+
+New shared helper: cToF(float c) in the byte-reading-helpers section.

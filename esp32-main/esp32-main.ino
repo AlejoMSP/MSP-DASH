@@ -223,6 +223,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                    font-size:0.7em; font-weight:700; color:#222; letter-spacing:1px; }
     .gauge-value { position:absolute; bottom:14%; left:50%; transform:translateX(-50%);
                    font-size:0.85em; font-weight:700; color:#000; font-family:monospace; }
+    .gps-dot { position:absolute; top:10%; left:50%; transform:translateX(-50%);
+               width:10px; height:10px; border-radius:50%; background:#555;
+               box-shadow:0 0 4px rgba(0,0,0,0.6); transition: background 0.3s ease, box-shadow 0.3s ease; }
+    .gps-dot.fix { background:#4caf50; box-shadow:0 0 8px rgba(76,175,80,0.9); }
 
     .lcd { width:120px; height:180px; background:#111; border-radius:8px; border:3px solid #333;
            display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -346,6 +350,12 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     cluster.appendChild(lcd);
 
     cluster.appendChild(makeGauge('mph', 220, gaugeRanges.mph.max, gaugeRanges.mph.major, 'MPH', '', undefined, false));
+    // GPS fix status dot, appended after the mph gauge is in the DOM
+    const mphWrap = cluster.lastElementChild;
+    const gpsDot = document.createElement('div');
+    gpsDot.className = 'gps-dot';
+    gpsDot.id = 'gps_dot';
+    mphWrap.appendChild(gpsDot);
     cluster.appendChild(makeGauge('clt', 110, gaugeRanges.clt.max, gaugeRanges.clt.major, 'TEMP', 'F', undefined, true));
 
     function updateNeedle(field, value) {
@@ -406,6 +416,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
         const el2 = document.getElementById("v_tpst");
         if (el2) el2.textContent = value + "%";
       }
+      if (field === "gpsfix") {
+        const dot = document.getElementById("gps_dot");
+        if (dot) dot.classList.toggle("fix", value === "1");
+      }
     }
 
     let ws;
@@ -447,6 +461,16 @@ uint16_t readU16BE(uint8_t* data, int offset) {
 }
 int16_t readS16BE(uint8_t* data, int offset) {
   return (int16_t)((data[offset] << 8) | data[offset + 1]);
+}
+
+// Shared C->F conversion. All temp fields pushed to Nextion/web are now
+// Fahrenheit - rusEFI's DBC confirms its temp signals are degC, so this
+// conversion is well-defined there. MegaSquirt's temp units depend on how
+// the ECU itself is configured (PCLink can output either C or F) - this
+// assumes Celsius input for MegaSquirt too, which is the common default,
+// but has NOT been bench-confirmed for MegaSquirt in this project.
+float cToF(float c) {
+  return c * 9.0f / 5.0f + 32.0f;
 }
 
 
@@ -542,9 +566,9 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float mapKpa = mapRaw * 0.0333333f;
       float boost = mapKpa - ASSUMED_BARO_KPA; // no baro signal in rusEFI DBC - fixed assumption
       int8_t cltRaw = (int8_t)d[2];
-      float clt = cltRaw - 40;
+      float clt = cToF(cltRaw - 40); // rusEFI DBC: degC, converted to degF
       int8_t matRaw = (int8_t)d[3];
-      float mat = matRaw - 40;
+      float mat = cToF(matRaw - 40); // rusEFI DBC: degC, converted to degF
       uint8_t fuelRaw = d[7]; // FuelLevel: byte7, x0.5, %
       float fuel = fuelRaw * 0.5f;
 
@@ -559,7 +583,7 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       uint16_t oilPressRaw = readU16LE(d, 2); // OilPress: byte2-3
       float oilPressKpa = oilPressRaw * 0.0333333f;
       int8_t oilTempRaw = (int8_t)d[4];
-      float oilTemp = oilTempRaw - 40;
+      float oilTemp = cToF(oilTempRaw - 40); // rusEFI DBC: degC, converted to degF
       uint16_t battRaw = readU16LE(d, 6); // BattVolt: byte6-7
       float battV = battRaw * 0.001f;
 
@@ -602,8 +626,8 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
     case MS_BLOCK2: {
       float baro = readU16BE(d, 0) / 10.0f; // word0
       float map_ = readU16BE(d, 2) / 10.0f; // word1
-      float mat  = readU16BE(d, 4) / 10.0f; // word2
-      float clt  = readU16BE(d, 6) / 10.0f; // word3
+      float mat  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
+      float clt  = cToF(readU16BE(d, 6) / 10.0f); // word3 - ASSUMES Celsius source config, not bench-confirmed
       float boost = map_ - baro; // real baro available here, unlike rusEFI
 
       nextionSend("map.txt=\"" + String(map_, 1) + "\"");
@@ -624,7 +648,7 @@ void handleMegasquirtFrame(uint32_t id, uint8_t* d) {
     case MS_BLOCK13: {
       float fuelp = readU16BE(d, 0) / 10.0f; // word0
       float oilp  = readU16BE(d, 2) / 10.0f; // word1
-      float oilt  = readU16BE(d, 4) / 10.0f; // word2
+      float oilt  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
 
       nextionSend("fuelp.txt=\"" + String(fuelp, 1) + "\"");
       nextionSend("oilp.txt=\"" + String(oilp, 1) + "\"");
@@ -690,7 +714,7 @@ void updateEgt() {
   } else {
     double egtF = egtC * 9.0 / 5.0 + 32.0;
     Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
-    nextionSend("egt.txt=\"" + String(egtC, 1) + "\""); // no Nextion component yet - web dashboard only
+    nextionSend("egt.txt=\"" + String(egtF, 1) + "\""); // no Nextion component yet - web dashboard only
   }
 }
 
@@ -698,6 +722,14 @@ void updateEgt() {
 // =====================================================================
 // GPS handling
 // =====================================================================
+
+// For system status indicators (not user-toggleable sensor gauges) -
+// broadcasts straight to the web dashboard, skipping the Nextion write
+// and the /config on/off gate entirely.
+void broadcastStatus(const String &field, const String &value) {
+  String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
+  ws.textAll(json);
+}
 
 void updateGps() {
   while (gpsSerial.available() > 0) {
@@ -709,8 +741,10 @@ void updateGps() {
     lastGpsSend = now;
     if (gps.speed.isValid()) {
       nextionSend("mph.txt=\"" + String(gps.speed.mph(), 0) + "\"");
+      broadcastStatus("gpsfix", "1");
     } else {
       nextionSend("mph.txt=\"--\""); // no GPS fix yet
+      broadcastStatus("gpsfix", "0");
     }
   }
 }
