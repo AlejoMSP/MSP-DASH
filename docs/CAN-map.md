@@ -295,3 +295,41 @@ This does NOT let you map a brand-new arbitrary CAN ID/byte offset to a
 new gauge via the web UI - only the DISPLAY of gauges already wired into
 this code is configurable. A true "add any CAN signal from a UI" system
 would be a separate, larger feature (essentially a mini DBC editor).
+
+## Full rusEFI DBC exposed as gauges + MegaSquirt/LinkECU removed (2026-09-06)
+
+Every single signal in rusEFI's official DBC is now wired into the
+sketch and configurable via /config - 74 total gauges (up from ~17):
+
+- **BASE0** (status/diagnostic): WarningCounter, LastError, RevLimAct,
+  MainRelayAct, FuelPumpAct, CELAct, EGOHeatAct, LambdaProtectAct, Fan,
+  Fan2, CurrentGear, DistanceTraveled
+- **BASE1**: RPM, IgnitionTiming, InjDuty, IgnDuty, VehicleSpeed (raw CAN
+  VSS - separate from GPS-sourced mph), FlexPct
+- **BASE2**: PPS, TPS1 (bar+text), TPS2, Wastegate
+- **BASE3**: MAP, Boost (derived), CoolantTemp, IntakeTemp, AUX1Temp,
+  AUX2Temp, MCUTemp, FuelLevel
+- **BASE4**: OilPress, OilTemperature, FuelTemperature, BattVolt
+- **BASE5**: CylAM, EstMAF, InjPW, KnockCt
+- **BASE6**: FuelUsed, FuelFlow, FuelTrim1, FuelTrim2
+- **BASE7**: Lam1 (as AFR), Lam2, FpLow, FpHigh
+- **BASE8**: Cam1I (kept as "vvt" key - matches existing physical Nextion
+  component), Cam1Itar, Cam1E, Cam1Etar, Cam2I, Cam2Itar, Cam2E, Cam2Etar
+- **BASE9**: Egt1-8 (8 individual ECU-reported EGT channels - distinct
+  from the physical MAX6675 probe, which keeps its own "egt" key)
+- **BASE10**: knock0-7 (8 per-cylinder knock channels)
+- **BASE11**: BrakePedal
+
+All new number-style gauges default to enabled=true, DISPLAY_NUMBER,
+0ms refresh (no throttle) except WarningCounter/LastError/DistanceTraveled
+which default to a gentler 1000ms refresh since they're not
+time-critical. All are fully configurable (type/refresh/min/max/redline)
+same as every other gauge.
+
+### MegaSquirt / LinkECU support REMOVED
+Per project decision, focusing on rusEFI only for now. All secondary-ECU
+code (SEC_BASE/SEC_BLOCK* defines, handleSecondaryEcuFrame,
+activeSecondaryProtocol selector, the /config protocol dropdown) has been
+deleted from the sketch. If this is revisited later, the git history
+(commits around 2026-09-06, before this one) has a working implementation
+to reference or restore.

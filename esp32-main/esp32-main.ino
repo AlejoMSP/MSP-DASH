@@ -1,53 +1,36 @@
 /*
   esp32-main
-  Production sketch: reads CAN frames from rusEFI, and/or MegaSquirt/LinkECU
-  (shared CAN format - see note below), plus an optional AEM X-Series
-  wideband tap, plus GPS speed, and pushes everything to a digital
-  7-segment Nextion dashboard AND a live web dashboard over WiFi.
+  Production sketch: reads the FULL rusEFI CAN signal set (every signal
+  in rusEFI's official DBC, base 0x200/512 decimal - see docs/CAN-map.md),
+  plus GPS speed and an EGT thermocouple, and pushes everything to a
+  digital Nextion dashboard AND a live web dashboard over WiFi.
 
-  STATUS:
-    rusEFI     - RPM/MAP/TPS1/BattVolt/MCUTemp are BENCH-CONFIRMED (real
-                 hardware, real values matched). CoolantTemp/OilPress/
-                 OilTemp/Lambda/IntakeTemp/FpLow/VVT/FuelLevel come
-                 straight from the official DBC (high confidence, not
-                 bench-verified with live sensors yet for the ones not
-                 wired).
-    MegaSquirt/LinkECU - scale factors (/10, big-endian) and block layout
-                 come from a working reference sketch. Its block labels
-                 ("Seconds,PW1,PW2,RPM" / "BARO,MAP,MAT,CLT" / "TPS,BATT,
-                 EGO") are IDENTICAL to Link's own PCLink CAN Setup labels
-                 seen earlier in this project - strong evidence Link and
-                 MegaSquirt share this exact broadcast format. Because of
-                 that, both protocols use the SAME CAN ID range (1520+
-                 decimal) and are handled by ONE shared parser
-                 (handleSecondaryEcuFrame) - the "Active Secondary ECU"
-                 setting on /config only changes labeling, not parsing.
-                 NOT independently bench-verified for either brand in
-                 THIS project - sniff-and-compare before fully trusting.
-    AEM X-Series - UNCONFIRMED. I don't have a bench-verified byte layout
-                 for AEM's wideband CAN broadcast in this project. A
-                 listener is scaffolded on a commonly-cited CAN ID, OFF
-                 by default. Run the CAN sniffer against the actual AEM
-                 unit and compare to its display before trusting this.
+  STATUS: RPM/MAP/TPS1/BattVolt/MCUTemp are BENCH-CONFIRMED (real
+  hardware, real values matched). Every other signal comes straight from
+  the official DBC (high confidence, not bench-verified with live sensors
+  for the ones not physically wired yet - those read 0/default).
+
+  MegaSquirt and LinkECU support has been REMOVED for now (rusEFI-only
+  focus per project decision) - to be revisited later. See git history
+  if you need to bring that code back.
 
   See docs/CAN-map.md for full signal tables and confirmation history.
 
-  Debug/Serial logging is now OFF by default (toggle on /config) - the
-  console no longer gets flooded with every CAN-derived value on every
-  message unless explicitly turned on for troubleshooting.
+  Debug/Serial logging is OFF by default (toggle on /config) - the
+  console doesn't get flooded with every CAN-derived value unless
+  explicitly turned on for troubleshooting.
 
-  Every gauge now has, via /config: enabled on/off, display type (number/
-  bar/needle - display type only applies to the non-hero tile-grid
-  gauges; the four hero cluster gauges - rpm/mph/fuel/clt - stay as fixed
-  needle dials but their min/max/redline are configurable same as
-  everything else), refresh rate (ms, throttles how often a value is
-  actually pushed out even if CAN data arrives faster), min/max range,
-  and an optional redline threshold.
+  Every gauge has, via /config: enabled on/off, display type (number/bar/
+  needle - only applies to non-hero tile-grid gauges; the four hero
+  cluster gauges - rpm/mph/fuel/clt - stay fixed needle dials but their
+  min/max/redline are still configurable), refresh rate (ms), min/max
+  range, and an optional redline threshold.
 
   NOTE ON SCOPE: this does NOT let you map an arbitrary new CAN ID/byte
-  offset to a brand-new gauge via the web UI - that would be a much
+  offset to a brand-new gauge via the web UI - that would be a separate,
   larger "generic CAN signal editor" feature. What's configurable here is
-  the DISPLAY of gauges already wired into this code.
+  the DISPLAY of every rusEFI signal already wired into this code (which
+  is now all of them).
 */
 
 
@@ -89,44 +72,24 @@
 
 
 // =====================================================================
-// rusEFI CAN IDs (base 0x200 / 512 decimal, confirmed via TunerStudio)
-// Byte order: LITTLE-ENDIAN
+// rusEFI CAN IDs - FULL DBC (base 0x200 / 512 decimal, confirmed via
+// TunerStudio). Byte order: LITTLE-ENDIAN throughout.
 // =====================================================================
 
-#define RUSEFI_BASE1 0x201 // RPM, IgnitionTiming, InjDuty, IgnDuty, VehicleSpeed, FlexPct
-#define RUSEFI_BASE2 0x202 // PPS, TPS1, TPS2, Wastegate
-#define RUSEFI_BASE3 0x203 // MAP, CoolantTemp, IntakeTemp, AUX1Temp, AUX2Temp, MCUTemp, FuelLevel
-#define RUSEFI_BASE4 0x204 // OilPress, OilTemperature, FuelTemperature, BattVolt
-#define RUSEFI_BASE7 0x207 // Lam1, Lam2, FpLow, FpHigh
-#define RUSEFI_BASE8 0x208 // Cam1I, Cam1Itar, Cam1E, Cam1Etar, Cam2I, Cam2Itar, Cam2E, Cam2Etar
+#define RUSEFI_BASE0  0x200 // WarningCounter, LastError, flags, CurrentGear, DistanceTraveled
+#define RUSEFI_BASE1  0x201 // RPM, IgnitionTiming, InjDuty, IgnDuty, VehicleSpeed, FlexPct
+#define RUSEFI_BASE2  0x202 // PPS, TPS1, TPS2, Wastegate
+#define RUSEFI_BASE3  0x203 // MAP, CoolantTemp, IntakeTemp, AUX1Temp, AUX2Temp, MCUTemp, FuelLevel
+#define RUSEFI_BASE4  0x204 // OilPress, OilTemperature, FuelTemperature, BattVolt
+#define RUSEFI_BASE5  0x205 // CylAM, EstMAF, InjPW, KnockCt
+#define RUSEFI_BASE6  0x206 // FuelUsed, FuelFlow, FuelTrim1, FuelTrim2
+#define RUSEFI_BASE7  0x207 // Lam1, Lam2, FpLow, FpHigh
+#define RUSEFI_BASE8  0x208 // Cam1I, Cam1Itar, Cam1E, Cam1Etar, Cam2I, Cam2Itar, Cam2E, Cam2Etar
+#define RUSEFI_BASE9  0x209 // Egt1-8
+#define RUSEFI_BASE10 0x20A // knock0-7
+#define RUSEFI_BASE11 0x20B // BrakePedal
 
 #define ASSUMED_BARO_KPA 101.3f // rusEFI's DBC has no baro signal - fixed assumption per project decision
-
-
-// =====================================================================
-// MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0)
-// Byte order: BIG-ENDIAN. See header note - both brands appear to share
-// this exact format, so one parser (handleSecondaryEcuFrame) covers both.
-// =====================================================================
-
-#define SEC_BASE      1520        // 0x5F0
-#define SEC_BLOCK0    (SEC_BASE+0) // Seconds, PW1, PW2, RPM
-#define SEC_BLOCK2    (SEC_BASE+2) // BARO, MAP, MAT, CLT
-#define SEC_BLOCK3    (SEC_BASE+3) // TPS, BATT, EGO1
-#define SEC_BLOCK13   (SEC_BASE+13)// FUELP, OILP, OILT
-#define SEC_BLOCK44   (SEC_BASE+44)// VVT angle
-#define SEC_BLOCK47   (SEC_BASE+47)// Ethanol %
-
-enum SecondaryProtocol { SEC_PROTO_MEGASQUIRT = 0, SEC_PROTO_LINKECU = 1 };
-SecondaryProtocol activeSecondaryProtocol = SEC_PROTO_MEGASQUIRT; // label only - parsing is identical
-
-
-// =====================================================================
-// AEM X-Series wideband CAN tap - UNCONFIRMED, off by default
-// =====================================================================
-
-#define AEM_CAN_ID 0x180 // commonly-cited AEMnet ID - NOT bench-verified in this project
-bool aemEnabled = false;
 
 
 // =====================================================================
@@ -138,7 +101,7 @@ TinyGPSPlus gps;
 unsigned long lastGpsSend = 0;
 const unsigned long GPS_SEND_INTERVAL_MS = 250; // ~4Hz display update, independent of GPS fix rate
 
-const unsigned long STALE_MS = 2000; // blocks round-robin at different rates (rusEFI); reserved for future staleness check
+const unsigned long STALE_MS = 2000; // blocks round-robin at different rates; reserved for future staleness check
 
 AsyncWebServer webServer(80);
 AsyncWebSocket ws("/ws");
@@ -159,8 +122,8 @@ enum DisplayType { DISPLAY_NUMBER = 0, DISPLAY_BAR = 1, DISPLAY_NEEDLE = 2 };
 struct GaugeConfig {
   const char* key;    // field name, matches what nextionSend() parses out
   const char* label;  // human-readable name for the config page
-  const char* ecu;    // "rusefi" | "secondary" | "aem" | "gps" - for grouping on /config
-  bool isHero;        // true = fixed needle dial in the cluster (rpm/mph/fuel/clt); type selector hidden for these
+  const char* ecu;    // "rusefi" | "aem" | "gps" | "aux" - for grouping on /config
+  bool isHero;        // true = fixed needle dial in the cluster (rpm/mph/fuel/clt)
   bool enabled;
   uint8_t displayType; // only meaningful when isHero==false
   unsigned long refreshMs;
@@ -172,23 +135,107 @@ struct GaugeConfig {
 };
 
 GaugeConfig gaugeConfigs[] = {
-  { "rpm",   "RPM",              "rusefi",    true,  true, DISPLAY_NEEDLE, 0,   0,    8000, true,  6800, 0 },
-  { "mph",   "Speed (GPS)",      "gps",       true,  true, DISPLAY_NEEDLE, 0,   0,    140,  false, 0,    0 },
-  { "fuel",  "Fuel Level",       "rusefi",    true,  true, DISPLAY_NEEDLE, 250, 0,    100,  false, 0,    0 },
-  { "clt",   "Coolant Temp",     "rusefi",    true,  true, DISPLAY_NEEDLE, 0,   0,    260,  false, 0,    0 },
-  { "boost", "Boost",            "rusefi",    false, true, DISPLAY_NUMBER, 0,   -15,  25,   false, 0,    0 },
-  { "tps",   "TPS (bar)",        "rusefi",    false, true, DISPLAY_BAR,    0,   0,    100,  false, 0,    0 },
-  { "tpst",  "TPS (text)",       "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    100,  false, 0,    0 },
-  { "eth",   "Ethanol %",        "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    100,  false, 0,    0 },
-  { "ego",   "AFR",              "rusefi",    false, true, DISPLAY_NUMBER, 0,   10,   20,   false, 0,    0 },
-  { "fuelp", "Fuel Pressure",    "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    500,  false, 0,    0 },
-  { "oilp",  "Oil Pressure",     "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    700,  false, 0,    0 },
-  { "oilt",  "Oil Temp",         "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    300,  false, 0,    0 },
-  { "map",   "MAP",              "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    250,  false, 0,    0 },
-  { "mat",   "Intake Air Temp",  "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    260,  false, 0,    0 },
-  { "vvt",   "VVT Angle",        "rusefi",    false, true, DISPLAY_NUMBER, 0,   -60,  60,   false, 0,    0 },
-  { "battv", "Battery Voltage",  "rusefi",    false, true, DISPLAY_NUMBER, 0,   0,    16,   false, 0,    0 },
-  { "egt",   "EGT",              "aux",       false, true, DISPLAY_NUMBER, 0,   0,    1800, false, 0,    0 },
+  // --- hero cluster ---
+  { "rpm",       "RPM",                 "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    8000,   true,  6800, 0 },
+  { "mph",       "Speed (GPS)",         "gps",    true,  true, DISPLAY_NEEDLE, 0,   0,    140,    false, 0,    0 },
+  { "fuel",      "Fuel Level",          "rusefi", true,  true, DISPLAY_NEEDLE, 250, 0,    100,    false, 0,    0 },
+  { "clt",       "Coolant Temp",        "rusefi", true,  true, DISPLAY_NEEDLE, 0,   0,    260,    false, 0,    0 },
+
+  // --- BASE1: RPM group extras ---
+  { "igntim",    "Ignition Timing",     "rusefi", false, true, DISPLAY_NUMBER, 0,   -20,  50,     false, 0,    0 },
+  { "injduty",   "Injector Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "ignduty",   "Ignition Duty",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "vss",       "Vehicle Speed (CAN)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    0 },
+  { "eth",       "Ethanol %",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+
+  // --- BASE2: throttle group ---
+  { "pps",       "Pedal Position",      "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "tps",       "TPS1 (bar)",          "rusefi", false, true, DISPLAY_BAR,    0,   0,    100,    false, 0,    0 },
+  { "tpst",      "TPS1 (text)",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "tps2",      "TPS2",                "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+  { "wastegate", "Wastegate",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100,    false, 0,    0 },
+
+  // --- BASE3: MAP/temps group ---
+  { "map",       "MAP",                 "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    250,    false, 0,    0 },
+  { "boost",     "Boost",               "rusefi", false, true, DISPLAY_NUMBER, 0,   -15,  25,     false, 0,    0 },
+  { "mat",       "Intake Air Temp",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+  { "aux1t",     "AUX1 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+  { "aux2t",     "AUX2 Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+  { "mcut",      "MCU Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+
+  // --- BASE4: oil/fuel/batt group ---
+  { "oilp",      "Oil Pressure",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    700,    false, 0,    0 },
+  { "oilt",      "Oil Temp",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    300,    false, 0,    0 },
+  { "fuelt",     "Fuel Temp",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    260,    false, 0,    0 },
+  { "battv",     "Battery Voltage",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    16,     false, 0,    0 },
+
+  // --- BASE5: load/knock group ---
+  { "cylam",     "Cyl Air Mass",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    0 },
+  { "estmaf",    "Est. MAF",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2000,   false, 0,    0 },
+  { "injpw",     "Injector Pulsewidth", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    0 },
+  { "knockct",   "Knock Count",         "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    65535,  false, 0,    0 },
+
+  // --- BASE6: fuel usage/trims group ---
+  { "fuelused",  "Fuel Used",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    100000, false, 0,    0 },
+  { "fuelflow",  "Fuel Flow",           "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    50,     false, 0,    0 },
+  { "trim1",     "Fuel Trim 1",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    0 },
+  { "trim2",     "Fuel Trim 2",         "rusefi", false, true, DISPLAY_NUMBER, 0,   -50,  50,     false, 0,    0 },
+
+  // --- BASE7: fueling group ---
+  { "ego",       "AFR (Lam1)",          "rusefi", false, true, DISPLAY_NUMBER, 0,   10,   20,     false, 0,    0 },
+  { "lam2",      "Lambda 2",            "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2,      false, 0,    0 },
+  { "fuelp",     "Fuel Pressure (Low)", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    500,    false, 0,    0 },
+  { "fphigh",    "Fuel Pressure (High)","rusefi", false, true, DISPLAY_NUMBER, 0,   0,    10,     false, 0,    0 },
+
+  // --- BASE8: cam timing group ---
+  { "vvt",       "Cam1 Intake (VVT)",  "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  60,     false, 0,    0 },
+  { "cam1itar",  "Cam1 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam1e",     "Cam1 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam1etar",  "Cam1 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam2i",     "Cam2 Intake",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam2itar",  "Cam2 Intake Target", "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam2e",     "Cam2 Exhaust",       "rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+  { "cam2etar",  "Cam2 Exhaust Target","rusefi", false, true, DISPLAY_NUMBER, 0,   -100, 100,    false, 0,    0 },
+
+  // --- BASE9: ECU-reported EGT (8ch) - distinct from the physical MAX6675 probe's "egt" key ---
+  { "ecuegt1",   "ECU EGT 1",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt2",   "ECU EGT 2",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt3",   "ECU EGT 3",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt4",   "ECU EGT 4",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt5",   "ECU EGT 5",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt6",   "ECU EGT 6",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt7",   "ECU EGT 7",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+  { "ecuegt8",   "ECU EGT 8",          "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    2280,   false, 0,    0 },
+
+  // --- BASE10: per-cylinder knock (8ch) ---
+  { "knock0",    "Knock Cyl 1",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock1",    "Knock Cyl 2",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock2",    "Knock Cyl 3",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock3",    "Knock Cyl 4",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock4",    "Knock Cyl 5",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock5",    "Knock Cyl 6",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock6",    "Knock Cyl 7",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+  { "knock7",    "Knock Cyl 8",        "rusefi", false, true, DISPLAY_NUMBER, 0,   -60,  10,     false, 0,    0 },
+
+  // --- BASE0: status/diagnostic group ---
+  { "warncnt",   "Warning Counter",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    0 },
+  { "lasterr",   "Last Error Code",    "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    65535,  false, 0,    0 },
+  { "revlim",    "Rev Limiter Active", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "mainrelay", "Main Relay Active",  "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "fuelpump",  "Fuel Pump Active",   "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "cel",       "Check Engine Light", "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "egoheat",   "EGO Heater Active",  "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "lambdaprot","Lambda Protect",     "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "fan1",      "Fan 1 Active",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "fan2",      "Fan 2 Active",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+  { "gear",      "Current Gear",       "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    8,      false, 0,    0 },
+  { "odo",       "Distance Traveled",  "rusefi", false, true, DISPLAY_NUMBER, 1000,0,    999999, false, 0,    0 },
+
+  // --- BASE11 ---
+  { "brake",     "Brake Pedal",        "rusefi", false, true, DISPLAY_NUMBER, 0,   0,    1,      false, 0,    0 },
+
+  // --- Auxiliary sensors (not from rusEFI CAN) ---
+  { "egt",       "EGT (probe)",        "aux",    false, true, DISPLAY_NUMBER, 0,   0,    1800,   false, 0,    0 },
 };
 const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
 
@@ -225,8 +272,6 @@ void loadGaugeConfig() {
     g.redline     = gaugePrefs.getFloat((k + "_rl").c_str(), g.redline);
   }
   debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
-  activeSecondaryProtocol = (SecondaryProtocol)sysPrefs.getUChar("secproto", SEC_PROTO_MEGASQUIRT);
-  aemEnabled = sysPrefs.getBool("aemon", false);
 }
 
 void saveGaugeConfig(AsyncWebServerRequest *request) {
@@ -265,14 +310,6 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
 
   debugLoggingEnabled = request->hasParam("dbglog", true);
   sysPrefs.putBool("dbglog", debugLoggingEnabled);
-
-  if (request->hasParam("secproto", true)) {
-    activeSecondaryProtocol = (SecondaryProtocol)request->getParam("secproto", true)->value().toInt();
-    sysPrefs.putUChar("secproto", activeSecondaryProtocol);
-  }
-
-  aemEnabled = request->hasParam("aemon", true);
-  sysPrefs.putBool("aemon", aemEnabled);
 }
 
 // JSON array of all gauge configs, for the dashboard JS to fetch at load
@@ -344,7 +381,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       box-shadow: 0 0 4px rgba(0,0,0,0.8);
     }
     .gauge-title { position:absolute; bottom:26%; left:50%; transform:translateX(-50%);
-                   font-size:0.7em; font-weight:700; color:#222; letter-spacing:1px; }
+                   font-size:0.65em; font-weight:700; color:#222; letter-spacing:1px; white-space:nowrap; }
     .gauge-value { position:absolute; bottom:14%; left:50%; transform:translateX(-50%);
                    font-size:0.85em; font-weight:700; color:#000; font-family:monospace; }
     .gps-dot { position:absolute; top:10%; left:50%; transform:translateX(-50%);
@@ -370,13 +407,13 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                 border-radius: 8px; transition: width 0.2s ease; }
 
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px;
-            max-width: 900px; margin: 0 auto; }
+            max-width: 1000px; margin: 0 auto; }
     .tile { background: #16161a; border: 1px solid #2a2a30; border-radius: 8px;
             padding: 12px 8px; text-align: center; }
-    .tile .label { color: #4dd0e1; font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px; }
-    .tile .value { font-size: 1.4em; font-weight: 600; margin-top: 4px; }
+    .tile .label { color: #4dd0e1; font-size: 0.65em; text-transform: uppercase; letter-spacing: 1px; }
+    .tile .value { font-size: 1.3em; font-weight: 600; margin-top: 4px; }
 
-    .mini-gauges { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:900px;
+    .mini-gauges { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:1000px;
                    margin: 0 auto 20px auto; }
   </style>
 </head>
@@ -557,10 +594,6 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
         }
       }
 
-      if (field === "tpst") {
-        // tps bar's own numeric readout - tps itself is a hero-adjacent
-        // bar handled generically above via its own displayType
-      }
       if (field === "gpsfix") {
         const dot = document.getElementById("gps_dot");
         if (dot) dot.classList.toggle("fix", value === "1");
@@ -606,7 +639,6 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
 // byte-reading helpers
 // =====================================================================
 
-// rusEFI: little-endian
 uint16_t readU16LE(uint8_t* data, int offset) {
   return data[offset] | (data[offset + 1] << 8);
 }
@@ -614,25 +646,15 @@ int16_t readS16LE(uint8_t* data, int offset) {
   return (int16_t)(data[offset] | (data[offset + 1] << 8));
 }
 
-// MegaSquirt/LinkECU: big-endian
-uint16_t readU16BE(uint8_t* data, int offset) {
-  return (data[offset] << 8) | data[offset + 1];
-}
-int16_t readS16BE(uint8_t* data, int offset) {
-  return (int16_t)((data[offset] << 8) | data[offset + 1]);
-}
-
-// Shared C->F conversion. rusEFI's DBC confirms its temp signals are
-// degC, so this conversion is well-defined there. MegaSquirt/LinkECU's
-// temp units depend on ECU configuration - this assumes Celsius input,
-// which is the common default, but has NOT been bench-confirmed.
+// rusEFI's DBC confirms its temp signals are degC - this conversion is
+// well-defined for every temp field in this sketch.
 float cToF(float c) {
   return c * 9.0f / 5.0f + 32.0f;
 }
 
 
 // =====================================================================
-// gauge config page - built dynamically, grouped per ECU
+// gauge config page - built dynamically, grouped per signal block
 // =====================================================================
 
 String gaugeRowHtml(GaugeConfig &g) {
@@ -683,7 +705,6 @@ String buildConfigPage() {
     ".gr-fields select{background:#0a0a0d;border:1px solid #2a2a30;color:#eee;border-radius:4px;padding:4px;}"
     ".rl{flex-direction:row !important;align-items:center;}"
     "input[type=checkbox]{width:18px;height:18px;}"
-    "select{padding:6px;border-radius:6px;background:#0a0a0d;color:#eee;border:1px solid #2a2a30;}"
     "button{background:#4dd0e1;color:#0a0a0d;border:none;border-radius:8px;"
     "padding:12px 20px;font-size:1em;font-weight:600;margin-top:20px;width:100%;}"
     "</style></head><body>"
@@ -695,34 +716,17 @@ String buildConfigPage() {
     "<input type='checkbox' name='dbglog'"
   );
   if (debugLoggingEnabled) html += " checked";
-  html += F("></div>"
-    "<div class='sys-row'><span>Active Secondary ECU (shares CAN ID range 1520+)</span>"
-    "<select name='secproto'>"
-    "<option value='0'"
-  );
-  if (activeSecondaryProtocol == SEC_PROTO_MEGASQUIRT) html += " selected";
-  html += F(">MegaSquirt</option><option value='1'");
-  if (activeSecondaryProtocol == SEC_PROTO_LINKECU) html += " selected";
-  html += F(">LinkECU</option></select></div>"
-    "<div class='sys-row'><span>AEM X-Series Wideband Tap (UNCONFIRMED protocol - verify with sniffer first)</span>"
-    "<input type='checkbox' name='aemon'"
-  );
-  if (aemEnabled) html += " checked";
   html += F("></div>");
 
   html += "<h2>rusEFI</h2>";
   for (int i = 0; i < NUM_GAUGES; i++) {
     if (String(gaugeConfigs[i].ecu) == "rusefi") html += gaugeRowHtml(gaugeConfigs[i]);
   }
-  html += "<h2>MegaSquirt / LinkECU (secondary ECU)</h2>";
-  html += "<p style='font-size:0.75em;color:#888;'>Same underlying data as rusEFI where fields overlap (rpm, map, clt, etc.) - this ECU writes to the same gauge keys, so no separate section needed here beyond the protocol selector above.</p>";
-  html += "<h2>AEM X-Series</h2>";
-  html += "<p style='font-size:0.75em;color:#888;'>No gauges wired yet - protocol byte layout is unconfirmed. Enable the tap above once you've sniffed and confirmed the real CAN ID/format, then this section will list its gauges.</p>";
   html += "<h2>GPS</h2>";
   for (int i = 0; i < NUM_GAUGES; i++) {
     if (String(gaugeConfigs[i].ecu) == "gps") html += gaugeRowHtml(gaugeConfigs[i]);
   }
-  html += "<h2>Auxiliary Sensors (EGT, etc.)</h2>";
+  html += "<h2>Auxiliary Sensors (EGT probe, etc.)</h2>";
   for (int i = 0; i < NUM_GAUGES; i++) {
     if (String(gaugeConfigs[i].ecu) == "aux") html += gaugeRowHtml(gaugeConfigs[i]);
   }
@@ -759,26 +763,67 @@ void nextionSend(const String &cmd) {
 
 
 // =====================================================================
-// rusEFI frame handling
+// rusEFI frame handling - full DBC, every signal
 // =====================================================================
 
 void handleRusefiFrame(uint32_t id, uint8_t* d) {
   switch (id) {
+    case RUSEFI_BASE0: {
+      uint16_t warnCntV = readU16LE(d, 0);
+      uint16_t lastErrV = readU16LE(d, 2);
+      uint8_t flags = d[4]; // bit0=RevLimAct,1=MainRelayAct,2=FuelPumpAct,3=CELAct,4=EGOHeatAct,5=LambdaProtectAct,6=Fan,7=Fan2
+      uint8_t gearV = d[5];
+      uint16_t distRaw = readU16LE(d, 6);
+      float distV = distRaw * 0.1f;
+
+      nextionSend("warncnt.txt=\"" + String(warnCntV) + "\"");
+      nextionSend("lasterr.txt=\"" + String(lastErrV) + "\"");
+      nextionSend("revlim.txt=\"" + String((flags >> 0) & 1) + "\"");
+      nextionSend("mainrelay.txt=\"" + String((flags >> 1) & 1) + "\"");
+      nextionSend("fuelpump.txt=\"" + String((flags >> 2) & 1) + "\"");
+      nextionSend("cel.txt=\"" + String((flags >> 3) & 1) + "\"");
+      nextionSend("egoheat.txt=\"" + String((flags >> 4) & 1) + "\"");
+      nextionSend("lambdaprot.txt=\"" + String((flags >> 5) & 1) + "\"");
+      nextionSend("fan1.txt=\"" + String((flags >> 6) & 1) + "\"");
+      nextionSend("fan2.txt=\"" + String((flags >> 7) & 1) + "\"");
+      nextionSend("gear.txt=\"" + String(gearV) + "\"");
+      nextionSend("odo.txt=\"" + String(distV, 1) + "\"");
+      break;
+    }
     case RUSEFI_BASE1: {
       uint16_t rpm = readU16LE(d, 0);
-      // VehicleSpeed (byte6, kph) intentionally not read - mph is GPS-sourced
-      uint8_t flexPct = d[7]; // FlexPct: byte7, %
+      int16_t ignTimRaw = readS16LE(d, 2);
+      float ignTim = ignTimRaw * 0.02f;
+      uint8_t injDutyRaw = d[4];
+      float injDuty = injDutyRaw * 0.5f;
+      uint8_t ignDutyRaw = d[5];
+      float ignDuty = ignDutyRaw * 0.5f;
+      uint8_t vssRaw = d[6]; // kph
+      uint8_t flexPct = d[7]; // FlexPct: %
 
       nextionSend("rpm.txt=\"" + String(rpm) + "\"");
+      nextionSend("igntim.txt=\"" + String(ignTim, 1) + "\"");
+      nextionSend("injduty.txt=\"" + String(injDuty, 1) + "\"");
+      nextionSend("ignduty.txt=\"" + String(ignDuty, 1) + "\"");
+      nextionSend("vss.txt=\"" + String(vssRaw) + "\"");
       nextionSend("eth.txt=\"" + String(flexPct) + "\"");
       break;
     }
     case RUSEFI_BASE2: {
-      int16_t tpsRaw = readS16LE(d, 2); // TPS1: byte2-3, signed
+      int16_t ppsRaw = readS16LE(d, 0);
+      float ppsV = ppsRaw * 0.01f;
+      int16_t tpsRaw = readS16LE(d, 2); // TPS1
       float tps = tpsRaw * 0.01f;
+      int16_t tps2Raw = readS16LE(d, 4);
+      float tps2V = tps2Raw * 0.01f;
+      int16_t wgRaw = readS16LE(d, 6);
+      float wgV = wgRaw * 0.01f;
 
+      nextionSend("pps.txt=\"" + String(ppsV, 1) + "\"");
       nextionSend("tps.val=" + String((int)tps)); // progress bar, native 0-100 range
       nextionSend("tpst.txt=\"" + String(tps, 1) + "\"");
+      nextionSend("tps2.txt=\"" + String(tps2V, 1) + "\"");
+      nextionSend("wastegate.txt=\"" + String(wgV, 1) + "\"");
       break;
     }
     case RUSEFI_BASE3: {
@@ -786,127 +831,134 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float mapKpa = mapRaw * 0.0333333f;
       float boost = mapKpa - ASSUMED_BARO_KPA; // no baro signal in rusEFI DBC - fixed assumption
       int8_t cltRaw = (int8_t)d[2];
-      float clt = cToF(cltRaw - 40); // rusEFI DBC: degC, converted to degF
+      float clt = cToF(cltRaw - 40);
       int8_t matRaw = (int8_t)d[3];
-      float mat = cToF(matRaw - 40); // rusEFI DBC: degC, converted to degF
-      uint8_t fuelRaw = d[7]; // FuelLevel: byte7, x0.5, %
+      float mat = cToF(matRaw - 40);
+      int8_t aux1Raw = (int8_t)d[4];
+      float aux1V = cToF(aux1Raw - 40);
+      int8_t aux2Raw = (int8_t)d[5];
+      float aux2V = cToF(aux2Raw - 40);
+      int8_t mcuRaw = (int8_t)d[6];
+      float mcuV = cToF(mcuRaw - 40);
+      uint8_t fuelRaw = d[7]; // FuelLevel: x0.5, %
       float fuel = fuelRaw * 0.5f;
 
       nextionSend("map.txt=\"" + String(mapKpa, 1) + "\"");
-      nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
+      nextionSend("boost.txt=\"" + String(boost, 1) + "\"");
       nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
       nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
-      nextionSend("fuel.txt=\"" + String(fuel, 1) + "\""); // no Nextion component yet - web dashboard only
+      nextionSend("aux1t.txt=\"" + String(aux1V, 1) + "\"");
+      nextionSend("aux2t.txt=\"" + String(aux2V, 1) + "\"");
+      nextionSend("mcut.txt=\"" + String(mcuV, 1) + "\"");
+      nextionSend("fuel.txt=\"" + String(fuel, 1) + "\"");
       break;
     }
     case RUSEFI_BASE4: {
       uint16_t oilPressRaw = readU16LE(d, 2); // OilPress: byte2-3
       float oilPressKpa = oilPressRaw * 0.0333333f;
       int8_t oilTempRaw = (int8_t)d[4];
-      float oilTemp = cToF(oilTempRaw - 40); // rusEFI DBC: degC, converted to degF
+      float oilTemp = cToF(oilTempRaw - 40);
+      int8_t fuelTRaw = (int8_t)d[5];
+      float fuelTV = cToF(fuelTRaw - 40);
       uint16_t battRaw = readU16LE(d, 6); // BattVolt: byte6-7
       float battV = battRaw * 0.001f;
 
       nextionSend("oilp.txt=\"" + String(oilPressKpa, 1) + "\"");
       nextionSend("oilt.txt=\"" + String(oilTemp, 1) + "\"");
-      nextionSend("battv.txt=\"" + String(battV, 2) + "\""); // no Nextion component yet - web dashboard only
+      nextionSend("fuelt.txt=\"" + String(fuelTV, 1) + "\"");
+      nextionSend("battv.txt=\"" + String(battV, 2) + "\"");
+      break;
+    }
+    case RUSEFI_BASE5: {
+      uint16_t cylamV = readU16LE(d, 0);
+      uint16_t estmafRaw = readU16LE(d, 2);
+      float estmafV = estmafRaw * 0.01f;
+      uint16_t injpwRaw = readU16LE(d, 4);
+      float injpwV = injpwRaw * 0.00333333f;
+      uint16_t knockctV = readU16LE(d, 6);
+
+      nextionSend("cylam.txt=\"" + String(cylamV) + "\"");
+      nextionSend("estmaf.txt=\"" + String(estmafV, 2) + "\"");
+      nextionSend("injpw.txt=\"" + String(injpwV, 2) + "\"");
+      nextionSend("knockct.txt=\"" + String(knockctV) + "\"");
+      break;
+    }
+    case RUSEFI_BASE6: {
+      uint16_t fuelusedV = readU16LE(d, 0);
+      uint16_t fuelflowRaw = readU16LE(d, 2);
+      float fuelflowV = fuelflowRaw * 0.005f;
+      int16_t trim1Raw = readS16LE(d, 4);
+      float trim1V = trim1Raw * 0.01f;
+      int16_t trim2Raw = readS16LE(d, 6);
+      float trim2V = trim2Raw * 0.01f;
+
+      nextionSend("fuelused.txt=\"" + String(fuelusedV) + "\"");
+      nextionSend("fuelflow.txt=\"" + String(fuelflowV, 2) + "\"");
+      nextionSend("trim1.txt=\"" + String(trim1V, 1) + "\"");
+      nextionSend("trim2.txt=\"" + String(trim2V, 1) + "\"");
       break;
     }
     case RUSEFI_BASE7: {
       uint16_t lam1Raw = readU16LE(d, 0);
       float lambda = lam1Raw * 0.0001f;
       float afr = lambda * 14.7f; // gasoline stoich - adjust if E85/flex
-      uint16_t fpLowRaw = readU16LE(d, 4); // FpLow: byte4-5
+      uint16_t lam2Raw = readU16LE(d, 2);
+      float lam2V = lam2Raw * 0.0001f;
+      uint16_t fpLowRaw = readU16LE(d, 4);
       float fpLowKpa = fpLowRaw * 0.0333333f;
+      uint16_t fpHighRaw = readU16LE(d, 6);
+      float fpHighV = fpHighRaw * 0.1f;
 
       nextionSend("ego.txt=\"" + String(afr, 1) + "\"");
+      nextionSend("lam2.txt=\"" + String(lam2V, 4) + "\"");
       nextionSend("fuelp.txt=\"" + String(fpLowKpa, 1) + "\"");
+      nextionSend("fphigh.txt=\"" + String(fpHighV, 1) + "\"");
       break;
     }
     case RUSEFI_BASE8: {
-      int8_t vvtRaw = (int8_t)d[0]; // Cam1I: byte0, signed
-      nextionSend("vvt.txt=\"" + String(vvtRaw) + "\"");
+      int8_t cam1iRaw = (int8_t)d[0];
+      int8_t cam1itarRaw = (int8_t)d[1];
+      int8_t cam1eRaw = (int8_t)d[2];
+      int8_t cam1etarRaw = (int8_t)d[3];
+      int8_t cam2iRaw = (int8_t)d[4];
+      int8_t cam2itarRaw = (int8_t)d[5];
+      int8_t cam2eRaw = (int8_t)d[6];
+      int8_t cam2etarRaw = (int8_t)d[7];
+
+      nextionSend("vvt.txt=\"" + String(cam1iRaw) + "\""); // kept as "vvt" - matches existing Nextion HMI component
+      nextionSend("cam1itar.txt=\"" + String(cam1itarRaw) + "\"");
+      nextionSend("cam1e.txt=\"" + String(cam1eRaw) + "\"");
+      nextionSend("cam1etar.txt=\"" + String(cam1etarRaw) + "\"");
+      nextionSend("cam2i.txt=\"" + String(cam2iRaw) + "\"");
+      nextionSend("cam2itar.txt=\"" + String(cam2itarRaw) + "\"");
+      nextionSend("cam2e.txt=\"" + String(cam2eRaw) + "\"");
+      nextionSend("cam2etar.txt=\"" + String(cam2etarRaw) + "\"");
+      break;
+    }
+    case RUSEFI_BASE9: {
+      // Egt1-8: raw x5 = degC directly (DBC scale 5, offset 0)
+      const char* keys[8] = {"ecuegt1","ecuegt2","ecuegt3","ecuegt4","ecuegt5","ecuegt6","ecuegt7","ecuegt8"};
+      for (int i = 0; i < 8; i++) {
+        float egtC = d[i] * 5.0f;
+        float egtF = cToF(egtC);
+        nextionSend(String(keys[i]) + ".txt=\"" + String(egtF, 0) + "\"");
+      }
+      break;
+    }
+    case RUSEFI_BASE10: {
+      const char* keys[8] = {"knock0","knock1","knock2","knock3","knock4","knock5","knock6","knock7"};
+      for (int i = 0; i < 8; i++) {
+        int8_t raw = (int8_t)d[i];
+        nextionSend(String(keys[i]) + ".txt=\"" + String(raw) + "\"");
+      }
+      break;
+    }
+    case RUSEFI_BASE11: {
+      uint8_t brakeV = d[0] & 1;
+      nextionSend("brake.txt=\"" + String(brakeV) + "\"");
       break;
     }
   }
-}
-
-
-// =====================================================================
-// MegaSquirt / LinkECU shared frame handling
-// activeSecondaryProtocol only changes labeling on /config - the actual
-// parsing is identical for both, per the format-overlap noted in the
-// file header.
-// =====================================================================
-
-void handleSecondaryEcuFrame(uint32_t id, uint8_t* d) {
-  switch (id) {
-    case SEC_BLOCK0: {
-      float rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
-      nextionSend("rpm.txt=\"" + String((int)rpm) + "\"");
-      break;
-    }
-    case SEC_BLOCK2: {
-      float baro = readU16BE(d, 0) / 10.0f; // word0
-      float map_ = readU16BE(d, 2) / 10.0f; // word1
-      float mat  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
-      float clt  = cToF(readU16BE(d, 6) / 10.0f); // word3 - ASSUMES Celsius source config, not bench-confirmed
-      float boost = map_ - baro; // real baro available here, unlike rusEFI
-
-      nextionSend("map.txt=\"" + String(map_, 1) + "\"");
-      nextionSend("boost.txt=\"" + String(boost, 1) + "\""); // no Nextion component yet - web dashboard only
-      nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
-      nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
-      break;
-    }
-    case SEC_BLOCK3: {
-      float tps  = readU16BE(d, 0) / 10.0f; // word0
-      float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per source sketch, not lambda
-
-      nextionSend("tps.val=" + String((int)tps));
-      nextionSend("tpst.txt=\"" + String(tps, 1) + "\"");
-      nextionSend("ego.txt=\"" + String(ego1, 1) + "\"");
-      break;
-    }
-    case SEC_BLOCK13: {
-      float fuelp = readU16BE(d, 0) / 10.0f; // word0
-      float oilp  = readU16BE(d, 2) / 10.0f; // word1
-      float oilt  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
-
-      nextionSend("fuelp.txt=\"" + String(fuelp, 1) + "\"");
-      nextionSend("oilp.txt=\"" + String(oilp, 1) + "\"");
-      nextionSend("oilt.txt=\"" + String(oilt, 1) + "\"");
-      break;
-    }
-    case SEC_BLOCK44: {
-      float vvt = readU16BE(d, 0) / 10.0f; // word0
-      nextionSend("vvt.txt=\"" + String(vvt, 1) + "\"");
-      break;
-    }
-    case SEC_BLOCK47: {
-      float eth = readU16BE(d, 0) / 10.0f; // word0
-      nextionSend("eth.txt=\"" + String(eth, 1) + "\"");
-      break;
-    }
-  }
-}
-
-
-// =====================================================================
-// AEM X-Series wideband - UNCONFIRMED protocol, scaffolded only.
-// Do NOT trust these values without first running the CAN sniffer
-// against the actual AEM unit and comparing to its own display.
-// =====================================================================
-
-void handleAemFrame(uint32_t id, uint8_t* d) {
-  if (id != AEM_CAN_ID) return;
-  if (debugLoggingEnabled) {
-    Serial.print("AEM frame (UNCONFIRMED format) - raw bytes:");
-    for (int i = 0; i < 8; i++) Serial.printf(" %02X", d[i]);
-    Serial.println();
-  }
-  // TODO: once sniffed and confirmed, parse AFR/lambda here and
-  // nextionSend() it under a new "aem_afr" gauge key.
 }
 
 
@@ -950,11 +1002,11 @@ void updateEgt() {
   double egtC = readThermocoupleC();
   if (isnan(egtC)) {
     if (debugLoggingEnabled) Serial.println("EGT: thermocouple open/disconnected");
-    nextionSend("egt.txt=\"--\""); // web dashboard shows disconnected state too
+    nextionSend("egt.txt=\"--\"");
   } else {
     double egtF = egtC * 9.0 / 5.0 + 32.0;
     if (debugLoggingEnabled) Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
-    nextionSend("egt.txt=\"" + String(egtF, 1) + "\""); // no Nextion component yet - web dashboard only
+    nextionSend("egt.txt=\"" + String(egtF, 1) + "\"");
   }
 }
 
@@ -999,7 +1051,7 @@ void setup() {
   Serial2.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX_PIN, NEXTION_TX_PIN);
 
   gaugePrefs.begin("gauges", false); // NVS namespace "gauges" - persists across reboots
-  sysPrefs.begin("sysconf", false);  // NVS namespace "sysconf" - debug/protocol/aem settings
+  sysPrefs.begin("sysconf", false);  // NVS namespace "sysconf" - debug logging setting
   loadGaugeConfig();
 
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
@@ -1051,7 +1103,7 @@ void setup() {
   });
   webServer.begin();
 
-  Serial.println("esp32-main running - rusEFI + secondary ECU + GPS -> Nextion + web dashboard");
+  Serial.println("esp32-main running - rusEFI (full DBC) + GPS -> Nextion + web dashboard");
 }
 
 void loop() {
@@ -1062,10 +1114,6 @@ void loop() {
 
     if (id >= 0x200 && id <= 0x20B) {
       handleRusefiFrame(id, d);
-    } else if (id >= 1520 && id <= 1520 + 52) {
-      handleSecondaryEcuFrame(id, d);
-    } else if (aemEnabled && id == AEM_CAN_ID) {
-      handleAemFrame(id, d);
     }
   }
 
