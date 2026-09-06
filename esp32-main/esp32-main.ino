@@ -52,6 +52,8 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <SD.h>
+#include <SPI.h>
 #include "wifi_config.h" // create from wifi_config.h.example - not tracked in git
 
 
@@ -74,6 +76,10 @@
 #define MAX6675_CS  32
 #define MAX6675_SCK 33
 #define MAX6675_SO  34 // input-only pin - fits since this is read-only
+
+// SD card logging (SPI, default VSPI pins - SCK/MISO/MOSI not used elsewhere in this project)
+#define SD_CS_PIN 27
+#define SD_LOG_INTERVAL_MS 500
 
 
 // =====================================================================
@@ -114,6 +120,13 @@ Preferences gaugePrefs;
 Preferences sysPrefs;
 
 bool debugLoggingEnabled = false; // global OFF by default - toggle on /config
+
+// SD card logging state
+bool sdLoggingEnabled = false; // persisted, toggle on /config
+bool sdCardReady = false;      // set true in setup() if SD.begin() succeeds
+int logSessionNum = 0;
+String logFileName = "";
+unsigned long lastSdLogMs = 0;
 
 
 // =====================================================================
@@ -244,6 +257,7 @@ GaugeConfig gaugeConfigs[] = {
   { "egt",       "EGT (probe)",        "aux",    false, true, DISPLAY_NUMBER, 0,   0,    1800,   false, 0,    false, 73, 0 },
 };
 const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
+float lastNumericValue[NUM_GAUGES]; // snapshot of each gauge's last value, for SD logging
 
 int findGaugeIndex(const String &field) {
   for (int i = 0; i < NUM_GAUGES; i++) {
@@ -284,6 +298,7 @@ void loadGaugeConfig() {
     g.order        = gaugePrefs.getInt((k + "_or").c_str(), g.order);
   }
   debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
+  sdLoggingEnabled = sysPrefs.getBool("sdlog", false);
 }
 
 void saveGaugeConfig(AsyncWebServerRequest *request) {
@@ -325,6 +340,9 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
 
   debugLoggingEnabled = request->hasParam("dbglog", true);
   sysPrefs.putBool("dbglog", debugLoggingEnabled);
+
+  sdLoggingEnabled = request->hasParam("sdlog", true);
+  sysPrefs.putBool("sdlog", sdLoggingEnabled);
 }
 
 // Writes directly to a response stream for the same reason as
@@ -463,6 +481,19 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
   <div class="mini-gauges" id="miniGauges"></div>
   <div id="genericBars"></div>
   <div class="grid" id="grid"></div>
+
+  <h2 style="text-align:center;color:#4dd0e1;font-size:0.8em;letter-spacing:2px;text-transform:uppercase;margin-top:24px;">ESP32 System Info</h2>
+  <div class="grid" style="max-width:900px;">
+    <div class="tile"><div class="label">Free RAM</div><div class="value" id="v_sys_heapfree">--</div></div>
+    <div class="tile"><div class="label">Total RAM</div><div class="value" id="v_sys_heaptotal">--</div></div>
+    <div class="tile"><div class="label">CPU Speed</div><div class="value" id="v_sys_cpu">--</div></div>
+    <div class="tile"><div class="label">Flash Size</div><div class="value" id="v_sys_flash">--</div></div>
+    <div class="tile"><div class="label">Sketch Used</div><div class="value" id="v_sys_sketch">--</div></div>
+    <div class="tile"><div class="label">Sketch Free</div><div class="value" id="v_sys_freesketch">--</div></div>
+    <div class="tile"><div class="label">Chip Temp*</div><div class="value" id="v_sys_temp">--</div></div>
+  </div>
+  <p style="text-align:center;font-size:0.65em;color:#666;max-width:500px;margin:8px auto;">*ESP32's internal sensor is meant for chip calibration, not precise ambient sensing - treat as a rough indicator only.</p>
+
   <div id="ctxMenu"></div>
 
   <script>
@@ -862,6 +893,12 @@ void writeConfigPage(AsyncResponseStream *response) {
   if (debugLoggingEnabled) response->print(" checked");
   response->print(F("></div>"));
 
+  response->print(F("<div class='sys-row'><span>SD Card Logging ("));
+  response->print(sdCardReady ? "card detected" : "NOT detected");
+  response->print(F(")</span><input type='checkbox' name='sdlog'"));
+  if (sdLoggingEnabled) response->print(" checked");
+  response->print(F("></div>"));
+
   response->print(F("<h2>rusEFI</h2>"));
   for (int i = 0; i < NUM_GAUGES; i++) {
     if (String(gaugeConfigs[i].ecu) == "rusefi") response->print(gaugeRowHtml(gaugeConfigs[i]));
@@ -897,6 +934,10 @@ void nextionSend(const String &cmd) {
 
   String value = cmd.substring(eq + 1);
   value.replace("\"", "");
+
+  int idx = findGaugeIndex(field);
+  if (idx >= 0) lastNumericValue[idx] = value.toFloat(); // snapshot for SD logging
+
   String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
   ws.textAll(json);
 }
@@ -1146,6 +1187,92 @@ void updateEgt() {
 
 
 // =====================================================================
+// ESP32 system info (RAM, CPU speed, flash/sketch storage, internal temp)
+// Broadcast periodically to the web dashboard's system panel. This is
+// diagnostic/health info, not a vehicle gauge - not part of the
+// GaugeConfig system, always on, not user-toggleable.
+//
+// NOTE on temperatureRead(): the ESP32's internal temperature sensor is
+// primarily meant for chip calibration, not precise ambient sensing - it
+// commonly reads noticeably higher than actual ambient temperature.
+// Treat it as a rough health indicator, not an accurate thermometer.
+// =====================================================================
+
+unsigned long lastSysInfoMs = 0;
+const unsigned long SYS_INFO_INTERVAL_MS = 2000;
+
+void updateSystemInfo() {
+  unsigned long now = millis();
+  if (now - lastSysInfoMs < SYS_INFO_INTERVAL_MS) return;
+  lastSysInfoMs = now;
+
+  uint32_t heapFree = ESP.getFreeHeap();
+  uint32_t heapTotal = ESP.getHeapSize();
+  uint32_t cpuMhz = ESP.getCpuFreqMHz();
+  uint32_t flashSize = ESP.getFlashChipSize();
+  uint32_t sketchSize = ESP.getSketchSize();
+  uint32_t freeSketchSpace = ESP.getFreeSketchSpace();
+  float espTempC = temperatureRead(); // see caveat above - not precisely calibrated
+
+  broadcastStatus("sys_heapfree", String(heapFree / 1024) + " KB");
+  broadcastStatus("sys_heaptotal", String(heapTotal / 1024) + " KB");
+  broadcastStatus("sys_cpu", String(cpuMhz) + " MHz");
+  broadcastStatus("sys_flash", String(flashSize / 1024 / 1024) + " MB");
+  broadcastStatus("sys_sketch", String(sketchSize / 1024) + " KB");
+  broadcastStatus("sys_freesketch", String(freeSketchSpace / 1024) + " KB");
+  broadcastStatus("sys_temp", String(espTempC * 9.0f / 5.0f + 32.0f, 1) + " F");
+}
+
+
+// =====================================================================
+// SD card logging - CSV, one row per interval, all gauge values snapshot
+// via lastNumericValue[] (populated in nextionSend()).
+// =====================================================================
+
+void initSdLogging() {
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println("SD card not detected/mounted - logging unavailable");
+    sdCardReady = false;
+    return;
+  }
+  sdCardReady = true;
+
+  logSessionNum = sysPrefs.getInt("logsession", 0) + 1;
+  sysPrefs.putInt("logsession", logSessionNum);
+  logFileName = "/log_" + String(logSessionNum) + ".csv";
+
+  File f = SD.open(logFileName, FILE_WRITE);
+  if (f) {
+    String header = "millis";
+    for (int i = 0; i < NUM_GAUGES; i++) header += "," + String(gaugeConfigs[i].key);
+    f.println(header);
+    f.close();
+    Serial.println("SD logging ready: " + logFileName);
+  } else {
+    Serial.println("SD card mounted but failed to create log file");
+    sdCardReady = false;
+  }
+}
+
+void updateSdLogging() {
+  if (!sdLoggingEnabled || !sdCardReady) return;
+  unsigned long now = millis();
+  if (now - lastSdLogMs < SD_LOG_INTERVAL_MS) return;
+  lastSdLogMs = now;
+
+  File f = SD.open(logFileName, FILE_APPEND);
+  if (!f) {
+    if (debugLoggingEnabled) Serial.println("SD log write failed - could not open file");
+    return;
+  }
+  String row = String(now);
+  for (int i = 0; i < NUM_GAUGES; i++) row += "," + String(lastNumericValue[i], 3);
+  f.println(row);
+  f.close();
+}
+
+
+// =====================================================================
 // GPS handling
 // =====================================================================
 
@@ -1192,6 +1319,8 @@ void setup() {
   twai_start();
 
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+
+  initSdLogging();
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -1299,6 +1428,8 @@ void loop() {
 
   updateGps();
   updateEgt();
+  updateSystemInfo();
+  updateSdLogging();
   ws.cleanupClients();
 
   // TODO: check per-block millis() timestamps vs STALE_MS and show a

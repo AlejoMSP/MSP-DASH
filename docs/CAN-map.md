@@ -397,3 +397,36 @@ buffer before sending. Renamed buildConfigPage()->writeConfigPage() and
 buildGaugeApiJson()->writeGaugeApiJson() to reflect the new signature
 (both now take a response stream pointer and print directly to it,
 rather than returning a String).
+
+## ESP32 system info + SD card logging (2026-09-06)
+
+### System info panel
+New dashboard section showing: free/total RAM, CPU frequency, flash chip
+size, sketch storage used/free, and the ESP32's internal chip temperature
+(convert to F). Broadcast every 2s via broadcastStatus() - not part of
+the GaugeConfig system (it's diagnostic/health info, not a vehicle
+gauge), always on, not user-toggleable. NOTE: the internal temperature
+sensor (temperatureRead()) is meant for chip calibration, not precise
+ambient sensing - it commonly reads higher than actual ambient. Treat as
+a rough health indicator only, flagged as such on the dashboard itself.
+
+### SD card logging
+Hardware: any SPI microSD breakout module + a FAT32-formatted card.
+Wiring uses ESP32's default VSPI pins (SCK=18, MISO=19, MOSI=23 - not
+used elsewhere in this project) plus CS=27.
+
+Uses the ESP32 core's built-in SD library (no external install needed).
+On boot, mounts the card and creates a new session log file
+(/log_<N>.csv, N auto-incrementing via NVS so sessions never overwrite
+each other) with a header row listing every gauge key. Toggle on
+/config ("SD Card Logging") - shows whether a card was actually detected
+at boot.
+
+Every gauge's last-sent value is snapshotted into a lastNumericValue[]
+array inside nextionSend() (added a couple lines there - the only change
+to that function). Every 500ms (SD_LOG_INTERVAL_MS), if logging is
+enabled and the card mounted successfully, a CSV row (millis timestamp +
+all 74 gauge values) is appended - opened/closed per write rather than
+keeping a file handle open continuously, trading some write performance
+for better resilience against an unclean power loss (common on a car
+bench/ignition-switched setup).
