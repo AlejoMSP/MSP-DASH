@@ -173,3 +173,27 @@ boost dial. No Nextion component for "boost" exists yet - web-only for now,
 same pattern as egt/battv.
 
 Dial ranges (in dashboard JS, easy to adjust): RPM 0-8000, Boost -15 to 25.
+
+## Gauge on/off config page added (2026-09-06)
+New /config page (linked from the dashboard's gear icon) lets you toggle
+each of the 16 currently-implemented gauges on/off with checkboxes.
+Settings persist across reboots via ESP32's Preferences (NVS flash), so
+they survive power cycles.
+
+Disabling a gauge suppresses it entirely - both the Nextion display push
+AND the web dashboard update stop, since they share the same
+nextionSend() output path. The gauge's tile/dial on the web page simply
+stops updating (stays at its last value or default) rather than being
+removed from the page layout.
+
+This does NOT disable CAN parsing itself - the ESP32 still reads and
+computes every value, it just stops sending disabled ones onward. If you
+want a leaner config that also skips the CAN parsing work for disabled
+channels, that would be a further optimization, not yet done.
+
+Toggleable gauges: rpm, boost, tps (bar), tpst (text), eth, ego, fuelp,
+oilp, oilt, map, clt, mat, vvt, battv, egt, mph. This list matches exactly
+what's implemented in code - it is NOT the full set of ~40+ signals
+available in the rusEFI DBC (see the "all rusEFI CAN messages" summary
+elsewhere in this doc for the complete signal list, most of which aren't
+parsed into the sketch yet).

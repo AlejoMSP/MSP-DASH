@@ -42,6 +42,7 @@
 #include <TinyGPSPlus.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <Preferences.h>
 #include "wifi_config.h" // create from wifi_config.h.example - not tracked in git
 
 
@@ -114,6 +115,61 @@ const unsigned long STALE_MS = 2000; // blocks round-robin at different rates (r
 
 AsyncWebServer webServer(80);
 AsyncWebSocket ws("/ws");
+Preferences gaugePrefs;
+
+
+// =====================================================================
+// gauge on/off config - persisted in flash (NVS), toggled via /config page
+// Disabling a gauge stops it from updating BOTH the Nextion display and
+// the web dashboard, since they share the same nextionSend() output path.
+// =====================================================================
+
+struct GaugeConfig {
+  const char* key;   // field name, matches what nextionSend() parses out
+  const char* label; // human-readable name for the config page
+  bool enabled;
+};
+
+GaugeConfig gaugeConfigs[] = {
+  { "rpm",    "RPM",              true },
+  { "boost",  "Boost",            true },
+  { "tps",    "TPS (bar)",        true },
+  { "tpst",   "TPS (text)",       true },
+  { "eth",    "Ethanol %",        true },
+  { "ego",    "AFR",              true },
+  { "fuelp",  "Fuel Pressure",    true },
+  { "oilp",   "Oil Pressure",     true },
+  { "oilt",   "Oil Temp",         true },
+  { "map",    "MAP",              true },
+  { "clt",    "Coolant Temp",     true },
+  { "mat",    "Intake Air Temp",  true },
+  { "vvt",    "VVT Angle",        true },
+  { "battv",  "Battery Voltage",  true },
+  { "egt",    "EGT",              true },
+  { "mph",    "Speed (GPS)",      true },
+};
+const int NUM_GAUGES = sizeof(gaugeConfigs) / sizeof(gaugeConfigs[0]);
+
+bool isGaugeEnabled(const String &field) {
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    if (field == gaugeConfigs[i].key) return gaugeConfigs[i].enabled;
+  }
+  return true; // unrecognized field - default to allowed rather than silently dropping something new
+}
+
+void loadGaugeConfig() {
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    gaugeConfigs[i].enabled = gaugePrefs.getBool(gaugeConfigs[i].key, true);
+  }
+}
+
+void saveGaugeConfig(AsyncWebServerRequest *request) {
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    bool checked = request->hasParam(gaugeConfigs[i].key, true); // checkbox present in POST body = checked
+    gaugeConfigs[i].enabled = checked;
+    gaugePrefs.putBool(gaugeConfigs[i].key, checked);
+  }
+}
 
 
 // =====================================================================
@@ -182,6 +238,9 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
 <body>
   <h1>MSP-DASH Live</h1>
   <div id="status">connecting...</div>
+  <div style="text-align:center; margin-bottom:16px;">
+    <a href="/config" style="color:#4dd0e1; font-size:0.8em; text-decoration:none; border:1px solid #2a2a30; border-radius:6px; padding:6px 14px;">&#9881; Configure Gauges</a>
+  </div>
 
   <div class="hero-row">
     <div class="dial" id="dial_rpm" style="--dial-color:#4dd0e1;">
@@ -296,26 +355,66 @@ int16_t readS16BE(uint8_t* data, int offset) {
 
 
 // =====================================================================
+// gauge config page - built dynamically so checkbox states always
+// reflect current config (a static PROGMEM page can't do this)
+// =====================================================================
+
+String buildConfigPage() {
+  String html = F(
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<title>MSP-DASH Config</title><style>"
+    "body{background:#0a0a0d;color:#eee;font-family:'Segoe UI',system-ui,sans-serif;"
+    "margin:0;padding:20px;max-width:500px;margin:0 auto;}"
+    "h1{color:#4dd0e1;font-size:1.1em;letter-spacing:2px;text-transform:uppercase;}"
+    "a{color:#4dd0e1;font-size:0.85em;text-decoration:none;}"
+    ".row{display:flex;justify-content:space-between;align-items:center;"
+    "background:#16161a;border:1px solid #2a2a30;border-radius:8px;"
+    "padding:12px 16px;margin-bottom:8px;}"
+    "input[type=checkbox]{width:20px;height:20px;}"
+    "button{background:#4dd0e1;color:#0a0a0d;border:none;border-radius:8px;"
+    "padding:12px 20px;font-size:1em;font-weight:600;margin-top:16px;width:100%;}"
+    "</style></head><body>"
+    "<a href='/'>&larr; Back to Dashboard</a>"
+    "<h1>Configure Gauges</h1>"
+    "<form method='POST' action='/config'>"
+  );
+
+  for (int i = 0; i < NUM_GAUGES; i++) {
+    html += "<div class='row'><span>" + String(gaugeConfigs[i].label) + "</span>";
+    html += "<input type='checkbox' name='" + String(gaugeConfigs[i].key) + "'";
+    if (gaugeConfigs[i].enabled) html += " checked";
+    html += "></div>";
+  }
+
+  html += F("<button type='submit'>Save</button></form></body></html>");
+  return html;
+}
+
+
+// =====================================================================
 // Nextion output
 // =====================================================================
 
 void nextionSend(const String &cmd) {
+  // Parse "field.txt=\"value\"" or "field.val=value" out of the command
+  // string up front, so a disabled gauge can be skipped entirely - no
+  // Nextion write, no debug print, no web broadcast.
+  int dot = cmd.indexOf('.');
+  int eq = cmd.indexOf('=');
+  if (dot <= 0 || eq <= dot) return; // malformed command, nothing to parse - drop silently
+
+  String field = cmd.substring(0, dot);
+  if (!isGaugeEnabled(field)) return; // gauge turned off via /config - suppress entirely
+
   Serial2.print(cmd);
   Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
   Serial.println(cmd); // debug mirror - remove once display confirmed working
 
-  // Also broadcast to the web dashboard as JSON. Parse "field.txt=\"value\""
-  // or "field.val=value" out of the same command string, so every existing
-  // call site gets web support for free with no other code changes needed.
-  int dot = cmd.indexOf('.');
-  int eq = cmd.indexOf('=');
-  if (dot > 0 && eq > dot) {
-    String field = cmd.substring(0, dot);
-    String value = cmd.substring(eq + 1);
-    value.replace("\"", ""); // strip quotes if present (text fields)
-    String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
-    ws.textAll(json);
-  }
+  String value = cmd.substring(eq + 1);
+  value.replace("\"", ""); // strip quotes if present (text fields)
+  String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
+  ws.textAll(json);
 }
 
 
@@ -526,6 +625,9 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX_PIN, NEXTION_TX_PIN);
 
+  gaugePrefs.begin("gauges", false); // NVS namespace "gauges" - persists across reboots
+  loadGaugeConfig();
+
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   twai_timing_config_t t_config = CAN_BITRATE;
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -562,6 +664,13 @@ void setup() {
   webServer.addHandler(&ws);
   webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", DASHBOARD_HTML);
+  });
+  webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", buildConfigPage());
+  });
+  webServer.on("/config", HTTP_POST, [](AsyncWebServerRequest *request) {
+    saveGaugeConfig(request);
+    request->redirect("/config");
   });
   webServer.begin();
 
