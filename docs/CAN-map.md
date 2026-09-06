@@ -459,3 +459,15 @@ The .bin ends up in `esp32-main/build/esp32.esp32.esp32/`. Upload it at
 http://<esp32-ip>/update - the device reboots automatically once the
 flash completes successfully. NVS/config is untouched by this process,
 same as a USB reflash.
+
+## Save button visibility fix (2026-09-06)
+The position:fixed + transform-centered Save button approach didn't
+render visibly for the user despite the page content otherwise loading
+completely (ruled out truncation/heap issues). Rather than keep
+debugging a CSS positioning edge case blind, replaced it with a simpler,
+more robust approach: a plain (normal document flow, no fixed/sticky
+positioning) Save button right at the TOP of the form, in addition to
+the original one at the bottom. Two submit buttons in one form is valid
+HTML - either one submits the same form. This guarantees visibility
+without depending on position:fixed behaving consistently across
+browsers/devices.
