@@ -1202,6 +1202,8 @@ void updateEgt() {
 unsigned long lastSysInfoMs = 0;
 const unsigned long SYS_INFO_INTERVAL_MS = 2000;
 
+void broadcastStatus(const String &field, const String &value); // forward declaration - defined below in GPS section
+
 void updateSystemInfo() {
   unsigned long now = millis();
   if (now - lastSysInfoMs < SYS_INFO_INTERVAL_MS) return;
