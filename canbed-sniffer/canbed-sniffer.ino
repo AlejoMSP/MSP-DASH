@@ -4,8 +4,8 @@
 
   Confirmed from official docs (docs.longan-labs.cc/1030022):
     - SPI CS pin: 17
-    - Library: Longan's own Arduino library (mcp_can.h API), installed via
-      Sketch > Include Library > Add .ZIP Library
+    - Library: "mcp_canbus" by Longan Labs (Arduino Library Manager),
+      header is mcp_canbus.h (not mcp_can.h, despite what the docs example shows)
     - Board: Tools > Board > Arduino Leonardo (uses standard Leonardo bootloader)
 
   rusEFI CAN config (confirmed via TunerStudio):
@@ -19,7 +19,7 @@
 */
 
 #include <SPI.h>
-#include "mcp_can.h"
+#include "mcp_canbus.h"
 
 const int SPI_CS_PIN = 17; // confirmed CANBed pin per Longan docs
 
