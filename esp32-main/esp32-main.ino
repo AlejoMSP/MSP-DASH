@@ -129,6 +129,77 @@ int logSessionNum = 0;
 String logFileName = "";
 unsigned long lastSdLogMs = 0;
 
+// Appearance/theme settings - global, persisted, configurable on /config.
+// Affect gauge face color, needle color, overall gauge size, and the
+// center "trip computer" LCD panel's colors, cycle speed, and which
+// gauges it cycles through.
+String faceColor = "#f5f2ea";
+String needleColor = "#e74c3c";
+int sizeScalePct = 100; // 100 = default size, e.g. 50-200 range on /config
+String lcdBgColor = "#111111";
+String lcdTextColor = "#4caf50";
+unsigned long lcdCycleMs = 3000;
+String lcdSlots[4] = {"boost", "oilp", "ego", "egt"}; // gauge keys shown on the center LCD panel
+
+void loadAppearance() {
+  faceColor    = sysPrefs.getString("faceColor", faceColor);
+  needleColor  = sysPrefs.getString("needleColor", needleColor);
+  sizeScalePct = sysPrefs.getUInt("sizeScalePct", sizeScalePct);
+  lcdBgColor   = sysPrefs.getString("lcdBg", lcdBgColor);
+  lcdTextColor = sysPrefs.getString("lcdText", lcdTextColor);
+  lcdCycleMs   = sysPrefs.getULong("lcdCycleMs", lcdCycleMs);
+  for (int i = 0; i < 4; i++) {
+    lcdSlots[i] = sysPrefs.getString(("lcdSlot" + String(i)).c_str(), lcdSlots[i]);
+  }
+}
+
+void saveAppearance(AsyncWebServerRequest *request) {
+  if (request->hasParam("faceColor", true)) {
+    faceColor = request->getParam("faceColor", true)->value();
+    sysPrefs.putString("faceColor", faceColor);
+  }
+  if (request->hasParam("needleColor", true)) {
+    needleColor = request->getParam("needleColor", true)->value();
+    sysPrefs.putString("needleColor", needleColor);
+  }
+  if (request->hasParam("sizeScalePct", true)) {
+    sizeScalePct = request->getParam("sizeScalePct", true)->value().toInt();
+    sysPrefs.putUInt("sizeScalePct", sizeScalePct);
+  }
+  if (request->hasParam("lcdBg", true)) {
+    lcdBgColor = request->getParam("lcdBg", true)->value();
+    sysPrefs.putString("lcdBg", lcdBgColor);
+  }
+  if (request->hasParam("lcdText", true)) {
+    lcdTextColor = request->getParam("lcdText", true)->value();
+    sysPrefs.putString("lcdText", lcdTextColor);
+  }
+  if (request->hasParam("lcdCycleMs", true)) {
+    lcdCycleMs = request->getParam("lcdCycleMs", true)->value().toInt();
+    sysPrefs.putULong("lcdCycleMs", lcdCycleMs);
+  }
+  for (int i = 0; i < 4; i++) {
+    String pname = "lcdSlot" + String(i);
+    if (request->hasParam(pname, true)) {
+      lcdSlots[i] = request->getParam(pname, true)->value();
+      sysPrefs.putString(pname.c_str(), lcdSlots[i]);
+    }
+  }
+}
+
+String buildAppearanceApiJson() {
+  String json = "{";
+  json += "\"faceColor\":\"" + faceColor + "\",";
+  json += "\"needleColor\":\"" + needleColor + "\",";
+  json += "\"sizeScalePct\":" + String(sizeScalePct) + ",";
+  json += "\"lcdBg\":\"" + lcdBgColor + "\",";
+  json += "\"lcdText\":\"" + lcdTextColor + "\",";
+  json += "\"lcdCycleMs\":" + String(lcdCycleMs) + ",";
+  json += "\"lcdSlots\":[\"" + lcdSlots[0] + "\",\"" + lcdSlots[1] + "\",\"" + lcdSlots[2] + "\",\"" + lcdSlots[3] + "\"]";
+  json += "}";
+  return json;
+}
+
 
 // =====================================================================
 // gauge config - persisted in flash (NVS), edited via /config OR live
@@ -300,6 +371,7 @@ void loadGaugeConfig() {
   }
   debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
   sdLoggingEnabled = sysPrefs.getBool("sdlog", false);
+  loadAppearance();
 }
 
 void saveGaugeConfig(AsyncWebServerRequest *request) {
@@ -344,6 +416,8 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
 
   sdLoggingEnabled = request->hasParam("sdlog", true);
   sysPrefs.putBool("sdlog", sdLoggingEnabled);
+
+  saveAppearance(request);
 }
 
 // Writes directly to a response stream for the same reason as
@@ -393,6 +467,13 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     #status { font-size: 0.75em; color: #666; margin-bottom: 10px; text-align:center; }
     #status.connected { color: #4caf50; }
     .cfg-link { text-align:center; margin-bottom:16px; }
+    :root {
+      --face-color: #f5f2ea;
+      --needle-color: #e74c3c;
+      --lcd-bg: #111111;
+      --lcd-text: #4caf50;
+    }
+
     .cfg-link a { color:#4dd0e1; font-size:0.8em; text-decoration:none; border:1px solid #2a2a30;
                   border-radius:6px; padding:6px 14px; }
 
@@ -402,9 +483,9 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     .gauge-wrap svg { display:block; }
     .needle {
       position:absolute; top:50%; left:50%; width:4px; height:38%;
-      background: linear-gradient(to top, #c0392b, #e74c3c);
+      background: var(--needle-color);
       transform-origin: bottom center; transform: translate(-50%,-100%) rotate(-135deg);
-      border-radius: 3px 3px 0 0; box-shadow: 0 0 4px rgba(231,76,60,0.6);
+      border-radius: 3px 3px 0 0; box-shadow: 0 0 4px rgba(0,0,0,0.6);
       transition: transform 0.15s ease-out;
     }
     .needle-small { height:32%; width:3px; }
@@ -422,13 +503,13 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
                box-shadow:0 0 4px rgba(0,0,0,0.6); transition: background 0.3s ease, box-shadow 0.3s ease; }
     .gps-dot.fix { background:#4caf50; box-shadow:0 0 8px rgba(76,175,80,0.9); }
 
-    .lcd { width:120px; height:180px; background:#111; border-radius:8px; border:3px solid #333;
+    .lcd { width:120px; height:180px; background:var(--lcd-bg); border-radius:8px; border:3px solid #333;
            display:flex; flex-direction:column; align-items:center; justify-content:center;
            box-shadow: inset 0 0 10px rgba(0,0,0,0.8); }
-    .lcd-label { color:#4dd0e1; font-size:0.6em; text-transform:uppercase; letter-spacing:1px; font-family:monospace; }
-    .lcd-value { color:#4caf50; font-size:1.5em; font-family:monospace; font-weight:700;
-                 text-shadow: 0 0 6px rgba(76,175,80,0.6); margin:6px 0; }
-    .lcd-unit { color:#4caf50; font-size:0.65em; font-family:monospace; opacity:0.7; }
+    .lcd-label { color:var(--lcd-text); font-size:0.6em; text-transform:uppercase; letter-spacing:1px; font-family:monospace; }
+    .lcd-value { color:var(--lcd-text); font-size:1.5em; font-family:monospace; font-weight:700;
+                 margin:6px 0; }
+    .lcd-unit { color:var(--lcd-text); font-size:0.65em; font-family:monospace; opacity:0.7; }
 
     /* Warning light strip - sits just under the hero cluster */
     .light-strip { display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
@@ -520,7 +601,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       const range = maxVal - minVal;
       let svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
       svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r + 6) + '" fill="#111" stroke="#555" stroke-width="2"/>';
-      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#f5f2ea"/>';
+      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="var(--face-color)"/>';
 
       if (hasRedline) {
         const fFrom = (redlineFrom - minVal) / range;
@@ -565,6 +646,8 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     }
 
     let gaugeConfig = {};
+    let appearance = { sizeScalePct: 100, lcdSlots: ['boost','oilp','ego','egt'], lcdCycleMs: 3000 };
+    let sizeScale = 1.0;
     const lastValues = {};
 
     function updateNeedle(field, value) {
@@ -582,8 +665,8 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
     function buildHeroCluster() {
       const cluster = document.getElementById('cluster');
       cluster.innerHTML = '';
-      if (gaugeConfig['fuel'] && gaugeConfig['fuel'].enabled) cluster.appendChild(makeGauge('fuel', 110, gaugeConfig['fuel'], true));
-      if (gaugeConfig['rpm'] && gaugeConfig['rpm'].enabled) cluster.appendChild(makeGauge('rpm', 220, gaugeConfig['rpm'], false));
+      if (gaugeConfig['fuel'] && gaugeConfig['fuel'].enabled) cluster.appendChild(makeGauge('fuel', Math.round(110*sizeScale), gaugeConfig['fuel'], true));
+      if (gaugeConfig['rpm'] && gaugeConfig['rpm'].enabled) cluster.appendChild(makeGauge('rpm', Math.round(220*sizeScale), gaugeConfig['rpm'], false));
 
       const lcd = document.createElement('div');
       lcd.className = 'lcd';
@@ -593,34 +676,33 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       cluster.appendChild(lcd);
 
       if (gaugeConfig['mph'] && gaugeConfig['mph'].enabled) {
-        const mphWrap = makeGauge('mph', 220, gaugeConfig['mph'], false);
+        const mphWrap = makeGauge('mph', Math.round(220*sizeScale), gaugeConfig['mph'], false);
         const gpsDot = document.createElement('div');
         gpsDot.className = 'gps-dot';
         gpsDot.id = 'gps_dot';
         mphWrap.appendChild(gpsDot);
         cluster.appendChild(mphWrap);
       }
-      if (gaugeConfig['clt'] && gaugeConfig['clt'].enabled) cluster.appendChild(makeGauge('clt', 110, gaugeConfig['clt'], true));
+      if (gaugeConfig['clt'] && gaugeConfig['clt'].enabled) cluster.appendChild(makeGauge('clt', Math.round(110*sizeScale), gaugeConfig['clt'], true));
     }
 
-    const lcdStats = [
-      { field: 'boost', label: 'BOOST', unit: 'kPa' },
-      { field: 'oilp',  label: 'OIL PRESS', unit: 'kPa' },
-      { field: 'ego',   label: 'AFR', unit: '' },
-      { field: 'egt',   label: 'EGT', unit: 'F' }
-    ];
-    let lcdIndex = 0;
+    let lcdInterval = null;
     function refreshLcd() {
-      const stat = lcdStats[lcdIndex];
+      const key = appearance.lcdSlots[lcdIndex];
+      const cfg = gaugeConfig[key];
       const lbl = document.getElementById('lcd_label');
       if (lbl) {
-        lbl.textContent = stat.label;
-        document.getElementById('lcd_value').textContent = lastValues[stat.field] !== undefined ? lastValues[stat.field] : '--';
-        document.getElementById('lcd_unit').textContent = stat.unit;
+        lbl.textContent = cfg ? cfg.label.toUpperCase() : key;
+        document.getElementById('lcd_value').textContent = lastValues[key] !== undefined ? lastValues[key] : '--';
+        document.getElementById('lcd_unit').textContent = ''; // units aren't tracked per-gauge server-side
       }
-      lcdIndex = (lcdIndex + 1) % lcdStats.length;
+      lcdIndex = (lcdIndex + 1) % appearance.lcdSlots.length;
     }
-    setInterval(refreshLcd, 3000);
+    let lcdIndex = 0;
+    function startLcdCycle() {
+      if (lcdInterval) clearInterval(lcdInterval);
+      lcdInterval = setInterval(refreshLcd, appearance.lcdCycleMs);
+    }
 
     // ---- live gauge actions: close / drag reorder / right-click type change ----
     function closeGauge(key) {
@@ -716,7 +798,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
           makeInteractive(box, key, lightStrip);
           lightStrip.appendChild(box);
         } else if (cfg.displayType === 2) { // needle mini gauge
-          const g = makeGauge(key, 100, cfg, true);
+          const g = makeGauge(key, Math.round(100*sizeScale), cfg, true);
           makeInteractive(g, key, miniWrap);
           miniWrap.appendChild(g);
         } else if (cfg.displayType === 1) { // bar
@@ -778,8 +860,21 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
       } catch (e) {
         console.error('Failed to load gauge config', e);
       }
+      try {
+        const resp2 = await fetch('/api/appearance');
+        appearance = await resp2.json();
+        sizeScale = (appearance.sizeScalePct || 100) / 100;
+        const root = document.documentElement.style;
+        root.setProperty('--face-color', appearance.faceColor);
+        root.setProperty('--needle-color', appearance.needleColor);
+        root.setProperty('--lcd-bg', appearance.lcdBg);
+        root.setProperty('--lcd-text', appearance.lcdText);
+      } catch (e) {
+        console.error('Failed to load appearance config', e);
+      }
       buildHeroCluster();
       refreshLcd();
+      startLcdCycle();
       buildDynamicGauges();
       connect();
     }
@@ -900,6 +995,48 @@ void writeConfigPage(AsyncResponseStream *response) {
   response->print(F(")</span><input type='checkbox' name='sdlog'"));
   if (sdLoggingEnabled) response->print(" checked");
   response->print(F("></div>"));
+
+  response->print(F("<h2>Appearance</h2>"));
+  response->print(F("<div class='gauge-row'><div class='gr-fields'>"));
+  response->print(F("<label>Gauge Face Color<input type='color' name='faceColor' value='"));
+  response->print(faceColor);
+  response->print(F("'></label>"));
+  response->print(F("<label>Needle Color<input type='color' name='needleColor' value='"));
+  response->print(needleColor);
+  response->print(F("'></label>"));
+  response->print(F("<label>Gauge Size (%)<input type='number' name='sizeScalePct' min='50' max='200' value='"));
+  response->print(sizeScalePct);
+  response->print(F("'></label>"));
+  response->print(F("<label>LCD Background<input type='color' name='lcdBg' value='"));
+  response->print(lcdBgColor);
+  response->print(F("'></label>"));
+  response->print(F("<label>LCD Text Color<input type='color' name='lcdText' value='"));
+  response->print(lcdTextColor);
+  response->print(F("'></label>"));
+  response->print(F("<label>LCD Cycle Speed (ms)<input type='number' name='lcdCycleMs' min='500' step='500' value='"));
+  response->print(lcdCycleMs);
+  response->print(F("'></label>"));
+  response->print(F("</div></div>"));
+
+  response->print(F("<div class='gauge-row'><div class='gr-head'>Center LCD Panel Contents</div><div class='gr-fields'>"));
+  for (int slot = 0; slot < 4; slot++) {
+    response->print(F("<label>Slot "));
+    response->print(slot + 1);
+    response->print(F("<select name='lcdSlot"));
+    response->print(slot);
+    response->print(F("'>"));
+    for (int i = 0; i < NUM_GAUGES; i++) {
+      response->print(F("<option value='"));
+      response->print(gaugeConfigs[i].key);
+      response->print(F("'"));
+      if (lcdSlots[slot] == String(gaugeConfigs[i].key)) response->print(F(" selected"));
+      response->print(F(">"));
+      response->print(gaugeConfigs[i].label);
+      response->print(F("</option>"));
+    }
+    response->print(F("</select></label>"));
+  }
+  response->print(F("</div></div>"));
 
   response->print(F("<h2>rusEFI</h2>"));
   for (int i = 0; i < NUM_GAUGES; i++) {
@@ -1359,6 +1496,9 @@ void setup() {
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     writeGaugeApiJson(response);
     request->send(response);
+  });
+  webServer.on("/api/appearance", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", buildAppearanceApiJson());
   });
   webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
     AsyncResponseStream *response = request->beginResponseStream("text/html");

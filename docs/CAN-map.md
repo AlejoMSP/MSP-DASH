@@ -471,3 +471,32 @@ the original one at the bottom. Two submit buttons in one form is valid
 HTML - either one submits the same form. This guarantees visibility
 without depending on position:fixed behaving consistently across
 browsers/devices.
+
+## Appearance/theme system: colors, size scale, configurable LCD panel (2026-09-06)
+
+New "Appearance" section on /config, global (applies to the whole
+dashboard, not per-gauge):
+- Gauge face color (color picker, default #f5f2ea)
+- Needle color (color picker, default #e74c3c) - simplified from the
+  original two-tone gradient to a solid configurable color
+- Gauge size scale (%, 50-200 range, default 100) - multiplies every
+  gauge's pixel size (hero rpm/mph at 220px, hero fuel/clt and mini
+  gauges at 110px/100px) by this factor
+- LCD panel background color and text color (color pickers)
+- LCD cycle speed (ms, default 3000)
+- LCD panel contents: 4 dropdown slots, each selectable from any of the
+  74 gauges (previously hardcoded to boost/oilp/ego/egt)
+
+Implementation: colors applied via CSS custom properties
+(--face-color, --needle-color, --lcd-bg, --lcd-text) set on
+document.documentElement at page load from a new GET /api/appearance
+JSON endpoint, referenced in the stylesheet and in buildGaugeFace()'s
+SVG fill attribute (inline SVG can reference CSS variables). Size scale
+is a JS multiplier (sizeScale = sizeScalePct/100) applied at each
+makeGauge() call site. All settings persist in NVS (sysPrefs), saved via
+the same /config form/POST as everything else.
+
+Known simplification: since units aren't tracked per-gauge server-side,
+the LCD panel no longer shows a unit suffix for user-selected slots
+(previously hardcoded per hardcoded stat, e.g. "kPa" for boost) - just
+the label and value.
