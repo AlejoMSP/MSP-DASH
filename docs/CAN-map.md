@@ -51,3 +51,27 @@ the bench harness. The CAN protocol and scale factors are now fully
 confirmed and ready to use the moment real sensors are connected - no
 further reverse-engineering needed for these signals. TPS1, MAP, RPM,
 BattVolt, and MCUTemp are already wired, confirmed, and correct.
+
+## HMI realignment (2026-09-06)
+The real Nextion HMI is a 12-field digital 7-segment dashboard (not analog
+dials as originally planned). Component names and sources, confirmed
+against the actual Editor build:
+
+| Component | Signal | Block | Formula |
+|---|---|---|---|
+| rpm | RPM | 0x201 | raw x 1 |
+| mph | VehicleSpeed | 0x201 | raw x 0.621371 (DBC gives kph) |
+| tps (bar) + tpst (text) | TPS1 | 0x202 | raw x 0.01 (%) |
+| eth | FlexPct | 0x201 | raw x 1 (%) |
+| ego | Lam1 | 0x207 | lambda x 14.7 = AFR (gasoline stoich assumed) |
+| fuelp | FpLow | 0x207 | raw x 0.0333333 (kPa) - assumes port injection, not GDI |
+| oilp | OilPress | 0x204 | raw x 0.0333333 (kPa) |
+| oilt | OilTemperature | 0x204 | raw - 40 (degC) |
+| map | MAP | 0x203 | raw x 0.0333333 (kPa) |
+| clt | CoolantTemp | 0x203 | raw - 40 (degC) |
+| mat | IntakeTemp | 0x203 | raw - 40 (degC) |
+| vvt | Cam1I | 0x208 | raw x 1 (deg, signed) - closest DBC signal to VVT angle |
+
+esp32-main.ino rewritten to push these 12 fields directly via .txt/.val
+commands - no gauge-angle math needed since the display is digital readouts,
+not analog dials.
