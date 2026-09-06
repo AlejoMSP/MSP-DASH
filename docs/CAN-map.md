@@ -84,3 +84,46 @@ dashboard is now sourced from GPS speed instead of rusEFI's VehicleSpeed
 to the display. Sent to the display at a steady ~4Hz regardless of the
 GPS module's actual fix update rate; shows "--" until a valid fix is
 acquired.
+
+## MegaSquirt support added (2026-09-06)
+esp32-main.ino now supports BOTH rusEFI and MegaSquirt in the same sketch -
+no mode switch needed, since their CAN ID ranges don't overlap (rusEFI:
+0x200-0x20B / 512-523 decimal; MegaSquirt: 1520+N decimal / 0x5F0+N).
+Whichever ECU is physically connected is simply the one whose frames
+appear and get parsed.
+
+MegaSquirt byte order is BIG-ENDIAN (opposite of rusEFI's little-endian).
+Scale factors and block layout are taken from a previously working
+reference sketch (not independently bench-verified in this project). If
+you switch to MegaSquirt, running the CAN sniffer against it once - same
+sniff-and-compare method used to confirm rusEFI - is worth doing before
+fully trusting these values in the same way RPM/MAP/TPS1/BattVolt are now
+trusted for rusEFI.
+
+| Component | MegaSquirt block | Formula |
+|---|---|---|
+| rpm | 1520+0, word3 | raw x 1 |
+| map | 1520+2, word1 | raw / 10 (kPa) |
+| mat | 1520+2, word2 | raw / 10 |
+| clt | 1520+2, word3 | raw / 10 |
+| tps / tpst | 1520+3, word0 | raw / 10 (%) |
+| ego | 1520+3, word2 | raw / 10 (already AFR units per source, not lambda) |
+| fuelp | 1520+13, word0 | raw / 10 |
+| oilp | 1520+13, word1 | raw / 10 |
+| oilt | 1520+13, word2 | raw / 10 |
+| vvt | 1520+44, word0 | raw / 10 |
+| eth | 1520+47, word0 | raw / 10 |
+| mph | not used | GPS-sourced regardless of ECU |
+
+Boost calc differs by ECU: rusEFI uses the fixed 101.3 kPa assumption
+(no baro signal available); MegaSquirt broadcasts real BARO in the same
+block as MAP (1520+2, word0), so boost = MAP - BARO using live data - more
+accurate than the rusEFI fixed-constant approach.
+
+## esp32-main.ino reorganized into clear sections
+File is now split into labeled banner sections: includes, pin/wiring
+config, rusEFI CAN IDs, MegaSquirt CAN IDs, globals, byte-reading helpers,
+Nextion output, rusEFI frame handling, MegaSquirt frame handling, GPS
+handling, setup/loop. Frame parsing for each ECU lives in its own function
+(handleRusefiFrame / handleMegasquirtFrame) called from loop() based on
+the incoming CAN ID range.
