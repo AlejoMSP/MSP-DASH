@@ -327,25 +327,26 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
   sysPrefs.putBool("dbglog", debugLoggingEnabled);
 }
 
-String buildGaugeApiJson() {
-  String json = "[";
+// Writes directly to a response stream for the same reason as
+// writeConfigPage() - avoids repeated String reallocation across 74 rows.
+void writeGaugeApiJson(AsyncResponseStream *response) {
+  response->print("[");
   for (int i = 0; i < NUM_GAUGES; i++) {
     GaugeConfig &g = gaugeConfigs[i];
-    if (i > 0) json += ",";
-    json += "{\"key\":\"" + String(g.key) + "\",";
-    json += "\"label\":\"" + String(g.label) + "\",";
-    json += "\"isHero\":" + String(g.isHero ? "true" : "false") + ",";
-    json += "\"enabled\":" + String(g.enabled ? "true" : "false") + ",";
-    json += "\"displayType\":" + String(g.displayType) + ",";
-    json += "\"min\":" + String(g.minVal, 2) + ",";
-    json += "\"max\":" + String(g.maxVal, 2) + ",";
-    json += "\"hasRedline\":" + String(g.hasRedline ? "true" : "false") + ",";
-    json += "\"redline\":" + String(g.redline, 2) + ",";
-    json += "\"order\":" + String(g.order);
-    json += "}";
+    if (i > 0) response->print(",");
+    response->print("{\"key\":\"" + String(g.key) + "\",");
+    response->print("\"label\":\"" + String(g.label) + "\",");
+    response->print("\"isHero\":" + String(g.isHero ? "true" : "false") + ",");
+    response->print("\"enabled\":" + String(g.enabled ? "true" : "false") + ",");
+    response->print("\"displayType\":" + String(g.displayType) + ",");
+    response->print("\"min\":" + String(g.minVal, 2) + ",");
+    response->print("\"max\":" + String(g.maxVal, 2) + ",");
+    response->print("\"hasRedline\":" + String(g.hasRedline ? "true" : "false") + ",");
+    response->print("\"redline\":" + String(g.redline, 2) + ",");
+    response->print("\"order\":" + String(g.order));
+    response->print("}");
   }
-  json += "]";
-  return json;
+  response->print("]");
 }
 
 
@@ -820,8 +821,11 @@ String gaugeRowHtml(GaugeConfig &g) {
   return row;
 }
 
-String buildConfigPage() {
-  String html = F(
+// Writes the config page directly to a response stream instead of
+// building one giant String in RAM - avoids the heap fragmentation that
+// was causing /config to come back blank once the gauge count grew to 74.
+void writeConfigPage(AsyncResponseStream *response) {
+  response->print(F(
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width, initial-scale=1'>"
     "<title>MSP-DASH Config</title><style>"
@@ -854,25 +858,24 @@ String buildConfigPage() {
     "<h2>System</h2>"
     "<div class='sys-row'><span>Serial Debug Logging (all gauges)</span>"
     "<input type='checkbox' name='dbglog'"
-  );
-  if (debugLoggingEnabled) html += " checked";
-  html += F("></div>");
+  ));
+  if (debugLoggingEnabled) response->print(" checked");
+  response->print(F("></div>"));
 
-  html += "<h2>rusEFI</h2>";
+  response->print(F("<h2>rusEFI</h2>"));
   for (int i = 0; i < NUM_GAUGES; i++) {
-    if (String(gaugeConfigs[i].ecu) == "rusefi") html += gaugeRowHtml(gaugeConfigs[i]);
+    if (String(gaugeConfigs[i].ecu) == "rusefi") response->print(gaugeRowHtml(gaugeConfigs[i]));
   }
-  html += "<h2>GPS</h2>";
+  response->print(F("<h2>GPS</h2>"));
   for (int i = 0; i < NUM_GAUGES; i++) {
-    if (String(gaugeConfigs[i].ecu) == "gps") html += gaugeRowHtml(gaugeConfigs[i]);
+    if (String(gaugeConfigs[i].ecu) == "gps") response->print(gaugeRowHtml(gaugeConfigs[i]));
   }
-  html += "<h2>Auxiliary Sensors (EGT probe, etc.)</h2>";
+  response->print(F("<h2>Auxiliary Sensors (EGT probe, etc.)</h2>"));
   for (int i = 0; i < NUM_GAUGES; i++) {
-    if (String(gaugeConfigs[i].ecu) == "aux") html += gaugeRowHtml(gaugeConfigs[i]);
+    if (String(gaugeConfigs[i].ecu) == "aux") response->print(gaugeRowHtml(gaugeConfigs[i]));
   }
 
-  html += F("<button type='submit'>Save</button></form></body></html>");
-  return html;
+  response->print(F("<button type='submit'>Save</button></form></body></html>"));
 }
 
 
@@ -1220,10 +1223,14 @@ void setup() {
     request->send_P(200, "text/html", DASHBOARD_HTML);
   });
   webServer.on("/api/gauges", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", buildGaugeApiJson());
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    writeGaugeApiJson(response);
+    request->send(response);
   });
   webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", buildConfigPage());
+    AsyncResponseStream *response = request->beginResponseStream("text/html");
+    writeConfigPage(response);
+    request->send(response);
   });
   webServer.on("/config", HTTP_POST, [](AsyncWebServerRequest *request) {
     saveGaugeConfig(request);

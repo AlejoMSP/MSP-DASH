@@ -386,3 +386,14 @@ New GaugeConfig fields: debugEnabled (persisted "_dbg"), order (persisted
 endpoints: GET /api/gauge/set, GET /api/gauge/type, GET /api/gauge/order
 - all separate from the full /config form POST, so the dashboard can make
 lightweight live changes without a full page reload.
+
+## Fix: /config blank page (heap fragmentation) (2026-09-06)
+With 74 gauges, building the /config page and /api/gauges JSON as one
+giant String via repeated += concatenation was fragmenting/exhausting
+ESP32 heap badly enough that the response came back empty. Fixed by
+switching both to a streaming response (AsyncResponseStream, written to
+incrementally row-by-row) instead of accumulating one large String
+buffer before sending. Renamed buildConfigPage()->writeConfigPage() and
+buildGaugeApiJson()->writeGaugeApiJson() to reflect the new signature
+(both now take a response stream pointer and print directly to it,
+rather than returning a String).
