@@ -75,3 +75,12 @@ against the actual Editor build:
 esp32-main.ino rewritten to push these 12 fields directly via .txt/.val
 commands - no gauge-angle math needed since the display is digital readouts,
 not analog dials.
+
+## GPS speed (2026-09-06)
+Added a GT-U7 (NEO-6M chipset) GPS module on ESP32 UART1 (pins 4/5,
+9600 baud NMEA), parsed via TinyGPSPlus. The `mph` field on the Nextion
+dashboard is now sourced from GPS speed instead of rusEFI's VehicleSpeed
+(VSS) signal - the VSS byte is still read from CAN but no longer pushed
+to the display. Sent to the display at a steady ~4Hz regardless of the
+GPS module's actual fix update rate; shows "--" until a valid fix is
+acquired.

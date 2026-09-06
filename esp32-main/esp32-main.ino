@@ -18,13 +18,30 @@
     ESP32 GPIO21 -> CAN transceiver TX
     ESP32 GPIO22 -> CAN transceiver RX
     ESP32 UART2 (TX2/RX2, pins 17/16) -> Nextion RX/TX
+    ESP32 UART1 (pins 4/5) -> GPS module (GT-U7, NEO-6M chipset, 9600 baud NMEA)
+    GPS TX -> ESP32 GPIO4
+    GPS RX -> ESP32 GPIO5
+
+  mph is now sourced from GPS speed (TinyGPSPlus), not rusEFI's
+  VehicleSpeed/VSS signal - the VSS byte is still parsed from CAN but no
+  longer pushed to the mph field.
 */
 
 #include "driver/twai.h"
+#include <TinyGPSPlus.h>
 
 #define CAN_TX_PIN GPIO_NUM_21
 #define CAN_RX_PIN GPIO_NUM_22
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
+
+#define GPS_RX_PIN 4 // ESP32 pin receiving GPS module's TX
+#define GPS_TX_PIN 5 // ESP32 pin driving GPS module's RX
+#define GPS_BAUD 9600
+
+HardwareSerial gpsSerial(1);
+TinyGPSPlus gps;
+unsigned long lastGpsSend = 0;
+const unsigned long GPS_SEND_INTERVAL_MS = 250; // ~4Hz display update, independent of GPS fix rate
 
 // Confirmed rusEFI CAN IDs (base 0x200)
 #define ID_BASE1 0x201 // RPM, IgnitionTiming, InjDuty, IgnDuty, VehicleSpeed, FlexPct
@@ -60,7 +77,9 @@ void setup() {
   twai_driver_install(&g_config, &t_config, &f_config);
   twai_start();
 
-  Serial.println("esp32-main running - decoding rusEFI CAN -> Nextion digital dashboard");
+  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+
+  Serial.println("esp32-main running - decoding rusEFI CAN + GPS -> Nextion digital dashboard");
 }
 
 void loop() {
@@ -71,13 +90,13 @@ void loop() {
     switch (message.identifier) {
       case ID_BASE1: {
         uint16_t rpm = readU16LE(d, 0);
-        int16_t vssRaw = (int16_t)d[6]; // VehicleSpeed: byte6, kph
-        float mph = vssRaw * 0.621371f;
+        // VehicleSpeed (byte6, kph) from rusEFI - no longer used for mph,
+        // GPS is now the speed source. Left unread since unused.
         uint8_t flexPct = d[7]; // FlexPct: byte7, %
 
         nextionSend("rpm.txt=\"" + String(rpm) + "\"");
-        nextionSend("mph.txt=\"" + String(mph, 0) + "\"");
         nextionSend("eth.txt=\"" + String(flexPct) + "\"");
+        // mph no longer sent here - now sourced from GPS, see loop()
         break;
       }
       case ID_BASE2: {
@@ -127,6 +146,22 @@ void loop() {
         nextionSend("vvt.txt=\"" + String(vvtRaw) + "\"");
         break;
       }
+    }
+  }
+
+  // Feed GPS parser continuously
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+  }
+
+  // Push GPS speed to the display at a steady rate, independent of GPS fix update rate
+  unsigned long now = millis();
+  if (now - lastGpsSend >= GPS_SEND_INTERVAL_MS) {
+    lastGpsSend = now;
+    if (gps.speed.isValid()) {
+      nextionSend("mph.txt=\"" + String(gps.speed.mph(), 0) + "\"");
+    } else {
+      nextionSend("mph.txt=\"--\""); // no GPS fix yet
     }
   }
 
