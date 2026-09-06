@@ -140,3 +140,20 @@ integration deferred until a field/page is designated for it. Reads every
 500ms (MAX6675 needs ~220ms minimum between conversions per datasheet).
 Reports NAN / "thermocouple open/disconnected" if bit 2 of the raw read
 is set, per MAX6675's open-circuit detection.
+
+## Web dashboard added (2026-09-06)
+Hosts a live WebSocket-based dashboard over WiFi (STA mode, joins existing
+network - credentials in a git-ignored esp32-main/wifi_config.h, copy from
+wifi_config.h.example). Libraries: "ESP Async WebServer" + "Async TCP"
+(both by ESP32Async, the actively maintained fork family - not the older
+dvarrel/me-no-dev forks, to avoid version mismatches).
+
+Implementation: nextionSend() was extended to also parse the same command
+it sends to the Nextion display and broadcast it as JSON over WebSocket -
+every existing call site gets web support for free, no other code changes
+needed. The web page (served at http://<esp32-ip>/) shows MORE fields than
+the physical 12-slot Nextion display: egt and battv are included on the
+web dashboard even though neither has a Nextion component yet (Nextion
+silently ignores field names it doesn't recognize, so this is safe).
+
+Web page auto-reconnects on WebSocket disconnect (2s retry loop).

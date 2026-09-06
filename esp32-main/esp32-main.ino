@@ -23,7 +23,14 @@
   See docs/CAN-map.md for full signal tables and confirmation history.
 
   Also reads EGT via a MAX6675 + K-type thermocouple (bit-banged,
-  console-only for now - not yet on the Nextion display).
+  console-only + web dashboard for now - not yet on the Nextion display).
+
+  Also hosts a live web dashboard over WiFi (join existing network, per
+  wifi_config.h - see wifi_config.h.example) using ESP Async WebServer +
+  Async TCP, pushing every value over WebSocket as it's parsed. The web
+  page shows more fields than the physical Nextion display (which is
+  fixed at 12 slots) - EGT and BattVolt included, since Nextion silently
+  ignores field names it has no component for.
 */
 
 
@@ -33,6 +40,9 @@
 
 #include "driver/twai.h"
 #include <TinyGPSPlus.h>
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include "wifi_config.h" // create from wifi_config.h.example - not tracked in git
 
 
 // =====================================================================
@@ -102,6 +112,67 @@ const unsigned long GPS_SEND_INTERVAL_MS = 250; // ~4Hz display update, independ
 
 const unsigned long STALE_MS = 2000; // blocks round-robin at different rates (rusEFI); reserved for future staleness check
 
+AsyncWebServer webServer(80);
+AsyncWebSocket ws("/ws");
+
+
+// =====================================================================
+// web dashboard - served HTML page
+// Shows more fields than the physical Nextion display (fixed at 12
+// slots): includes egt and battv, which have no Nextion component yet.
+// =====================================================================
+
+static const char DASHBOARD_HTML[] PROGMEM = R"HTMLPAGE(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Live</title>
+  <style>
+    body { background:#111; color:#0f0; font-family: monospace; margin:0; padding:16px; }
+    h1 { color:#0ff; font-size:1.2em; margin:0 0 16px 0; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
+    .tile { background:#000; border:1px solid #0f0; border-radius:6px; padding:10px; text-align:center; }
+    .label { color:#0ff; font-size:0.8em; text-transform:uppercase; }
+    .value { font-size:1.6em; margin-top:4px; }
+    #status { font-size:0.8em; color:#888; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+  <h1>MSP-DASH Live</h1>
+  <div id="status">connecting...</div>
+  <div class="grid" id="grid"></div>
+  <script>
+    const fields = ["rpm","mph","tps","tpst","eth","ego","fuelp","oilp","oilt","map","clt","mat","vvt","battv","egt"];
+    const grid = document.getElementById("grid");
+    fields.forEach(f => {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.innerHTML = '<div class="label">' + f + '</div><div class="value" id="v_' + f + '">--</div>';
+      grid.appendChild(tile);
+    });
+
+    let ws;
+    function connect() {
+      ws = new WebSocket("ws://" + location.host + "/ws");
+      ws.onopen = () => { document.getElementById("status").textContent = "connected"; };
+      ws.onclose = () => { document.getElementById("status").textContent = "disconnected - retrying..."; setTimeout(connect, 2000); };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          const el = document.getElementById("v_" + msg.field);
+          if (el) el.textContent = msg.value;
+        } catch (e) { /* ignore malformed messages */ }
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>
+)HTMLPAGE";
+
 
 // =====================================================================
 // byte-reading helpers
@@ -132,6 +203,19 @@ void nextionSend(const String &cmd) {
   Serial2.print(cmd);
   Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
   Serial.println(cmd); // debug mirror - remove once display confirmed working
+
+  // Also broadcast to the web dashboard as JSON. Parse "field.txt=\"value\""
+  // or "field.val=value" out of the same command string, so every existing
+  // call site gets web support for free with no other code changes needed.
+  int dot = cmd.indexOf('.');
+  int eq = cmd.indexOf('=');
+  if (dot > 0 && eq > dot) {
+    String field = cmd.substring(0, dot);
+    String value = cmd.substring(eq + 1);
+    value.replace("\"", ""); // strip quotes if present (text fields)
+    String json = "{\"field\":\"" + field + "\",\"value\":\"" + value + "\"}";
+    ws.textAll(json);
+  }
 }
 
 
@@ -177,9 +261,12 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
       float oilPressKpa = oilPressRaw * 0.0333333f;
       int8_t oilTempRaw = (int8_t)d[4];
       float oilTemp = oilTempRaw - 40;
+      uint16_t battRaw = readU16LE(d, 6); // BattVolt: byte6-7
+      float battV = battRaw * 0.001f;
 
       nextionSend("oilp.txt=\"" + String(oilPressKpa, 1) + "\"");
       nextionSend("oilt.txt=\"" + String(oilTemp, 1) + "\"");
+      nextionSend("battv.txt=\"" + String(battV, 2) + "\""); // no Nextion component yet - web dashboard only
       break;
     }
     case RUSEFI_BASE7: {
@@ -299,9 +386,11 @@ void updateEgt() {
   double egtC = readThermocoupleC();
   if (isnan(egtC)) {
     Serial.println("EGT: thermocouple open/disconnected");
+    nextionSend("egt.txt=\"--\""); // web dashboard shows disconnected state too
   } else {
     double egtF = egtC * 9.0 / 5.0 + 32.0;
     Serial.printf("EGT = %.1f C (%.1f F)\n", egtC, egtF);
+    nextionSend("egt.txt=\"" + String(egtC, 1) + "\""); // no Nextion component yet - web dashboard only
   }
 }
 
@@ -343,7 +432,38 @@ void setup() {
 
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
-  Serial.println("esp32-main running - rusEFI + MegaSquirt + GPS -> Nextion digital dashboard");
+  // WiFi + web dashboard
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi");
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.print("WiFi connected, IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println();
+    Serial.println("WiFi connect failed/timed out - web dashboard unavailable, continuing anyway");
+  }
+
+  ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    if (type == WS_EVT_CONNECT) {
+      Serial.printf("Web client #%u connected\n", client->id());
+    } else if (type == WS_EVT_DISCONNECT) {
+      Serial.printf("Web client #%u disconnected\n", client->id());
+    }
+  });
+  webServer.addHandler(&ws);
+  webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", DASHBOARD_HTML);
+  });
+  webServer.begin();
+
+  Serial.println("esp32-main running - rusEFI + MegaSquirt + GPS -> Nextion digital dashboard + web");
 }
 
 void loop() {
@@ -361,6 +481,7 @@ void loop() {
 
   updateGps();
   updateEgt();
+  ws.cleanupClients();
 
   // TODO: check per-block millis() timestamps vs STALE_MS and show a
   // "no data" indicator on the Nextion side if a channel goes stale.
