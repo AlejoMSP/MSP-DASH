@@ -63,7 +63,11 @@ void setup() {
   // partial rendering is a classic signal-integrity symptom at high
   // speed, especially over jumper-wire connections rather than a
   // soldered/direct connection. Testing 20MHz first.
-  if (!gfx->begin(20000000)) {
+  // Dropping further: 40MHz was badly corrupted, 20MHz cleaned up the
+  // solid fills but text (more sensitive to signal integrity - needs
+  // pixel-exact accuracy vs one repeated color) was still dithered.
+  // Testing 10MHz next.
+  if (!gfx->begin(10000000)) {
     Serial.println("gfx->begin() FAILED");
   } else {
     Serial.println("gfx->begin() succeeded");
