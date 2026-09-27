@@ -16,9 +16,15 @@
 
   Performance note: a full 466x466 16-bit-color frame is ~434KB - at our
   confirmed 10MHz QSPI (quad-lane) speed, a full-screen redraw takes
-  longer than a smooth update interval would allow. Instead of clearing
-  the whole screen every frame, this only clears a fixed-size rectangle
-  behind the text (~36KB) - fast enough for smooth continuous updates.
+  longer than a smooth update interval would allow.
+
+  Tearing fix: originally this cleared a rectangle then drew text as TWO
+  separate write operations - if the panel's internal refresh happened
+  between those two writes, you'd see a torn frame (half-cleared, text
+  not yet drawn). Fixed by using an OPAQUE background text color
+  (setTextColor(fg, bg)) instead of a separate clear pass - each
+  character glyph overwrites its own old pixels in one operation, so
+  there's only ever one write per frame instead of two.
 */
 
 #include <Arduino_GFX_Library.h>
@@ -40,7 +46,8 @@ Arduino_GFX *gfx = new Arduino_CO5300(
   7, 7, 7, 7 /* centering offset - see header note */);
 
 const uint8_t TEXT_SIZE = 6;
-const int16_t CLEAR_X = 60, CLEAR_Y = 190, CLEAR_W = 350, CLEAR_H = 70;
+const int16_t TEXT_X = 70, TEXT_Y = 205;
+const uint8_t FIELD_WIDTH = 10; // fixed width, space-padded - guarantees old digits always fully overwritten
 
 unsigned long lastDraw = 0;
 const unsigned long DRAW_INTERVAL_MS = 50; // ~20 updates/sec
@@ -60,6 +67,9 @@ void setup() {
   }
 
   gfx->fillScreen(0x0000); // one-time full clear at boot only
+
+  gfx->setTextColor(0xFFFF, 0x0000); // opaque: white text on black background
+  gfx->setTextSize(TEXT_SIZE);
 }
 
 void loop() {
@@ -70,15 +80,15 @@ void loop() {
   unsigned long secs = now / 1000;
   unsigned int millisPart = now % 1000;
 
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%lu.%03u", secs, millisPart);
+  char raw[16];
+  snprintf(raw, sizeof(raw), "%lu.%03u", secs, millisPart);
 
-  // Clear only the text region, not the whole screen - keeps this fast
-  // enough for smooth updates at our confirmed 10MHz QSPI speed.
-  gfx->fillRect(CLEAR_X, CLEAR_Y, CLEAR_W, CLEAR_H, 0x0000);
+  // Pad to a fixed width with trailing spaces - since the background is
+  // now opaque, the space characters overwrite any leftover old digits
+  // in the same single print() call, no separate clear needed.
+  char buf[FIELD_WIDTH + 1];
+  snprintf(buf, sizeof(buf), "%-*s", FIELD_WIDTH, raw);
 
-  gfx->setTextColor(0xFFFF);
-  gfx->setTextSize(TEXT_SIZE);
-  gfx->setCursor(CLEAR_X + 10, CLEAR_Y + 15);
+  gfx->setCursor(TEXT_X, TEXT_Y);
   gfx->print(buf);
 }
