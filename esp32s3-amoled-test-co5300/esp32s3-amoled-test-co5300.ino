@@ -65,17 +65,20 @@ void setup() {
     Serial.println("gfx->begin() succeeded");
   }
 
-  // Color bar test pattern - easy to visually confirm correct rendering
-  gfx->fillScreen(RED);
+  // Color bar test pattern - easy to visually confirm correct rendering.
+  // Using raw RGB565 hex instead of named color constants (RED/GREEN/etc)
+  // since this library version doesn't define those macros the way expected.
+  // 0xF800=red, 0x07E0=green, 0x001F=blue, 0x0000=black, 0xFFFF=white
+  gfx->fillScreen(0xF800);
   delay(1000);
-  gfx->fillScreen(GREEN);
+  gfx->fillScreen(0x07E0);
   delay(1000);
-  gfx->fillScreen(BLUE);
+  gfx->fillScreen(0x001F);
   delay(1000);
-  gfx->fillScreen(BLACK);
+  gfx->fillScreen(0x0000);
 
   gfx->setCursor(80, 220);
-  gfx->setTextColor(WHITE);
+  gfx->setTextColor(0xFFFF);
   gfx->setTextSize(3);
   gfx->println("CO5300");
   gfx->setCursor(60, 260);
