@@ -48,14 +48,12 @@ Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   AMOLED_CS, AMOLED_SCK, AMOLED_D0, AMOLED_D1, AMOLED_D2, AMOLED_D3);
 
 Arduino_GFX *gfx = new Arduino_CO5300(
-  bus, AMOLED_RST, 0 /* rotation */, 480 /* width - class default, NOT 466 */, 480 /* height - class default, NOT 466 */,
-  0, 0, 0, 0 /* col/row offsets - untuned. Using 480x480 (class default,
-              not the advertised 466x466 visible resolution) since a
-              persistent green sliver appeared regardless of clock speed,
-              suggesting a buffer-size mismatch: the real VRAM is likely
-              480x480 with the round 466px visible area centered inside
-              it (offset would be (480-466)/2=7px each side if that's
-              needed later; testing 0,0,0,0 with the corrected size first) */);
+  bus, AMOLED_RST, 0 /* rotation */, 466 /* width - actual visible resolution */, 466 /* height */,
+  7, 7, 7, 7 /* col/row offsets - centering the 466x466 visible area within
+              the panel's native 480x480 buffer: (480-466)/2=7px each side.
+              Previous test (480x480, offsets 0,0,0,0) still showed a thin
+              edge sliver in the photo, suggesting the visible window
+              needs centering rather than just matching buffer size. */);
 
 void setup() {
   Serial.begin(115200);
@@ -90,6 +88,14 @@ void setup() {
   gfx->fillScreen(0x001F);
   delay(1000);
   gfx->fillScreen(0x0000);
+
+  // Draw a 1px white border around the full visible area, plus a
+  // crosshair through the center - makes any remaining offset/centering
+  // error immediately visible (border clipped/incomplete = still
+  // misaligned) rather than relying on spotting a thin colored sliver.
+  gfx->drawRect(0, 0, 466, 466, 0xFFFF);
+  gfx->drawFastHLine(0, 233, 466, 0xFFFF);
+  gfx->drawFastVLine(233, 0, 466, 0xFFFF);
 
   gfx->setCursor(80, 220);
   gfx->setTextColor(0xFFFF);
