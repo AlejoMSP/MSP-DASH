@@ -59,7 +59,11 @@ void setup() {
   pinMode(AMOLED_EN, OUTPUT);
   digitalWrite(AMOLED_EN, HIGH); // power/enable the AMOLED panel
 
-  if (!gfx->begin()) {
+  // Explicit slower QSPI clock (default is 40MHz) - dithered/scrambled
+  // partial rendering is a classic signal-integrity symptom at high
+  // speed, especially over jumper-wire connections rather than a
+  // soldered/direct connection. Testing 20MHz first.
+  if (!gfx->begin(20000000)) {
     Serial.println("gfx->begin() FAILED");
   } else {
     Serial.println("gfx->begin() succeeded");
