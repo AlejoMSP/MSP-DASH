@@ -21,10 +21,13 @@
   confirm CAN frames are actually arriving before trusting displayed
   values.
 
-  CAN pins: confirmed free/safe GPIOs on this board (from Waveshare's own
-  pinout table - GPIO5/6 are NOT used by display/touch/RTC/IMU/SD/USB).
-    CAN TX -> GPIO5 -> SN65HVD230 CTX
-    CAN RX -> GPIO6 -> SN65HVD230 CRX
+  CAN pins: GPIO1/GPIO2, confirmed both free (per Waveshare's pinout
+  table) AND physically broken out on the left-side pin header (per the
+  actual board diagram - GPIO5/6 were an earlier wrong guess: they're
+  "free" at the chip level but not wired to any accessible connector on
+  this specific board).
+    CAN TX -> GPIO1 -> SN65HVD230 CTX
+    CAN RX -> GPIO2 -> SN65HVD230 CRX
   Bitrate: 500kbps (matches every other ECU in this project - confirm
   against your actual PCLink CAN Setup bitrate if different).
 
@@ -47,9 +50,13 @@
 #define AMOLED_RST   21
 #define AMOLED_EN    42
 
-// ---- CAN pins (confirmed free on this board) ----
-#define CAN_TX_PIN GPIO_NUM_5
-#define CAN_RX_PIN GPIO_NUM_6
+// ---- CAN pins (revised: GPIO5/6 are NOT physically broken out on this
+// board's headers, despite being listed "free" in the chip's official
+// pinout table - that table shows silicon availability, not what's
+// actually wired to an accessible connector. Confirmed from the real
+// board diagram: IO1/IO2 ARE on the left-side header, confirmed free.) ----
+#define CAN_TX_PIN GPIO_NUM_1
+#define CAN_RX_PIN GPIO_NUM_2
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
 
 // ---- LinkECU CAN blocks (confirmed base address, from PCLink) ----

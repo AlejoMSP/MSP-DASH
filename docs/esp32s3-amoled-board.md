@@ -93,7 +93,7 @@ Status: not yet bench-tested on the actual unit as of this writing.
   fully overwriting old pixels (via fixed-width space-padding), fixed it
   completely.
 
-## CAN pins (confirmed free/safe, from Waveshare's official pinout table)
+## CAN pins (revised - see correction below)
 Committed pins to avoid: GPIO0 (BOOT strap), GPIO4 (battery ADC), GPIO8
 (IMU interrupt), GPIO9-14 (QSPI display), GPIO15 (RTC interrupt), GPIO19/20
 (native USB), GPIO21 (AMOLED reset), GPIO38-41 (SD card), GPIO42 (AMOLED
@@ -101,9 +101,21 @@ enable), GPIO43/44 (UART), GPIO47/48 (shared I2C - touch+IMU+RTC). Also
 avoid GPIO45/46 (S3 boot-strapping pins, even though the vendor table
 lists them as free) and GPIO3 (strapping-adjacent).
 
-**Chosen CAN pins: TX=GPIO5, RX=GPIO6** - wire to an SN65HVD230
-transceiver (same part used in the original ESP32 build): CTX->GPIO5,
-CRX->GPIO6, VCC->3.3V, GND->GND, CANH/CANL->bus.
+**IMPORTANT CORRECTION:** the official pinout table shows which GPIOs
+are free at the chip/silicon level - it does NOT mean every free GPIO is
+physically wired to an accessible connector on this board. GPIO5/6 were
+originally chosen on that basis and turned out to not be broken out
+anywhere. The actual board diagram (confirmed via photo) shows two real
+headers: left side has IO0, IO7, IO1, IO17, IO2, IO16 (plus GND/power
+pins); right side has IO45, IO18 (plus 3V3/TXD/RXD/GND/SDA/SCL). Of
+those, IO1/IO2/IO7/IO16/IO17/IO18 are both free AND physically
+accessible.
+
+**Chosen CAN pins: TX=GPIO1, RX=GPIO2** (both on the left header, right
+next to each other) - wire to an SN65HVD230 transceiver (same part used
+in the original ESP32 build, and conveniently 3.3V-native so no voltage
+divider is needed this time): CTX->GPIO1, CRX->GPIO2, VCC->3.3V,
+GND->GND, CANH/CANL->bus.
 
 ## LinkECU support - numbers-only gauge display
 New sketch: `esp32s3-amoled-linkecu-numbers/`. Parses LinkECU's CAN
