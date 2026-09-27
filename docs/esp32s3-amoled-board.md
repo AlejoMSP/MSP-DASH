@@ -77,3 +77,60 @@ Status: not yet bench-tested on the actual unit as of this writing.
 - This board also has WiFi, so it could potentially also host the same
   web dashboard code, or just render locally via Arduino_GFX/LVGL -
   approach not yet decided.
+
+## Display bring-up: RESOLVED (2026-09-27)
+- **Confirmed driver chip: CO5300** (SH8601 showed a blank screen entirely)
+- **Confirmed QSPI speed: 10MHz** (40MHz badly corrupted, 20MHz cleaned
+  up solid fills but text was still dithered - text is more sensitive to
+  signal integrity than solid color fills since it needs pixel-exact
+  accuracy)
+- **Confirmed offset: 7,7,7,7** with width/height=466,466 - centers the
+  visible 466x466 area within the panel's native 480x480 buffer
+- **Tearing fix confirmed:** use opaque-background text
+  (`setTextColor(fg, bg)`) instead of a separate clear-rect + draw-text
+  pass. Two separate writes per frame let the panel's internal refresh
+  land mid-update, causing visible tearing. One write per field, always
+  fully overwriting old pixels (via fixed-width space-padding), fixed it
+  completely.
+
+## CAN pins (confirmed free/safe, from Waveshare's official pinout table)
+Committed pins to avoid: GPIO0 (BOOT strap), GPIO4 (battery ADC), GPIO8
+(IMU interrupt), GPIO9-14 (QSPI display), GPIO15 (RTC interrupt), GPIO19/20
+(native USB), GPIO21 (AMOLED reset), GPIO38-41 (SD card), GPIO42 (AMOLED
+enable), GPIO43/44 (UART), GPIO47/48 (shared I2C - touch+IMU+RTC). Also
+avoid GPIO45/46 (S3 boot-strapping pins, even though the vendor table
+lists them as free) and GPIO3 (strapping-adjacent).
+
+**Chosen CAN pins: TX=GPIO5, RX=GPIO6** - wire to an SN65HVD230
+transceiver (same part used in the original ESP32 build): CTX->GPIO5,
+CRX->GPIO6, VCC->3.3V, GND->GND, CANH/CANL->bus.
+
+## LinkECU support - numbers-only gauge display
+New sketch: `esp32s3-amoled-linkecu-numbers/`. Parses LinkECU's CAN
+broadcast (base 1520 decimal/0x5F0, big-endian, most channels x0.1) -
+the SAME format previously used for "MegaSquirt" in the ESP32-classic
+build before that was removed; strong evidence (from PCLink CAN Setup
+screenshots at the very start of this project) that Link and MegaSquirt
+share this exact broadcast convention.
+
+Blocks parsed: 0x5F0 (RPM), 0x5F2 (Baro/MAP/MAT/CLT), 0x5F3
+(TPS/Batt/EGO1/EGO2). NOT yet bench-verified against a real LinkECU on
+this specific wiring - confirm frames are actually arriving (Serial
+debug or a bus analyzer) before trusting displayed values, same
+discipline as every other protocol in this project.
+
+Display: one large "hero" RPM readout plus a 2-column grid of six
+smaller fields (MAP, CLT, TPS, AFR, Battery, MAT). Cyan labels
+(approximating the web dashboard's #4dd0e1 theme color) above white
+values. Numbers-only for now, per project decision - no needles/bars/
+lights yet on this board.
+
+## Future generic signal mapping (LinkECU, deferred)
+Since Link's CAN layout is fully user-configurable in PCLink (unlike
+rusEFI's fixed DBC), a longer-term plan is a `linkmap.conf`-style text
+file (loaded from the SD card already supported on the ESP32-classic
+build) defining arbitrary signals by CAN ID + bit position + scaling,
+decoded generically at runtime rather than hardcoded per-channel in C++.
+Modeled after the open-source M-Gauge project's canmap.conf approach.
+Not yet implemented - current sketch hardcodes the 3 confirmed blocks
+directly.
