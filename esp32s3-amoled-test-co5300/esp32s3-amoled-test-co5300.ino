@@ -48,8 +48,14 @@ Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   AMOLED_CS, AMOLED_SCK, AMOLED_D0, AMOLED_D1, AMOLED_D2, AMOLED_D3);
 
 Arduino_GFX *gfx = new Arduino_CO5300(
-  bus, AMOLED_RST, 0 /* rotation */, 466 /* width */, 466 /* height */,
-  0, 0, 0, 0 /* col/row offsets - untuned, see header note */);
+  bus, AMOLED_RST, 0 /* rotation */, 480 /* width - class default, NOT 466 */, 480 /* height - class default, NOT 466 */,
+  0, 0, 0, 0 /* col/row offsets - untuned. Using 480x480 (class default,
+              not the advertised 466x466 visible resolution) since a
+              persistent green sliver appeared regardless of clock speed,
+              suggesting a buffer-size mismatch: the real VRAM is likely
+              480x480 with the round 466px visible area centered inside
+              it (offset would be (480-466)/2=7px each side if that's
+              needed later; testing 0,0,0,0 with the corrected size first) */);
 
 void setup() {
   Serial.begin(115200);
