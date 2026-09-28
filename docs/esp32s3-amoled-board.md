@@ -337,3 +337,29 @@ reasonable guess based on common LVGL scale widget convention, not
 independently confirmed against source. Low risk if wrong - would just
 mean colors don't apply exactly as intended cosmetically, not a
 functional issue.
+
+## Combined LVGL gauge + direct CAN (2026-09-28)
+
+New sketch: `esp32s3-amoled-lvgl-can-gauge/`. Combines the confirmed LVGL
+gauge (lv_scale + lv_line needle, from esp32s3-amoled-lvgl-gauge-test)
+with direct LinkECU CAN reading on this board's own transceiver (from
+esp32s3-amoled-linkecu-numbers) - per project decision, this board reads
+CAN itself rather than via the UART bridge from the WROOM board.
+
+Real RPM (0-8000 range) drives the needle instead of the earlier
+simulated 0-100 sweep test. Only RPM is parsed for now (BLOCK0/word3) -
+the other LinkECU values (MAP/CLT/TPS/AFR/etc, already parsed in
+esp32s3-amoled-linkecu-numbers) aren't wired into this gauge yet.
+
+Wiring: same as esp32s3-amoled-linkecu-numbers - GPIO1=CAN TX, GPIO2=CAN
+RX (through 1k/2k voltage divider, MCP2551 is 5V), MCP2551 powered from
+the shared automotive 5V supply (this board itself has no dedicated 5V
+pin).
+
+Needle update throttled to 80ms and only redraws when RPM actually
+changed - carries over the tearing-test settings (disabled rounded line
+caps, slower update rate) from esp32s3-amoled-lvgl-gauge-test, pending
+confirmation those actually fixed the tearing issue seen there.
+
+NOT yet bench-tested end-to-end (real CAN frames + gauge rendering
+together) as of this writing.
