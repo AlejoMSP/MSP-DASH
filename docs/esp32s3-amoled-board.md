@@ -236,3 +236,26 @@ image (like tick marks), and if a rotating needle over the image is
 ever wanted, that needs more complex partial-redraw logic (restoring
 background pixels under the needle's old position each frame) - a
 meaningfully bigger step than static-image display.
+
+## Moving needle test (2026-09-28)
+
+New standalone test: `esp32s3-amoled-needle-test/`. A needle sweeps
+automatically via a simulated 0-100 value (no real data hookup needed
+yet) - proves out rotation math and flicker-free redraw before
+integrating with a real gauge background image or live UART/CAN data.
+
+Sweep convention: -135 to +135 degrees (270 total), 0 degrees = straight
+up - matches the web dashboard's established gauge convention.
+
+Erase technique: since this test has a plain black background (no
+gauge-face image yet), the old needle is erased by simply redrawing its
+previous line in the background color before drawing the new one at the
+new angle. This is NOT what a real background-image gauge will need -
+that requires restoring the actual background pixels from a buffer
+(the same PSRAM buffer already used for image loading) rather than
+painting over in one flat color, since painting flat black would punch
+a hole in the gauge-face image wherever the needle used to be. That's
+the next step once this core motion mechanic is confirmed working.
+
+Remember the board-option fix from the image-loading work applies here
+too: `esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M`.
