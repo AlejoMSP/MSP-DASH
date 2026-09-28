@@ -193,3 +193,46 @@ esp32s3-amoled-linkecu-numbers/ as the current approach)
 
 NOT yet bench-tested end-to-end (WROOM decoding + forwarding + AMOLED
 receiving/displaying) as of this writing.
+
+## Custom gauge background images from SD card (2026-09-28)
+
+New standalone test: `esp32s3-amoled-image-test/`. Loads a raw RGB565
+image file from the SD card and displays it - validates the pipeline on
+its own before folding into the live gauge display.
+
+### SD card pins (confirmed, separate SPI bus from the QSPI display)
+SD_CS=GPIO38, SD_MOSI=GPIO39, SD_MISO=GPIO40, SD_SCLK=GPIO41 (from
+Waveshare's official pinout table).
+
+### Image format
+Raw RGB565, little-endian uint16 per pixel, no header - just
+width*height*2 bytes, row-major. Confirmed via the installed Arduino_GFX
+library's header (`draw16bitRGBBitmap(x, y, uint16_t *bitmap, w, h)`) -
+takes a pointer to pixel data already in memory, so the file is read
+into a PSRAM buffer (via heap_caps_malloc + MALLOC_CAP_SPIRAM - ESP32-S3
+has 8MB PSRAM, plenty for a 434KB full-screen 466x466 image) before
+being blitted.
+
+A test image (`docs/images/gauge_bg_test.raw`, 466x466, 434312 bytes)
+is included, converted from a reference gauge-face photo using Python/
+Pillow (RGBA flattened onto black, then R8G8B8 -> RGB565 packed as
+((R>>3)<<11)|((G>>2)<<5)|(B>>3), written little-endian). Copy this file
+to the SD card's root as `/gauge_bg.raw` to test.
+
+### Unconfirmed detail worth flagging
+The SD card's SPI bus setup (`SPIClass sdSPI(HSPI)`) is a best-effort
+guess, not verified against ESP32-S3's actual SPI host naming in the
+installed core - the display already occupies SPI2_HOST internally
+(confirmed from Arduino_ESP32QSPI.h), so the SD card needs a genuinely
+different SPI peripheral to avoid a bus conflict. If this doesn't
+compile or the card misbehaves, try FSPI instead of HSPI.
+
+### Next step (not yet built)
+This is background-image loading only - not yet integrated with the
+live gauge display (numbers still render as before, on a black
+background). Combining a background image with the live number overlay
+would need the numbers positioned to not overlap important parts of the
+image (like tick marks), and if a rotating needle over the image is
+ever wanted, that needs more complex partial-redraw logic (restoring
+background pixels under the needle's old position each frame) - a
+meaningfully bigger step than static-image display.
