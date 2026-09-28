@@ -1,32 +1,29 @@
 /*
   esp32s3-amoled-needle-test
   Standalone test: a moving needle on the round AMOLED, sweeping
-  automatically via a simulated value (no real CAN/UART data needed yet)
-  to prove out rotation math + flicker-free erase/redraw before
-  integrating with a real gauge background image or live data.
+  automatically via a simulated value (no real CAN/UART data needed yet).
 
-  Technique: since this test has NO background image (plain black), the
-  needle is "erased" by redrawing its OLD line in the background color
-  before drawing the NEW line at the new angle. This is much simpler
-  than what a real gauge-face image background would need (restoring
-  the actual background pixels from a buffer instead of just painting
-  over in one flat color) - that's a separate, later step once this
-  core rotation/redraw mechanic is proven here.
+  REWRITTEN to be more diagnosable: prints a step at every stage of
+  setup (so if it stops working, the Serial Monitor shows exactly where),
+  and prints a continuous heartbeat in loop() every second - so opening
+  Serial Monitor at ANY time after boot (not just the exact moment of
+  reset) will show output within ~1 second, rather than only printing
+  once during a boot window that's easy to miss.
 
-  Sweep convention: -135 to +135 degrees (270 total), 0 degrees = straight
-  up - matches the web dashboard's gauge convention used throughout this
-  project (see buildGaugeFace()/updateNeedle() in esp32-main.ino).
+  IMPORTANT - compile with the corrected board options (this board's
+  chip is ESP32-S3R8 with 16MB flash - the default profile is wrong,
+  PSRAM disabled and flash set to 4MB):
+    arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-needle-test
+    arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-needle-test
 
-  Display config (confirmed working via prior bring-up testing):
-    - Driver: CO5300, QSPI clock: 10MHz, offset=7,7,7,7
+  Display config (confirmed working via the image-loading test that DID
+  work): CO5300 driver, 10MHz QSPI, offset=7,7,7,7.
 
-  Board compile note: this board needs PSRAM=opi and FlashSize=16M board
-  options (confirmed from `arduino-cli board details` - the default
-  profile has PSRAM disabled and flash set to 4MB, both wrong for this
-  ESP32-S3R8/16MB-flash board):
-    arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M ...
-  (This particular sketch doesn't actually need PSRAM itself, but using
-  the same corrected FQBN as the other S3 sketches avoids confusion.)
+  Erase technique: plain black background (no gauge-face image in this
+  test), so the old needle is erased by redrawing its previous line in
+  the background color before drawing the new one.
+
+  Sweep convention: -135 to +135 degrees (270 total), 0 = straight up.
 */
 
 #include <Arduino_GFX_Library.h>
@@ -51,9 +48,9 @@ Arduino_GFX *gfx = new Arduino_CO5300(
 #define COLOR_BG     0x0000
 #define COLOR_NEEDLE 0xF800 // red
 #define COLOR_HUB    0x7BEF // gray
-#define COLOR_RING   0x39C7 // faint reference ring, just to visualize the sweep range
+#define COLOR_RING   0x39C7 // faint reference ring
 
-const int16_t CX = 233, CY = 233; // screen center
+const int16_t CX = 233, CY = 233;
 const int16_t NEEDLE_LEN = 180;
 const int16_t HUB_RADIUS = 14;
 const float SWEEP_START_DEG = -135.0f;
@@ -61,9 +58,6 @@ const float SWEEP_TOTAL_DEG = 270.0f;
 
 float lastAngleDeg = SWEEP_START_DEG;
 
-// 0 degrees = straight up (matches this project's established gauge
-// convention). Draws a slightly-thickened line (3 parallel 1px lines)
-// since Arduino_GFX's basic drawLine is 1px only.
 void drawNeedle(float angleDeg, uint16_t color) {
   float rad = angleDeg * PI / 180.0f;
   int16_t x1 = CX + (int16_t)(sin(rad) * NEEDLE_LEN);
@@ -74,35 +68,65 @@ void drawNeedle(float angleDeg, uint16_t color) {
 }
 
 unsigned long lastUpdate = 0;
-const unsigned long UPDATE_INTERVAL_MS = 30; // ~33 updates/sec
-
-float testValue = 0; // simulated 0-100 value driving the needle
+const unsigned long UPDATE_INTERVAL_MS = 30;
+float testValue = 0;
 int direction = 1;
+
+unsigned long lastHeartbeat = 0;
+unsigned long loopCount = 0;
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
-  Serial.println("Needle test starting...");
+  delay(1500); // extra time for USB serial to enumerate before first prints
 
+  Serial.println();
+  Serial.println("=== Needle test booting ===");
+  Serial.println("Step 1: setting AMOLED_EN high...");
   pinMode(AMOLED_EN, OUTPUT);
   digitalWrite(AMOLED_EN, HIGH);
+  Serial.println("Step 1 done.");
 
-  if (!gfx->begin(10000000)) {
-    Serial.println("gfx->begin() FAILED");
-  } else {
-    Serial.println("gfx->begin() succeeded");
+  Serial.println("Step 2: calling gfx->begin(10000000)...");
+  bool ok = gfx->begin(10000000);
+  Serial.print("Step 2 done. begin() returned: ");
+  Serial.println(ok ? "SUCCESS" : "FAILED");
+
+  if (!ok) {
+    Serial.println("HALTING - display init failed. Check wiring/power to the AMOLED panel.");
+    while (true) {
+      Serial.println("...still halted (display init failed)...");
+      delay(2000);
+    }
   }
 
+  Serial.println("Step 3: fillScreen(BLACK)...");
   gfx->fillScreen(COLOR_BG);
-  gfx->drawCircle(CX, CY, NEEDLE_LEN + 10, COLOR_RING); // faint reference ring
-  gfx->fillCircle(CX, CY, HUB_RADIUS, COLOR_HUB);
+  Serial.println("Step 3 done.");
 
+  Serial.println("Step 4: drawing reference ring + hub...");
+  gfx->drawCircle(CX, CY, NEEDLE_LEN + 10, COLOR_RING);
+  gfx->fillCircle(CX, CY, HUB_RADIUS, COLOR_HUB);
+  Serial.println("Step 4 done.");
+
+  Serial.println("Step 5: drawing initial needle position...");
   drawNeedle(lastAngleDeg, COLOR_NEEDLE);
-  Serial.println("Needle test running - sweeping automatically");
+  Serial.println("Step 5 done.");
+
+  Serial.println("=== Setup complete - entering loop() ===");
 }
 
 void loop() {
   unsigned long now = millis();
+
+  // Heartbeat: prints every second regardless of anything else, so
+  // connecting Serial Monitor at any point shows output within ~1s.
+  if (now - lastHeartbeat >= 1000) {
+    lastHeartbeat = now;
+    Serial.print("heartbeat - loop() running, iterations so far: ");
+    Serial.println(loopCount);
+  }
+  loopCount++;
+
   if (now - lastUpdate < UPDATE_INTERVAL_MS) return;
   lastUpdate = now;
 
@@ -112,9 +136,9 @@ void loop() {
 
   float angleDeg = SWEEP_START_DEG + (testValue / 100.0f) * SWEEP_TOTAL_DEG;
 
-  drawNeedle(lastAngleDeg, COLOR_BG);   // erase old position
-  drawNeedle(angleDeg, COLOR_NEEDLE);   // draw new position
-  gfx->fillCircle(CX, CY, HUB_RADIUS, COLOR_HUB); // redraw hub in case the erase clipped it
+  drawNeedle(lastAngleDeg, COLOR_BG);
+  drawNeedle(angleDeg, COLOR_NEEDLE);
+  gfx->fillCircle(CX, CY, HUB_RADIUS, COLOR_HUB);
 
   lastAngleDeg = angleDeg;
 }
