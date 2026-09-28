@@ -53,8 +53,12 @@ Arduino_GFX *gfx = new Arduino_CO5300(
 
 // LVGL's working draw buffer - NOT a full framebuffer, just a chunk it
 // renders into before handing sections to our flush callback. Sized per
-// LVGL's own example formula (1/10 screen size).
-#define DRAW_BUF_SIZE (SCREEN_W * SCREEN_H / 10 * (LV_COLOR_DEPTH / 8))
+// LVGL's own example formula (1/10 screen size). Hardcoding "2" bytes
+// per pixel here (not LV_COLOR_DEPTH, which no longer exists in LVGL
+// v9 - confirmed via source search; color format is now a runtime
+// setting via lv_display_set_color_format() instead) since RGB565 is
+// fixed at 2 bytes/pixel by definition.
+#define DRAW_BUF_SIZE (SCREEN_W * SCREEN_H / 10 * 2)
 uint32_t draw_buf[DRAW_BUF_SIZE / 4];
 
 // Bridges LVGL's rendered pixels to our confirmed-working Arduino_GFX
@@ -94,6 +98,7 @@ void setup() {
   lv_tick_set_cb(my_tick);
 
   lv_display_t *disp = lv_display_create(SCREEN_W, SCREEN_H);
+  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565); // confirmed: matches our display's native format
   lv_display_set_flush_cb(disp, my_disp_flush);
   lv_display_set_buffers(disp, draw_buf, NULL, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
   Serial.println("Display registered with LVGL.");

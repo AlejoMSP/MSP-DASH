@@ -259,3 +259,57 @@ the next step once this core motion mechanic is confirmed working.
 
 Remember the board-option fix from the image-loading work applies here
 too: `esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M`.
+
+## LVGL v9 integration - setup findings (2026-09-28)
+
+Switched from hand-rolled Arduino_GFX gauge drawing to LVGL v9, since it
+has a confirmed working needle-rotation mechanism
+(`lv_image_set_rotation()` + `lv_image_set_pivot()`) that handles
+compositing a rotating needle over a background automatically via its
+own render/invalidation system - solving the exact "needle over
+background image without artifacts" problem this project's hand-rolled
+approach would have needed much more manual work for.
+
+### Key finding: no more all-in-one "meter" widget
+LVGL v9 removed the old v8 `lv_meter_*` gauge widget entirely - confirmed
+via source search (no `lv_meter.h` exists). Replaced with a compositional
+approach: `lv_scale` (tick marks/arc face) as a separate widget from a
+rotatable needle built from `lv_image` (or `lv_line`). A real gauge
+needs building from these pieces rather than one drop-in call.
+
+### lv_conf.h setup (confirmed via actual compile error)
+LVGL expects `lv_conf.h` as a SIBLING of the `lvgl` library folder itself
+(i.e. directly in `Arduino/libraries/`, not inside `Arduino/libraries/lvgl/`).
+Confirmed via the actual compiler error:
+`fatal error: ../../../../lv_conf.h: No such file or directory`.
+Fix: copy `lv_conf_template.h` from the library root to
+`Arduino/libraries/lv_conf.h`, then flip its master switch from `#if 0`
+to `#if 1` near the top of the file (line ~15) to actually enable the
+config's content.
+
+### Color depth: LV_COLOR_DEPTH no longer exists in v9
+Confirmed via source search - the old global compile-time
+`LV_COLOR_DEPTH` macro used throughout LVGL v8 (and still referenced in
+the current official Arduino example's buffer-size formula, which
+appears to be stale/not fully updated for v9) doesn't exist anywhere in
+v9.6.0's actual source. Replaced by a per-display RUNTIME setting:
+`lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565)`. Since a
+compile-time array size can't use this runtime call, hardcoded "2" bytes
+per pixel directly in the buffer-size calculation instead (RGB565 is
+fixed at 2 bytes/pixel by definition, no ambiguity).
+
+### Confirmed working API surface for the display bridge
+- `lv_tick_set_cb(fn)` - tick source (fn returns millis())
+- `lv_display_create(w, h)`
+- `lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565)`
+- `lv_display_set_flush_cb(disp, fn)` - fn signature:
+  `void(lv_display_t*, const lv_area_t*, uint8_t* px_map)`
+- `lv_display_set_buffers(disp, buf1, buf2, size, LV_DISPLAY_RENDER_MODE_PARTIAL)`
+- Inside flush_cb: `lv_area_get_width(area)`/`lv_area_get_height(area)`,
+  then bridge straight to our confirmed `gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t*)px_map, w, h)`,
+  then `lv_display_flush_ready(disp)`
+
+New test sketch: `esp32s3-amoled-lvgl-test/` - minimal "Hello LVGL"
+label, proving the full bridge (tick, buffers, color format, flush
+callback, our display init) before building the actual gauge composition
+(background image + rotated needle image, next step).
