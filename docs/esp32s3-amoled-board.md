@@ -313,3 +313,27 @@ New test sketch: `esp32s3-amoled-lvgl-test/` - minimal "Hello LVGL"
 label, proving the full bridge (tick, buffers, color format, flush
 callback, our display init) before building the actual gauge composition
 (background image + rotated needle image, next step).
+
+## First real LVGL gauge (2026-09-28)
+
+New test: `esp32s3-amoled-lvgl-gauge-test/`. Real `lv_scale` widget with a
+`lv_line` needle driven by `lv_scale_set_line_needle_value()` -
+automatic simulated 0-100 sweep, before wiring to live data. Built on
+the confirmed-working LVGL bridge from esp32s3-amoled-lvgl-test.
+
+Confirmed core API (checked against installed source):
+`lv_scale_create`, `lv_scale_set_mode` (LV_SCALE_MODE_ROUND_INNER),
+`lv_scale_set_total_tick_count`, `lv_scale_set_label_show`,
+`lv_scale_set_range`, `lv_scale_set_angle_range`, `lv_scale_set_rotation`,
+`lv_line_create` (the needle object itself), `lv_scale_set_line_needle_value(scale, needle_line, needle_length, value)`.
+
+Sweep convention -135 to +135 (270 total) matches this project's
+established gauge convention elsewhere (web dashboard, hand-rolled
+Arduino_GFX needle test).
+
+NOTE - unverified detail: the part-based styling calls (LV_PART_ITEMS
+for minor ticks, LV_PART_INDICATOR for major ticks/labels) are a
+reasonable guess based on common LVGL scale widget convention, not
+independently confirmed against source. Low risk if wrong - would just
+mean colors don't apply exactly as intended cosmetically, not a
+functional issue.
