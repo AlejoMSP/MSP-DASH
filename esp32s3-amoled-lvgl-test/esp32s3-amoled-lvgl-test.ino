@@ -103,6 +103,11 @@ void setup() {
   lv_display_set_buffers(disp, draw_buf, NULL, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
   Serial.println("Display registered with LVGL.");
 
+  // LVGL's default theme uses a light/white background - explicitly
+  // set the screen to black to match this project's dark aesthetic
+  // (and so white text is actually visible, rather than white-on-white).
+  lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
+
   lv_obj_t *label = lv_label_create(lv_screen_active());
   lv_label_set_text(label, "Hello, LVGL!");
   lv_obj_set_style_text_color(label, lv_color_white(), 0);
