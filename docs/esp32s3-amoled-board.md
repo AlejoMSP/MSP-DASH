@@ -363,3 +363,14 @@ confirmation those actually fixed the tearing issue seen there.
 
 NOT yet bench-tested end-to-end (real CAN frames + gauge rendering
 together) as of this writing.
+
+## CAN pin revision: switched to the UART connector (2026-09-28)
+The 1.27mm-pitch GPIO expansion header (where GPIO1/GPIO2 lived) turned
+out to be physically inaccessible - no adapter or fine-pitch soldering
+setup on hand. Switched to the board's UART connector instead (JST-SH
+1.0mm pitch, matching cable already available): GPIO43 (labeled "TXD")
+and GPIO44 (labeled "RXD"). ESP32-S3's TWAI peripheral is routable to
+almost any GPIO via the chip's flexible GPIO matrix, so repurposing
+these UART-labeled pins for CAN works fine - they're general-purpose
+exposed pins, not consumed by any onboard peripheral. Same wiring
+pattern as before otherwise (MCP2551, 5V, 1k/2k voltage divider on RX).

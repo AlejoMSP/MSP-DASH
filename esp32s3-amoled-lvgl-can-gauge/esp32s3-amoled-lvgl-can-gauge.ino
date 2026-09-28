@@ -13,12 +13,20 @@
       caveats as documented there: shares MegaSquirt's broadcast format,
       not yet independently bench-verified against a real Link ECU
 
-  CAN wiring (confirmed free/accessible pins from the real board photo,
-  NOT the pins from the official chip-level table which turned out to
-  not be physically broken out):
-    CAN TX -> GPIO1 -> MCP2551 CTX
-    CAN RX -> GPIO2 -> MCP2551 CRX, through a 1k/2k voltage divider
-              (MCP2551 is a 5V part, ESP32-S3 GPIO is not 5V-tolerant)
+  CAN wiring - REVISED: GPIO1/GPIO2 (the 1.27mm-pitch GPIO expansion
+  header) were physically inaccessible without specialized fine-pitch
+  tools/adapters. Switched to the UART connector instead (JST-SH 1.0mm
+  pitch, same connector type used for Nextion-style external links
+  elsewhere in this project) since a matching cable was available.
+  ESP32-S3's TWAI peripheral is routable to almost any GPIO via the
+  chip's flexible GPIO matrix, so repurposing these UART-labeled pins
+  for CAN works fine - they're general-purpose exposed pins, not
+  consumed by any onboard peripheral (unlike GPIO47/48, which are
+  shared by the touch/IMU/RTC I2C bus).
+    CAN TX -> GPIO43 (labeled "TXD" on the connector) -> MCP2551 CTX
+    CAN RX -> GPIO44 (labeled "RXD" on the connector) -> MCP2551 CRX,
+              through a 1k/2k voltage divider (MCP2551 is a 5V part,
+              ESP32-S3 GPIO is not 5V-tolerant)
     MCP2551 VCC -> 5V (shared automotive supply, not from this board -
               this board itself has no dedicated 5V pin, only 3V3/VBUS)
     MCP2551 GND -> common GND with ESP32-S3
@@ -48,8 +56,14 @@
 #define SCREEN_H 466
 
 // ---- CAN pins (confirmed physically accessible on the real board) ----
-#define CAN_TX_PIN GPIO_NUM_1
-#define CAN_RX_PIN GPIO_NUM_2
+// ---- CAN pins - using the exposed UART connector (physically
+// accessible via a JST-SH 1.0mm cable, unlike the 1.27mm GPIO header
+// pins originally chosen). ESP32-S3's TWAI (CAN) peripheral is routable
+// to almost any GPIO via the chip's flexible GPIO matrix - it is NOT
+// hardware-locked to a specific "CAN pin", so repurposing these UART-
+// labeled pins for CAN works fine. ----
+#define CAN_TX_PIN GPIO_NUM_43 // labeled "TXD" on the UART connector
+#define CAN_RX_PIN GPIO_NUM_44 // labeled "RXD" on the UART connector
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
 
 // ---- LinkECU CAN blocks (confirmed base address, from PCLink) ----
