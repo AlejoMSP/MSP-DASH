@@ -374,3 +374,22 @@ almost any GPIO via the chip's flexible GPIO matrix, so repurposing
 these UART-labeled pins for CAN works fine - they're general-purpose
 exposed pins, not consumed by any onboard peripheral. Same wiring
 pattern as before otherwise (MCP2551, 5V, 1k/2k voltage divider on RX).
+
+## Switched to boost gauge on rusEFI (2026-09-28)
+
+esp32s3-amoled-lvgl-can-gauge repurposed from RPM/LinkECU to a BOOST
+gauge on rusEFI (bench-confirmed elsewhere in this project) - matches
+current test setup. Boost = MAP (RUSEFI_BASE3, little-endian) minus the
+fixed 101.3 kPa assumed baro, same as the rest of this project.
+
+Requested display range was "-40 inHg to 30 psi" AND "-2 to 2 bar"
+simultaneously - not cleanly supported by lv_scale's plain single-range
+tick system (no confirmed per-tick custom decimal formatting API).
+Scoping decision: on-screen gauge shows kPa (range -150 to 200, covering
+both requested ranges), Serial console prints every CAN-derived boost
+reading in kPa, bar, inHg, AND psi - covers wanting to see those units
+without risking broken/misleading on-screen tick labels, and doubles as
+direct confirmation CAN data is flowing. A true dual-unit tick face
+(inHg on the left half, psi on the right, matching a real mechanical
+boost gauge) would be a larger follow-up if that authentic look is
+wanted later.
