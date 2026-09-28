@@ -146,3 +146,50 @@ decoded generically at runtime rather than hardcoded per-channel in C++.
 Modeled after the open-source M-Gauge project's canmap.conf approach.
 Not yet implemented - current sketch hardcodes the 3 confirmed blocks
 directly.
+
+## Architecture change: UART bridge from WROOM, not independent CAN (2026-09-27)
+
+Per project decision, the round display no longer reads CAN directly.
+Instead, the WROOM board (esp32-main.ino) owns ALL CAN decoding - rusEFI
+(auto-detected, own ID range) AND MegaSquirt/LinkECU (shared parser,
+selector on /config, per project decision to support all three ECUs) -
+and forwards the same field/value data it already sends to the physical
+Nextion display, over a new separate UART link, to this round AMOLED
+board.
+
+**Why:** avoids duplicating a CAN transceiver + voltage divider + 5V
+power sharing on the AMOLED board entirely; single source of truth for
+CAN parsing; reuses the UART-based approach already proven with Nextion.
+
+### WROOM side changes (esp32-main.ino)
+- MegaSquirt/LinkECU support RE-ADDED (was removed earlier to focus on
+  rusEFI-only; now restoring all three per project decision). Shares one
+  parser (handleSecondaryEcuFrame) since both brands appear to use the
+  identical broadcast format - selector on /config only changes
+  labeling. Fixed a gap in the restored code: BATT (word1 of block 3)
+  was being read from the CAN frame but never actually sent - needed for
+  the round display's BATT field, now fixed.
+- New UART1 link (Serial1, GPIO25=TX/GPIO26=RX, 115200 baud) added
+  alongside the existing Nextion UART2 - nextionSend() now writes to
+  BOTH UART2 (Nextion) and UART1 (AMOLED board) with the same command
+  string and terminator convention.
+
+### ESP32-S3 AMOLED side (esp32s3-amoled-uart-display/ - NEW, replaces
+esp32s3-amoled-linkecu-numbers/ as the current approach)
+- No CAN code at all anymore - just a UART receiver (GPIO2=RX from
+  WROOM's GPIO25, GPIO1=TX to WROOM's GPIO26 though not used yet)
+- Parses the same "field.txt=\"value\"" / "field.val=value" +
+  0xFF-terminated protocol Nextion already uses
+- Same 7-field numbers-only layout as before (RPM/MAP/CLT/TPS/AFR/
+  BATT/MAT), same confirmed display config (CO5300, 10MHz, offset
+  7,7,7,7, opaque-text tearing fix) - only the DATA SOURCE changed
+
+### Wiring (WROOM <-> ESP32-S3 AMOLED board)
+| WROOM pin | AMOLED board pin |
+|---|---|
+| GPIO25 (TX) | GPIO2 (RX) |
+| GPIO26 (RX) | GPIO1 (TX) - not used yet |
+| GND | GND (common ground required) |
+
+NOT yet bench-tested end-to-end (WROOM decoding + forwarding + AMOLED
+receiving/displaying) as of this writing.

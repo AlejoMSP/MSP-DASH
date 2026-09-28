@@ -1,5 +1,14 @@
 /*
   esp32s3-amoled-linkecu-numbers
+
+  SUPERSEDED per project decision: the round display now receives
+  pre-decoded ECU data over a UART link from the WROOM board instead of
+  reading CAN independently - see esp32s3-amoled-uart-display/ for the
+  current approach. This sketch is kept as a reference/alternative in
+  case standalone CAN reading on this board is wanted again later (it
+  was fully wired and confirmed working at the code level, just not the
+  chosen path going forward).
+
   First real gauge display for the Waveshare ESP32-S3-Touch-AMOLED-1.43,
   reading LinkECU CAN data. Numbers-only for now (no needles/bars/lights
   yet) - big, clean digits on the round display.

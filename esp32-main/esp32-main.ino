@@ -11,8 +11,16 @@
   the official DBC (high confidence, not bench-verified with live sensors
   for the ones not physically wired yet - those read 0/default).
 
-  MegaSquirt and LinkECU support has been REMOVED for now (rusEFI-only
-  focus per project decision) - see git history to reference/restore.
+  MegaSquirt and LinkECU support RE-ADDED (per project decision - all
+  three ECUs now supported: rusEFI, MegaSquirt, LinkECU). rusEFI is
+  auto-detected via its own non-overlapping CAN ID range (0x200-0x20B).
+  MegaSquirt and LinkECU share one CAN ID range (1520+ decimal) and one
+  parser (handleSecondaryEcuFrame) - strong evidence (matching PCLink CAN
+  Setup labels) that both brands share this exact broadcast format. The
+  "Active Secondary ECU" selector on /config only changes labeling, not
+  parsing, since the two can't be auto-detected apart by ID range alone.
+  Scale factors NOT independently bench-verified for either brand in
+  this project - sniff-and-compare before fully trusting.
 
   Debug/Serial logging: a global toggle (OFF by default) PLUS a per-gauge
   toggle - either turns on console output for that gauge's updates.
@@ -82,6 +90,14 @@
 #define SD_CS_PIN 27
 #define SD_LOG_INTERVAL_MS 500
 
+// UART bridge to the ESP32-S3 AMOLED round display board - forwards the
+// same field/value data Nextion receives, over a separate UART. Uses
+// the ESP32 core's predefined Serial1 (UART1) - UART0 is USB/debug,
+// UART2 is already used for Nextion.
+#define AMOLED_LINK_TX_PIN 25
+#define AMOLED_LINK_RX_PIN 26
+#define AMOLED_LINK_BAUD 115200
+
 
 // =====================================================================
 // rusEFI CAN IDs - FULL DBC (base 0x200 / 512 decimal, confirmed via
@@ -102,6 +118,28 @@
 #define RUSEFI_BASE11 0x20B // BrakePedal
 
 #define ASSUMED_BARO_KPA 101.3f // rusEFI's DBC has no baro signal - fixed assumption per project decision
+
+
+// =====================================================================
+// MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0)
+// Byte order: BIG-ENDIAN. Re-added per project decision to support all
+// three ECUs - both brands appear to share this exact broadcast format
+// (see docs/CAN-map.md history), so one parser covers both; the
+// "Active Secondary ECU" setting on /config only changes labeling.
+// Since this ID range does NOT overlap rusEFI's (0x200-0x20B), both can
+// be decoded simultaneously without a mode switch.
+// =====================================================================
+
+#define SEC_BASE      1520        // 0x5F0
+#define SEC_BLOCK0    (SEC_BASE+0) // Seconds, PW1, PW2, RPM
+#define SEC_BLOCK2    (SEC_BASE+2) // BARO, MAP, MAT, CLT
+#define SEC_BLOCK3    (SEC_BASE+3) // TPS, BATT, EGO1
+#define SEC_BLOCK13   (SEC_BASE+13)// FUELP, OILP, OILT
+#define SEC_BLOCK44   (SEC_BASE+44)// VVT angle
+#define SEC_BLOCK47   (SEC_BASE+47)// Ethanol %
+
+enum SecondaryProtocol { SEC_PROTO_MEGASQUIRT = 0, SEC_PROTO_LINKECU = 1 };
+SecondaryProtocol activeSecondaryProtocol = SEC_PROTO_MEGASQUIRT; // label only - parsing is identical
 
 
 // =====================================================================
@@ -371,6 +409,7 @@ void loadGaugeConfig() {
   }
   debugLoggingEnabled = sysPrefs.getBool("dbglog", false);
   sdLoggingEnabled = sysPrefs.getBool("sdlog", false);
+  activeSecondaryProtocol = (SecondaryProtocol)sysPrefs.getUChar("secproto", SEC_PROTO_MEGASQUIRT);
   loadAppearance();
 }
 
@@ -416,6 +455,11 @@ void saveGaugeConfig(AsyncWebServerRequest *request) {
 
   sdLoggingEnabled = request->hasParam("sdlog", true);
   sysPrefs.putBool("sdlog", sdLoggingEnabled);
+
+  if (request->hasParam("secproto", true)) {
+    activeSecondaryProtocol = (SecondaryProtocol)request->getParam("secproto", true)->value().toInt();
+    sysPrefs.putUChar("secproto", activeSecondaryProtocol);
+  }
 
   saveAppearance(request);
 }
@@ -911,6 +955,11 @@ int16_t readS16LE(uint8_t* data, int offset) {
   return (int16_t)(data[offset] | (data[offset + 1] << 8));
 }
 
+// MegaSquirt/LinkECU: big-endian (re-added alongside little-endian rusEFI helpers)
+uint16_t readU16BE(uint8_t* data, int offset) {
+  return (data[offset] << 8) | data[offset + 1];
+}
+
 float cToF(float c) {
   return c * 9.0f / 5.0f + 32.0f;
 }
@@ -996,6 +1045,13 @@ void writeConfigPage(AsyncResponseStream *response) {
   if (sdLoggingEnabled) response->print(" checked");
   response->print(F("></div>"));
 
+  response->print(F("<div class='sys-row'><span>Active Secondary ECU (shares CAN ID range 1520+ - rusEFI is always auto-detected separately)</span>"
+    "<select name='secproto'><option value='0'"));
+  if (activeSecondaryProtocol == SEC_PROTO_MEGASQUIRT) response->print(" selected");
+  response->print(F(">MegaSquirt</option><option value='1'"));
+  if (activeSecondaryProtocol == SEC_PROTO_LINKECU) response->print(" selected");
+  response->print(F(">LinkECU</option></select></div>"));
+
   response->print(F("<h2>Appearance</h2>"));
   response->print(F("<div class='gauge-row'><div class='gr-fields'>"));
   response->print(F("<label>Gauge Face Color<input type='color' name='faceColor' value='"));
@@ -1069,6 +1125,8 @@ void nextionSend(const String &cmd) {
 
   Serial2.print(cmd);
   Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
+  Serial1.print(cmd); // forward to the ESP32-S3 AMOLED display over the UART bridge
+  Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF); // same terminator convention as Nextion
   if (debugLoggingEnabled || gaugeDebugOn(field)) Serial.println(cmd);
 
   String value = cmd.substring(eq + 1);
@@ -1282,6 +1340,71 @@ void handleRusefiFrame(uint32_t id, uint8_t* d) {
 
 
 // =====================================================================
+// MegaSquirt / LinkECU shared frame handling - re-added per project
+// decision to support all three ECUs. activeSecondaryProtocol only
+// changes labeling on /config - the actual parsing is identical for
+// both, per the format-overlap noted in the defines section above.
+// Writes to the SAME gauge keys as rusEFI where they overlap (rpm, map,
+// clt, mat, tps, tpst, ego, fuelp, oilp, oilt, vvt, eth) - since these
+// IDs don't overlap rusEFI's range, both can be live simultaneously.
+// =====================================================================
+
+void handleSecondaryEcuFrame(uint32_t id, uint8_t* d) {
+  switch (id) {
+    case SEC_BLOCK0: {
+      float rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
+      nextionSend("rpm.txt=\"" + String((int)rpm) + "\"");
+      break;
+    }
+    case SEC_BLOCK2: {
+      float baro = readU16BE(d, 0) / 10.0f; // word0
+      float map_ = readU16BE(d, 2) / 10.0f; // word1
+      float mat  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
+      float clt  = cToF(readU16BE(d, 6) / 10.0f); // word3 - ASSUMES Celsius source config, not bench-confirmed
+      float boost = map_ - baro; // real baro available here, unlike rusEFI
+
+      nextionSend("map.txt=\"" + String(map_, 1) + "\"");
+      nextionSend("boost.txt=\"" + String(boost, 1) + "\"");
+      nextionSend("mat.txt=\"" + String(mat, 1) + "\"");
+      nextionSend("clt.txt=\"" + String(clt, 1) + "\"");
+      break;
+    }
+    case SEC_BLOCK3: {
+      float tps  = readU16BE(d, 0) / 10.0f; // word0
+      float battV = readU16BE(d, 2) / 10.0f; // word1 - was missing before, needed for the round display's BATT field
+      float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per source sketch, not lambda
+
+      nextionSend("tps.val=" + String((int)tps));
+      nextionSend("tpst.txt=\"" + String(tps, 1) + "\"");
+      nextionSend("battv.txt=\"" + String(battV, 2) + "\"");
+      nextionSend("ego.txt=\"" + String(ego1, 1) + "\"");
+      break;
+    }
+    case SEC_BLOCK13: {
+      float fuelp = readU16BE(d, 0) / 10.0f; // word0
+      float oilp  = readU16BE(d, 2) / 10.0f; // word1
+      float oilt  = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, not bench-confirmed
+
+      nextionSend("fuelp.txt=\"" + String(fuelp, 1) + "\"");
+      nextionSend("oilp.txt=\"" + String(oilp, 1) + "\"");
+      nextionSend("oilt.txt=\"" + String(oilt, 1) + "\"");
+      break;
+    }
+    case SEC_BLOCK44: {
+      float vvt = readU16BE(d, 0) / 10.0f; // word0
+      nextionSend("vvt.txt=\"" + String(vvt, 1) + "\"");
+      break;
+    }
+    case SEC_BLOCK47: {
+      float eth = readU16BE(d, 0) / 10.0f; // word0
+      nextionSend("eth.txt=\"" + String(eth, 1) + "\"");
+      break;
+    }
+  }
+}
+
+
+// =====================================================================
 // EGT (MAX6675 + K-type thermocouple)
 // =====================================================================
 
@@ -1448,6 +1571,7 @@ void updateGps() {
 void setup() {
   Serial.begin(115200);
   Serial2.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX_PIN, NEXTION_TX_PIN);
+  Serial1.begin(AMOLED_LINK_BAUD, SERIAL_8N1, AMOLED_LINK_RX_PIN, AMOLED_LINK_TX_PIN);
 
   gaugePrefs.begin("gauges", false);
   sysPrefs.begin("sysconf", false);
@@ -1627,6 +1751,8 @@ void loop() {
 
     if (id >= 0x200 && id <= 0x20B) {
       handleRusefiFrame(id, d);
+    } else if (id >= 1520 && id <= 1520 + 52) {
+      handleSecondaryEcuFrame(id, d);
     }
   }
 
