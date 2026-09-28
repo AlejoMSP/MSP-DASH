@@ -68,7 +68,7 @@ lv_obj_t *scale;
 lv_obj_t *needle_line;
 
 unsigned long lastUpdate = 0;
-const unsigned long UPDATE_INTERVAL_MS = 30;
+const unsigned long UPDATE_INTERVAL_MS = 80; // slowed from 30ms - isolates whether tearing is rate-dependent or purely rendering-complexity related
 int32_t testValue = 0;
 int direction = 1;
 
@@ -116,7 +116,12 @@ void setup() {
   needle_line = lv_line_create(scale);
   lv_obj_set_style_line_width(needle_line, 4, 0);
   lv_obj_set_style_line_color(needle_line, lv_color_hex(0xF44336), 0); // red
-  lv_obj_set_style_line_rounded(needle_line, true, 0);
+  // Rounded caps disabled - simpler single-segment line rendering,
+  // testing whether the extra antialiasing/rounding pass was widening
+  // the redraw region enough to cause tearing (persistent even at slow
+  // needle movement, pointing at rendering complexity rather than just
+  // a fast-value-change/hardware-timing coincidence).
+  lv_obj_set_style_line_rounded(needle_line, false, 0);
 
   lv_scale_set_line_needle_value(scale, needle_line, 170, testValue);
 
