@@ -429,3 +429,29 @@ wanted: confirm enabled fonts in lv_conf.h first.
 NOT yet bench-tested (button press cycling, half-moon rendering,
 6-value grid layout, and the newly-added CAN signal parsing) as of this
 writing.
+
+## Touch controller test (2026-09-28)
+
+New standalone test: `esp32s3-amoled-touch-test/`. Uses **bb_captouch**
+library (Larry Bank) - supports FT6x36-family chips (likely covers
+FT6146), auto-detects sensor type/address. FT3168 specifically isn't in
+its stated supported chip list - if this board's actual touch IC is
+FT3168 rather than FT6146, this library may not recognize it. This test
+makes that clear directly (prints init()/sensorType() results).
+
+Confirmed API (checked against installed library source):
+`BBCapTouch` class, `init(SDA, SCL, RST=-1, INT=-1, speed=400000)`,
+`getSamples(TOUCHINFO*)`. `TOUCHINFO` struct: `count` (0-5 active
+touches), `x[5]`/`y[5]` coordinate arrays, `pressure[5]`/`area[5]`.
+
+Touch pins (confirmed): TP_SDA=GPIO47, TP_SCL=GPIO48 - no dedicated
+reset/interrupt pin in the official pinout table, using -1 (unused) for
+both per the library's defaults.
+
+Test prints raw touch samples and detects swipe left/right (touch-down
+X vs touch-up X, threshold 60px) - validates the hardware/library
+before wiring swipe-to-change-page into the real multi-page gauge
+cluster (esp32s3-amoled-lvgl-can-gauge, currently uses the physical
+BOOT button for page cycling).
+
+NOT yet bench-tested as of this writing.
