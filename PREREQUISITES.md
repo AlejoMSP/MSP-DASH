@@ -1,0 +1,87 @@
+# Prerequisites
+
+Setup steps for a new Windows machine to build/flash firmware in this
+repo. Both boards (esp32-main WROOM, esp32s3-amoled-lvgl-can-gauge) use
+arduino-cli.
+
+## One-time environment setup
+
+Requires **winget** (built into modern Windows 10/11). If missing, the
+script below prints instructions to install it via Microsoft Store's
+"App Installer" rather than attempting an unverified direct download URL.
+
+```powershell
+# --- 0. Check for winget, guide manual install if missing ---
+$wingetCheck = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCheck) {
+    Write-Host "winget not found on this system."
+    Write-Host "Please install it manually: open Microsoft Store, search for 'App Installer', and install/update it."
+    Write-Host "Then re-run this script."
+    return
+}
+
+# --- 1. Install arduino-cli via winget ---
+winget install ArduinoSA.CLI
+
+Write-Host "If 'arduino-cli' isn't recognized below, close this PowerShell window, open a fresh one, and re-run from here."
+
+# --- 2. Confirm arduino-cli is on PATH ---
+arduino-cli version
+
+# --- 3. Init config and install the ESP32 board package (pinned to match the version this project has been built/tested against) ---
+arduino-cli config init
+arduino-cli core update-index
+arduino-cli core install esp32:esp32@3.3.11
+
+# --- 4. Install required libraries ---
+arduino-cli lib install "GFX Library for Arduino"
+arduino-cli lib install lvgl
+
+# --- 5. Set up lv_conf.h (checks for OneDrive-redirected Documents first - common on machines where OneDrive Known Folder Move is active) ---
+$libPath = if (Test-Path "$env:USERPROFILE\OneDrive\Documents\Arduino\libraries\lvgl") {
+    "$env:USERPROFILE\OneDrive\Documents\Arduino\libraries"
+} else {
+    "$env:USERPROFILE\Documents\Arduino\libraries"
+}
+Copy-Item "$libPath\lvgl\lv_conf_template.h" "$libPath\lv_conf.h"
+(Get-Content "$libPath\lv_conf.h") -replace '^#if 0 /\* Set this to "1" to enable content \*/', '#if 1 /* Set this to "1" to enable content */' | Set-Content "$libPath\lv_conf.h"
+
+Write-Host "Setup complete. Library path used: $libPath"
+```
+
+If step 2 (`arduino-cli version`) shows "not recognized," close the
+PowerShell window and open a fresh one before continuing - winget's PATH
+update sometimes doesn't apply to an already-open session.
+
+## Known Git/OneDrive quirk
+
+If this repo lives inside a OneDrive-synced folder, `git pull`/`git commit`
+may intermittently fail with:
+```
+fatal: update_ref failed for ref 'HEAD': cannot update the ref 'refs/heads/main': unable to append to '.git/logs/refs/heads/main': Invalid argument
+```
+Fix (per-repo, run once):
+```powershell
+git config windows.appendAtomically false
+```
+If a pull is interrupted by this error partway through, just re-run the
+same `git pull` command - already-fetched objects aren't re-downloaded,
+and it will finish updating the branch pointer.
+
+## Board-specific compile flags
+
+The ESP32-S3 AMOLED board (esp32s3-amoled-lvgl-can-gauge) needs board
+options beyond the default profile - its default has PSRAM disabled and
+flash set to 4MB, both wrong for this board's actual ESP32-S3R8 chip
+(8MB PSRAM) and 16MB flash:
+
+```powershell
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-lvgl-can-gauge
+arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-lvgl-can-gauge
+```
+
+The WROOM board (esp32-main) uses the plain default profile:
+```powershell
+arduino-cli compile --fqbn esp32:esp32:esp32 esp32-main
+arduino-cli upload -p COMx --fqbn esp32:esp32:esp32 esp32-main
+```

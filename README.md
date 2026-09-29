@@ -25,6 +25,10 @@ dependency on the WROOM board).
   and CAN wiring notes
 - Currently configured as a boost gauge
 
+## Getting started
+New machine setup (arduino-cli, board packages, libraries, lv_conf.h) -
+see `PREREQUISITES.md`.
+
 ## docs/
 Full build history, protocol confirmation status, and hardware bring-up
 notes for both boards. Worth reading before making changes - a lot of
