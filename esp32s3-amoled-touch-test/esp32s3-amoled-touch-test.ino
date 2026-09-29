@@ -1,25 +1,21 @@
 /*
   esp32s3-amoled-touch-test
-  Standalone test for the board's capacitive touch controller (FT3168 or
-  FT6146, varies by batch - same "varies" caveat as the display driver).
-  Prints raw touch samples and detected swipe direction to Serial -
-  validates the hardware/library work before wiring swipe-to-change-page
-  into the real multi-page gauge cluster.
+  REWRITTEN to be diagnosable: step-by-step setup logging + continuous
+  heartbeat print (every second), same fix that resolved the identical
+  "nothing shows on Serial" symptom seen earlier with the needle test -
+  either the boot-time prints were missed (monitor opened too late,
+  since they only print once) or something is hanging silently. The
+  heartbeat guarantees SOME output within ~1s of connecting the monitor,
+  at any point after boot, regardless of timing.
 
   Library: bb_captouch by Larry Bank - supports FT6x36-family chips
-  (likely covers FT6146) plus several others, with auto-detection of
-  sensor type/address. FT3168 specifically isn't in its stated supported
-  list - if this board's actual chip is FT3168, auto-detect may not
-  recognize it. This test will make that clear either way (prints
-  init() result and whatever getSamples() reports).
+  (likely covers FT6146), auto-detects sensor type/address. FT3168
+  specifically isn't in its stated supported list - if this board's
+  actual touch IC is FT3168 rather than FT6146, this library may not
+  recognize it. This test surfaces that directly via printed
+  init()/sensorType() results.
 
-  Touch pins (confirmed): TP_SDA=GPIO47, TP_SCL=GPIO48 (I2C). No
-  dedicated reset/interrupt pin listed in the official pinout table, so
-  using -1 (unused) for both, matching the library's defaults.
-
-  Swipe detection: tracks the touch position from first contact to
-  release (or largest movement across samples while touching), reports
-  LEFT/RIGHT if horizontal movement exceeds a threshold.
+  Touch pins (confirmed): TP_SDA=GPIO47, TP_SCL=GPIO48.
 */
 
 #include <bb_captouch.h>
@@ -34,19 +30,42 @@ int16_t touchStartX = -1;
 int16_t lastX = -1;
 const int16_t SWIPE_THRESHOLD_PX = 60;
 
+unsigned long lastHeartbeat = 0;
+unsigned long loopCount = 0;
+
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("Touch test starting...");
+  delay(1500); // extra time for USB serial to enumerate before first prints
 
+  Serial.println();
+  Serial.println("=== Touch test booting ===");
+
+  Serial.println("Step 1: calling touch.init()...");
   int result = touch.init(TOUCH_SDA, TOUCH_SCL);
-  Serial.printf("touch.init() returned: %d\n", result);
-  Serial.printf("sensorType() returned: %d\n", touch.sensorType());
+  Serial.print("Step 1 done. touch.init() returned: ");
+  Serial.println(result);
 
+  Serial.println("Step 2: calling touch.sensorType()...");
+  int sType = touch.sensorType();
+  Serial.print("Step 2 done. sensorType() returned: ");
+  Serial.println(sType);
+
+  Serial.println("=== Setup complete - entering loop() ===");
   Serial.println("Touch the screen and swipe left/right to test.");
 }
 
 void loop() {
+  unsigned long now = millis();
+
+  // Heartbeat: prints every second regardless of anything else, so
+  // connecting Serial Monitor at any point shows output within ~1s.
+  if (now - lastHeartbeat >= 1000) {
+    lastHeartbeat = now;
+    Serial.print("heartbeat - loop() running, iterations so far: ");
+    Serial.println(loopCount);
+  }
+  loopCount++;
+
   TOUCHINFO ti;
   int result = touch.getSamples(&ti);
 
@@ -55,14 +74,12 @@ void loop() {
                   ti.count, ti.x[0], ti.y[0], ti.pressure[0]);
 
     if (!wasTouching) {
-      // New touch-down
       touchStartX = ti.x[0];
       wasTouching = true;
     }
     lastX = ti.x[0];
   } else {
     if (wasTouching) {
-      // Touch just released - evaluate swipe
       int16_t deltaX = lastX - touchStartX;
       if (deltaX > SWIPE_THRESHOLD_PX) {
         Serial.println(">>> SWIPE RIGHT detected <<<");
