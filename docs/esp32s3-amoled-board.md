@@ -393,3 +393,39 @@ direct confirmation CAN data is flowing. A true dual-unit tick face
 (inHg on the left half, psi on the right, matching a real mechanical
 boost gauge) would be a larger follow-up if that authentic look is
 wanted later.
+
+## Multi-page gauge cluster (2026-09-28)
+
+Rewrote esp32s3-amoled-lvgl-can-gauge as a 3-page cluster, cycled with
+the board's physical BOOT button (GPIO0, active-low, debounced):
+
+- **Page 1**: AFR needle gauge (range 10-20) + precise numeric readout
+  below the needle (e.g. "14.7")
+- **Page 2**: Coolant Temp (0-260F) and Oil Pressure (0-700kPa) as two
+  independent half-moon (180-degree) gauges side by side. Half-moon
+  achieved via lv_scale_set_angle_range(180) + lv_scale_set_rotation(-90)
+  (opens upward, matching a classic rainbow-arc gauge look)
+- **Page 3**: 6-value grid - AFR/CLT, Oil Temp/Oil Press, Fuel Press/
+  Flex% - plain numeric labels, 2 columns x 3 rows
+
+Uses LVGL's native multi-screen support (lv_obj_create(NULL) creates each
+page as an independent top-level screen, lv_screen_load() switches the
+active one). All CAN parsing and gauge-value updates run every loop()
+regardless of which page is currently loaded/visible - switching pages
+always shows already-current data with no lag, since updating an LVGL
+object on a non-active screen is harmless (no display cost until that
+screen is loaded).
+
+Expanded CAN parsing to cover: RUSEFI_BASE1 (FlexPct), RUSEFI_BASE3
+(MAP/boost + CLT), RUSEFI_BASE4 (OilPress + OilTemp), RUSEFI_BASE7
+(AFR via Lambda + FuelPress/FpLow) - up from boost-only.
+
+Font note: all text uses LVGL's default font size - didn't reference a
+specific larger font (e.g. LV_FONT_MONTSERRAT_36) since which font sizes
+are actually enabled in lv_conf.h isn't confirmed, and guessing risked
+an "undefined identifier" compile error. Follow-up if bigger text is
+wanted: confirm enabled fonts in lv_conf.h first.
+
+NOT yet bench-tested (button press cycling, half-moon rendering,
+6-value grid layout, and the newly-added CAN signal parsing) as of this
+writing.
