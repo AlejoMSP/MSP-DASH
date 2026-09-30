@@ -38,6 +38,7 @@ volatile float g_flex_pct = 0;
 volatile int g_requested_page = -1;
 
 static lv_obj_t *page1, *page2, *page3;
+static int s_current_page = 0; // tracked here so swipe gestures know which direction is "next"/"previous"
 
 static lv_obj_t *afr_meter;
 static lv_meter_indicator_t *afr_needle;
@@ -144,6 +145,28 @@ static void build_page3(void) {
   g_flex_cell  = make_grid_cell(page3, colX[1], rowY[2], "FLEX %");
 }
 
+// Fires from WITHIN LVGL's own task context (gesture detection happens
+// during lv_timer_handler()'s normal processing) - safe to call
+// lv_disp_load_scr() directly here, unlike Arduino's loop() which must
+// go through the g_requested_page flag instead.
+static void gesture_event_cb(lv_event_t *e) {
+  lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+  int next_page = s_current_page;
+
+  if (dir == LV_DIR_LEFT) {
+    next_page = (s_current_page + 1) % 3;
+  } else if (dir == LV_DIR_RIGHT) {
+    next_page = (s_current_page + 2) % 3; // +2 mod 3 == -1 mod 3, avoids negative modulo
+  } else {
+    return; // vertical or no clear gesture - ignore
+  }
+
+  s_current_page = next_page;
+  if (next_page == 0) lv_disp_load_scr(page1);
+  else if (next_page == 1) lv_disp_load_scr(page2);
+  else lv_disp_load_scr(page3);
+}
+
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   char buf[16];
 
@@ -153,6 +176,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
     if (g_requested_page == 0) lv_disp_load_scr(page1);
     else if (g_requested_page == 1) lv_disp_load_scr(page2);
     else lv_disp_load_scr(page3);
+    s_current_page = g_requested_page;
     g_requested_page = -1;
   }
 
@@ -182,6 +206,14 @@ void build_gauge_app(void) {
   build_page1();
   build_page2();
   build_page3();
+
+  // Swipe left/right to change pages - attached to each page (a
+  // screen's root object) so gestures anywhere on that page's content
+  // bubble up and trigger this callback.
+  lv_obj_add_event_cb(page1, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+  lv_obj_add_event_cb(page2, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+  lv_obj_add_event_cb(page3, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+
   lv_disp_load_scr(page1);
 
   lv_timer_create(gauge_update_timer_cb, 80, NULL); // 80ms, matches the update rate used throughout this project's other gauge sketches

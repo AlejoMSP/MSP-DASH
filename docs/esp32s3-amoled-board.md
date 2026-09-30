@@ -562,3 +562,23 @@ re-verified independently.
 NOT yet bench-tested (real CAN data flowing into these new pages, BOOT
 button page-switching, half-moon rendering, rotation angle correctness)
 as of this writing.
+
+## Swipe gesture page switching (2026-09-30)
+
+Added touch swipe left/right to change pages, alongside the existing
+BOOT button (both work). Confirmed API used (checked against installed
+v8.4.0 source, including a header comment that gave the exact call
+pattern): `lv_obj_add_event_cb(obj, cb, LV_EVENT_GESTURE, user_data)`,
+and inside the callback: `lv_indev_get_gesture_dir(lv_indev_get_act())`
+returning `LV_DIR_LEFT`/`LV_DIR_RIGHT`.
+
+Attached to all 3 page root objects (screens) so gestures anywhere on a
+page's content bubble up and trigger the callback. Since gesture events
+fire from within LVGL's own task context (detected during
+lv_timer_handler()'s normal processing), the callback calls
+lv_disp_load_scr() directly - unlike the BOOT button path (which crosses
+from Arduino's separate loop() task and must go through the
+g_requested_page flag instead). A new `s_current_page` tracker in
+gauge_app.c keeps both switching mechanisms in sync.
+
+NOT yet bench-tested as of this writing.
