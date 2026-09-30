@@ -19,6 +19,7 @@
 
 #include "web_monitor.h"
 #include "gauge_app.h"
+#include "ecu_config.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <string.h>
@@ -47,6 +48,14 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <body>
   <h1>MSP-DASH Live Monitor</h1>
   <p style="text-align:center"><a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a></p>
+  <div style="text-align:center; margin-top:10px;">
+    <label>ECU: <select id="ecuSelect">
+      <option value="0">rusEFI</option>
+      <option value="1">MegaSquirt</option>
+      <option value="2">LinkECU</option>
+    </select></label>
+    <button onclick="saveEcu()">Save</button>
+  </div>
   <div class="grid">
     <div class="cell"><div class="label">CLT (F)</div><div class="value" id="clt">--</div></div>
     <div class="cell"><div class="label">MAP (kPa)</div><div class="value" id="map">--</div></div>
@@ -57,6 +66,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="cell"><div class="label">ETH %</div><div class="value" id="flex">--</div></div>
   </div>
   <script>
+    fetch("/ecu").then(r => r.json()).then(d => { document.getElementById("ecuSelect").value = d.ecu; });
+    function saveEcu() {
+      const val = document.getElementById("ecuSelect").value;
+      fetch("/ecu", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded"}, body: "ecu=" + val });
+    }
     const ws = new WebSocket("ws://" + location.host + "/ws");
     ws.onmessage = (event) => {
       const d = JSON.parse(event.data);
@@ -204,6 +218,19 @@ void web_monitor_init(void) {
 
   server.on("/can.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", buildCanJson());
+  });
+
+  server.on("/ecu", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String json = "{\"ecu\":" + String((int)ecu_config_get()) + "}";
+    request->send(200, "application/json", json);
+  });
+
+  server.on("/ecu", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("ecu", true)) {
+      int val = request->getParam("ecu", true)->value().toInt();
+      ecu_config_set((EcuSelection)val);
+    }
+    request->send(200, "text/plain", "OK");
   });
 
   server.addHandler(&ws);

@@ -784,3 +784,27 @@ one we recognize/decode).
 Confirmed twai_message_t's actual field name (data_length_code) from
 ESP-IDF's hal/twai_types_deprecated.h header before using it - matched
 the initial guess, no correction needed.
+
+## Stage 3: ECU selection (2026-09-30)
+
+Ported the MegaSquirt/LinkECU shared parser directly from the WROOM
+board's confirmed handleSecondaryEcuFrame (esp32-main.ino) - same CAN
+IDs (base 1520/0x5F0), same big-endian word extraction, same /10
+scaling, same block layout (BLOCK2: baro/MAP/MAT/CLT, BLOCK3: TPS/BATT/
+EGO1, BLOCK13: FUELP/OILP/OILT, BLOCK47: Ethanol%). Feeds the same
+global g_* values used by the gauge cluster and web monitor.
+
+New files: ecu_config.h/.cpp - persisted ECU selection (rusEFI/
+MegaSquirt/LinkECU) via Preferences/NVS, same pattern as the WROOM
+board's sysPrefs. Per the WROOM board's own design, this selection is
+purely a DISPLAY LABEL, not a parsing gate - MegaSquirt/LinkECU's ID
+range (1520+) never overlaps rusEFI's (0x200s), so both parsers stay
+active simultaneously regardless of which is "selected" - matches the
+WROOM board's exact approach.
+
+Web page: added an ECU dropdown (rusEFI/MegaSquirt/LinkECU) with a
+Save button, GET/POST /ecu endpoint for reading/writing the current
+selection.
+
+NOT yet bench-tested (MS/Link parsing specifically, since testing so
+far has used rusEFI) as of this writing.
