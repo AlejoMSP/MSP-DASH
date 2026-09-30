@@ -21,21 +21,23 @@ extern volatile float g_oilp_kpa;
 extern volatile float g_oilt_f;
 extern volatile float g_fuelp_kpa;
 extern volatile float g_flex_pct;
+extern volatile float g_boost_kpa;
 
 // Set true the first time a real CAN frame updates each signal - until
-// then, that gauge's needle sits at its own minimum rather than showing
-// a possibly-misleading default/zero value.
+// then, that gauge's needle sits at its rest value (min, or 0 for
+// boost/vacuum) rather than showing a possibly-misleading default value.
 extern volatile bool g_afr_has_data;
 extern volatile bool g_clt_has_data;
 extern volatile bool g_oilp_has_data;
 extern volatile bool g_oilt_has_data;
 extern volatile bool g_fuelp_has_data;
 extern volatile bool g_flex_has_data;
+extern volatile bool g_boost_has_data;
 
 // Set from Arduino's loop() when the BOOT button is pressed (debounced
 // there) - our LVGL timer callback checks this and performs the actual
 // lv_disp_load_scr() call safely from within LVGL's own task context.
-extern volatile int g_requested_page; // -1 = no change requested, 0-5 = switch to that page
+extern volatile int g_requested_page; // -1 = no change requested, 0-7 = switch to that page
 
 #ifdef __cplusplus
 }

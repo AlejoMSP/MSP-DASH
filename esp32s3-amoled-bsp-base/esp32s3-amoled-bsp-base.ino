@@ -70,6 +70,10 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       break;
     }
     case RUSEFI_BASE3: {
+      uint16_t mapRaw = readU16LE(d, 0);
+      float mapKpa = mapRaw * 0.0333333f;
+      g_boost_kpa = mapKpa - 101.3f; // ASSUMED_BARO_KPA, same fixed assumption used throughout this project
+      g_boost_has_data = true;
       int8_t cltRaw = (int8_t)d[2];
       g_clt_f = cToF(cltRaw - 40);
       g_clt_has_data = true;

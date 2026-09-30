@@ -614,3 +614,28 @@ lv_timer_reset() exists in this v8.4.0 install before using it.
 NOT yet bench-tested (visual density/legibility of 26-tick scale
 across all 6 differently-ranged gauges, auto-cycle timing, no-data
 fallback behavior) as of this writing.
+
+## Refinements: thicker needle, numbers page, boost gauge, no auto-cycle (2026-09-30)
+
+- Needle width increased (5 -> 8) - thicker per request
+- Major tick label_gap increased (15 -> 25) - numbers sit further from
+  tick marks for clearer separation
+- New page 6: numbers grid - all 6 gauge values as plain digital
+  readouts (reusing the same grid-label pattern from the earlier
+  3-page design), no meter widget on this page
+- New page 7: BOOST/VACUUM gauge, range -150 to 200 kPa, rests at 0
+  (not the range minimum) until real data arrives - a genuine special
+  case, since 0 (atmospheric, no boost/no vacuum) is the meaningful
+  "at rest" point here, unlike the other gauges where sitting at their
+  minimum makes sense. Added a per-page `rest_val` field (separate from
+  `min_val`) to support this.
+  UNIT NOTE: true inHg (vacuum)/PSI (boost) dual-unit tick labels aren't
+  supported by lv_meter's built-in single linear numeric axis - this
+  gauge uses kPa (the unit our CAN math already computes) instead,
+  captioned "BOOST/VACUUM (kPa)". A true dual-unit tick face would need
+  a custom per-tick label override - flagged as a larger separate task
+  if wanted later.
+- Auto-cycle timer removed entirely - manual navigation (swipe/BOOT
+  button) only now, per request.
+
+NOT yet bench-tested as of this writing.
