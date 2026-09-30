@@ -12,6 +12,7 @@
 */
 
 #include "sd_storage.h"
+#include <Arduino.h>
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include "driver/sdmmc_host.h"
