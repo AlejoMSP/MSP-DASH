@@ -39,6 +39,9 @@ typedef struct {
   uint32_t needle_color; // 0xRRGGBB
   uint32_t tick_color;   // 0xRRGGBB - minor/major tick marks and their number labels
   uint32_t bg_color;     // 0xRRGGBB - page/meter face background (also the "off" state of the warning flash, instead of assuming black)
+  float value_divisor;   // live signal value is divided by this before display - e.g. 1000 for RPM shown as "RPM x1000" with clean 1-9 ticks. 1.0 for no scaling.
+  int32_t tick_count;    // total ticks across the sweep (minor+major combined) - lets a gauge like RPM (range 1-9, wants exactly 9 evenly labeled ticks) differ from the standard density used elsewhere
+  int32_t major_nth;     // every Nth tick is a labeled major tick
   bool has_warning;
   float warning_threshold;
   bool warning_above;
@@ -56,6 +59,11 @@ GaugeSlotConfig *gauge_config_get_slots(void);
 // Saves the current in-memory config array to NVS - call after
 // applying changes received from the web config page.
 void gauge_config_save(void);
+
+// Swaps two slots' positions in the array - the basis for reordering
+// which page a gauge appears on, since build_gauge_app() builds pages
+// in array order.
+void gauge_config_swap_slots(int a, int b);
 
 // Human-readable signal name, for the web UI's dropdown and captions.
 const char *gauge_config_signal_name(SignalId sig);

@@ -38,6 +38,7 @@
 #include "web_monitor.h"
 #include "ecu_config.h"
 #include "sd_storage.h"
+#include "sd_logging.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available),
 // same as our earlier v9-based sketch. These are this board's dedicated
@@ -229,6 +230,7 @@ void setup()
   Serial.println("CAN running - waiting for rusEFI frames...");
 
   sd_storage_init();
+  sd_logging_init();
   web_monitor_init();
 }
 
@@ -242,4 +244,5 @@ void loop()
   }
   checkPageButton();
   web_monitor_loop();
+  sd_logging_loop();
 }
