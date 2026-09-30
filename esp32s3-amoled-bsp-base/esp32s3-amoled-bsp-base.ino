@@ -34,6 +34,7 @@
 #include "FT3168.h"
 #include "gauge_app.h"
 #include "driver/twai.h"
+#include "web_monitor.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available),
 // same as our earlier v9-based sketch. These are this board's dedicated
@@ -136,6 +137,8 @@ void setup()
     Serial.println("TWAI start FAILED");
   }
   Serial.println("CAN running - waiting for rusEFI frames...");
+
+  web_monitor_init();
 }
 
 void loop()
@@ -145,4 +148,5 @@ void loop()
     handleRusefiFrame(message.identifier, message.data);
   }
   checkPageButton();
+  web_monitor_loop();
 }

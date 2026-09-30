@@ -708,3 +708,28 @@ an ongoing idle animation once live data is flowing.
 New clamped_or_sweep() function replaces the old clamped_or_rest();
 added sweep_pos/sweep_step/sweep_dir fields to GaugePage, initialized
 in build_full_gauge_page().
+
+## Stage 1: WiFi + web monitor (2026-09-30)
+
+New files: web_monitor.h/.cpp. WiFi AP mode ("MSP-DASH" network),
+AsyncWebServer + AsyncWebSocket serving a simple live-updating HTML
+page showing all 7 sensor values, broadcasting JSON every 500ms to
+connected clients. Uses the same "ESP Async WebServer" + "Async TCP"
+libraries already proven working on the WROOM board (esp32-main)
+elsewhere in this project - same general pattern, adapted for this
+board's 7 values instead of the WROOM board's 74 gauges.
+
+Read-only monitoring only for now (Stage 1 of the larger wireless
+configuration plan) - no control/configuration yet. Broadcast skips
+building/sending JSON entirely when no clients are connected
+(ws.count() == 0), avoiding unnecessary work.
+
+Connect a phone to the "MSP-DASH" WiFi network, then browse to
+192.168.4.1 (the default AP IP) to view the live monitor page.
+
+Planned next stages: raw CAN broadcast monitor (any ID, not just
+recognized ones), ECU selection (port WROOM board's MegaSquirt/LinkECU
+parser, persisted via NVS), full gauge configuration (color/range/
+add/remove/rename, requires a data-driven gauge-config refactor).
+
+NOT yet bench-tested as of this writing.
