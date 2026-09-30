@@ -455,3 +455,19 @@ cluster (esp32s3-amoled-lvgl-can-gauge, currently uses the physical
 BOOT button for page cycling).
 
 NOT yet bench-tested as of this writing.
+
+## Serial echo test - RX direction diagnostic (2026-09-28)
+
+New minimal test: `esp32s3-amoled-serial-echo/`. Type on any Serial
+terminal, whatever you type appears on the AMOLED screen. Tests the
+OPPOSITE direction from what's been failing (Serial RX - computer to
+board - instead of Serial TX/print - board to computer), plus the
+display itself, independent of Serial.print() output or LVGL/any
+complex library - raw Arduino_GFX text drawing only.
+
+Built in response to persistent "nothing shows on Serial Monitor"
+symptom across multiple sketches/computers - if typed characters DO
+appear on screen, that proves the board is genuinely running
+application code, USB serial works in at least the RX direction, and
+the display is fine - isolating the problem specifically to Serial
+TX/print visibility in the monitor tools tried so far, not a dead board.
