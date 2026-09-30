@@ -135,8 +135,9 @@ static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const ch
 
   lv_obj_t *val = lv_label_create(parent);
   lv_obj_set_style_text_color(val, lv_color_white(), 0);
+  lv_obj_set_style_text_font(val, &lv_font_montserrat_28, 0); // bigger numbers per request
   lv_label_set_text(val, "--");
-  lv_obj_set_pos(val, x, y + 20);
+  lv_obj_set_pos(val, x, y + 24); // slightly more vertical clearance for the larger font
   return val;
 }
 
@@ -192,17 +193,17 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   lv_meter_set_indicator_value(pages[0].meter, pages[0].needle,
     clamped_or_rest(g_afr, g_afr_has_data, pages[0].min_val, pages[0].max_val, pages[0].rest_val));
   lv_meter_set_indicator_value(pages[1].meter, pages[1].needle,
-    clamped_or_rest(g_clt_f, g_clt_has_data, pages[1].min_val, pages[1].max_val, pages[1].rest_val));
+    clamped_or_rest(g_boost_kpa, g_boost_has_data, pages[1].min_val, pages[1].max_val, pages[1].rest_val));
   lv_meter_set_indicator_value(pages[2].meter, pages[2].needle,
-    clamped_or_rest(g_oilp_kpa, g_oilp_has_data, pages[2].min_val, pages[2].max_val, pages[2].rest_val));
+    clamped_or_rest(g_clt_f, g_clt_has_data, pages[2].min_val, pages[2].max_val, pages[2].rest_val));
   lv_meter_set_indicator_value(pages[3].meter, pages[3].needle,
-    clamped_or_rest(g_oilt_f, g_oilt_has_data, pages[3].min_val, pages[3].max_val, pages[3].rest_val));
+    clamped_or_rest(g_oilp_kpa, g_oilp_has_data, pages[3].min_val, pages[3].max_val, pages[3].rest_val));
   lv_meter_set_indicator_value(pages[4].meter, pages[4].needle,
-    clamped_or_rest(g_fuelp_kpa, g_fuelp_has_data, pages[4].min_val, pages[4].max_val, pages[4].rest_val));
+    clamped_or_rest(g_oilt_f, g_oilt_has_data, pages[4].min_val, pages[4].max_val, pages[4].rest_val));
   lv_meter_set_indicator_value(pages[5].meter, pages[5].needle,
-    clamped_or_rest(g_flex_pct, g_flex_has_data, pages[5].min_val, pages[5].max_val, pages[5].rest_val));
-  lv_meter_set_indicator_value(pages[7].meter, pages[7].needle,
-    clamped_or_rest(g_boost_kpa, g_boost_has_data, pages[7].min_val, pages[7].max_val, pages[7].rest_val));
+    clamped_or_rest(g_fuelp_kpa, g_fuelp_has_data, pages[5].min_val, pages[5].max_val, pages[5].rest_val));
+  lv_meter_set_indicator_value(pages[6].meter, pages[6].needle,
+    clamped_or_rest(g_flex_pct, g_flex_has_data, pages[6].min_val, pages[6].max_val, pages[6].rest_val));
 
   char buf[16];
   snprintf(buf, sizeof(buf), "%.1f", g_afr); lv_label_set_text(g_afr_cell, buf);
@@ -215,13 +216,13 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
 void build_gauge_app(void) {
   build_full_gauge_page(0, 10, 20, 10, "AFR");
-  build_full_gauge_page(1, 65, 300, 65, "COOLANT TEMP (F)");
-  build_full_gauge_page(2, 0, 100, 0, "OIL PRESSURE (kPa)");
-  build_full_gauge_page(3, 65, 240, 65, "OIL TEMP (F)");
-  build_full_gauge_page(4, 0, 100, 0, "FUEL PRESSURE (kPa)");
-  build_full_gauge_page(5, 0, 100, 0, "ETHANOL %");
-  build_numbers_page(6);
-  build_full_gauge_page(7, -150, 200, 0, "BOOST/VACUUM (kPa)"); // rests at 0, not min - see header note on units
+  build_full_gauge_page(1, 0, 200, 100, "MAP / BOOST (kPa) - 100 = AMBIENT"); // 100 kPa = atmospheric/ambient pressure, not 0 - a raw MAP reading, not baro-subtracted
+  build_full_gauge_page(2, 65, 300, 65, "COOLANT TEMP (F)");
+  build_full_gauge_page(3, 0, 100, 0, "OIL PRESSURE (kPa)");
+  build_full_gauge_page(4, 65, 240, 65, "OIL TEMP (F)");
+  build_full_gauge_page(5, 0, 100, 0, "FUEL PRESSURE (kPa)");
+  build_full_gauge_page(6, 0, 100, 0, "ETHANOL %");
+  build_numbers_page(7);
 
   s_current_page = 0;
   lv_disp_load_scr(pages[0].page);

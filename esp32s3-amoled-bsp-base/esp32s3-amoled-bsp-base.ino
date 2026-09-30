@@ -49,7 +49,6 @@
 #define RUSEFI_BASE3 0x203
 #define RUSEFI_BASE4 0x204
 #define RUSEFI_BASE7 0x207
-#define ASSUMED_BARO_KPA 101.3f
 
 // ---- Page-switch button (board's physical BOOT button) ----
 #define BOOT_BTN_PIN 0
@@ -72,7 +71,7 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
     case RUSEFI_BASE3: {
       uint16_t mapRaw = readU16LE(d, 0);
       float mapKpa = mapRaw * 0.0333333f;
-      g_boost_kpa = mapKpa - 101.3f; // ASSUMED_BARO_KPA, same fixed assumption used throughout this project
+      g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-200 with 100 as the "ambient/zero" reference point
       g_boost_has_data = true;
       int8_t cltRaw = (int8_t)d[2];
       g_clt_f = cToF(cltRaw - 40);

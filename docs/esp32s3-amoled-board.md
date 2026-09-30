@@ -653,3 +653,19 @@ NOTE: with a much larger font at the same label_gap (25) used for the
 smaller 14px font, numbers may visually crowd against tick marks or
 each other - not yet visually confirmed, may need the gap or meter size
 adjusted once tested.
+
+## Page reorder, boost/MAP recentered, bigger grid numbers (2026-09-30)
+
+- Page order changed: Boost/MAP now page 1 (right after AFR), pushing
+  CLT/OilP/OilT/FuelP/Flex%/NumbersGrid each down one slot (now 2-7)
+- Boost gauge changed from a baro-subtracted signed value (-150 to 200,
+  rest 0) to raw MAP (0-200 kPa, rest 100) - 100 kPa represents
+  ambient/atmospheric pressure directly (no ECU baro sensor needed,
+  matches rusEFI's DBC which has no live baro signal - same
+  fixed-assumption rationale used throughout this project, just applied
+  differently: instead of subtracting a fixed baro constant to get a
+  signed "boost" value, the raw MAP number itself is shown, with the
+  gauge face's "100" tick serving as the visual ambient reference)
+- Numbers-grid page (now page 7): value labels enlarged to 28px
+  (lv_font_montserrat_28, already enabled), row vertical offset bumped
+  slightly (20->24) for clearance under the larger font
