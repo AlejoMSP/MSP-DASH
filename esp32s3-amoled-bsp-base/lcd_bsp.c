@@ -3,6 +3,7 @@
 #include "lcd_config.h"
 #include "FT3168.h"
 #include "read_lcd_id_bsp.h"
+#include "gauge_app.h"
 static SemaphoreHandle_t lvgl_mux = NULL; //mutex semaphores
 #define LCD_HOST    SPI2_HOST
 
@@ -119,10 +120,7 @@ void lcd_lvgl_Init(void)
   xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
   if (example_lvgl_lock(-1)) 
   {   
-    lv_demo_widgets();      /* A widgets example */
-    //lv_demo_music();        /* A modern, smartphone-like music player demo. */
-    //lv_demo_stress();       /* A stress test for LVGL. */
-    //lv_demo_benchmark();    /* A demo to measure the performance of LVGL or to compare different settings. */
+    build_gauge_app();      /* Our multi-page gauge cluster - replaces the original lv_demo_widgets() placeholder */
 
     // Release the mutex
     example_lvgl_unlock();

@@ -471,3 +471,94 @@ appear on screen, that proves the board is genuinely running
 application code, USB serial works in at least the RX direction, and
 the display is fine - isolating the problem specifically to Serial
 TX/print visibility in the monitor tools tried so far, not a dead board.
+
+## Full pivot: multi-page gauge cluster on Waveshare's ESP-IDF/LVGL v8 BSP (2026-09-30)
+
+Major architecture change, following a long debugging saga (persistent
+"nothing on Serial", display/touch issues never fully resolved on our
+Arduino_GFX + LVGL v9 + bb_captouch stack). Root cause was finally
+isolated by flashing Waveshare's own factory firmware directly - display
+AND touch both worked perfectly, proving the hardware was always fine
+and the problem was entirely in our software stack. Their factory image
+uses a completely different foundation: ESP-IDF's native `esp_lcd_panel`
+framework (not Arduino_GFX), LVGL v8.4.0 (not v9), LVGL running on its
+own dedicated FreeRTOS task, and a small custom I2C driver for touch
+(not a library). Confirmed via their own bundled example source
+(07_LVGL_Test), compiled and flashed through our own arduino-cli
+toolchain - both display and touch confirmed working end-to-end.
+
+Two real hardware facts this also corrected, from the source code itself:
+- **Display driver is genuinely SH8601** (not CO5300 as our own
+  dithering/blank-screen testing had concluded) - their code
+  auto-detects the chip ID at runtime and picks the right init sequence
+  for either, explaining why "SH8601 or CO5300" wasn't actually
+  ambiguous for THEM.
+- **Touch controller is genuinely FT3168** (matching the official specs
+  we originally had, before bb_captouch's lack of FT3168 support led us
+  to suspect it might be the other listed option, FT6146).
+
+### New sketch: esp32s3-amoled-bsp-base/
+Built directly on top of Waveshare's confirmed-working 07_LVGL_Test
+example (all files: lcd_bsp.c/h, esp_lcd_sh8601.c/h, FT3168.cpp/h,
+read_lcd_id_bsp.c/h, lcd_config.h - unmodified except one targeted
+change). Library setup: their bundled `lvgl` v8.4.0 and matching
+`lv_conf.h` replace our earlier v9 install (backed up, not deleted, as
+lvgl_v9_backup / lv_conf_v9_backup.h in the Arduino libraries folder).
+
+**The one edit made to their code**: in lcd_bsp.c, added
+`#include "gauge_app.h"` and replaced the placeholder
+`lv_demo_widgets();` call with `build_gauge_app();` - everything else in
+their confirmed-working display/touch/LVGL init is untouched.
+
+### gauge_app.c/h - our actual gauge cluster
+Rebuilt the same 3-page layout from the earlier v9 attempt, now using
+v8's `lv_meter` widget (the classic all-in-one gauge widget removed in
+v9 - simpler than the v9 lv_scale+lv_line manual composition):
+- Page 1: AFR meter (range 10-20) + precise numeric readout
+- Page 2: CLT + Oil Pressure as independent half-moon (180-degree)
+  meters side by side
+- Page 3: 6-value grid (AFR/CLT, Oil Temp/Oil Press, Fuel Press/Flex%)
+
+Confirmed lv_meter API (checked against installed v8.4.0 source):
+`lv_meter_create`, `lv_meter_add_scale`, `lv_meter_set_scale_ticks`,
+`lv_meter_set_scale_major_ticks`, `lv_meter_set_scale_range`,
+`lv_meter_add_needle_line`, `lv_meter_set_indicator_value`. Also
+confirmed: `lv_obj_create(NULL)` for screens, `lv_disp_load_scr()` for
+switching, `lv_label_create`/`lv_label_set_text`, and
+`lv_obj_set_style_bg_color`/`lv_obj_set_style_text_color` (v8 signature
+takes a `lv_style_selector_t selector` param, using `0` for default
+part/state - very common v8 convention).
+
+NOTE - unverified: the `rotation` parameter values in
+`lv_meter_set_scale_range` (135 for the full gauge, 180 for the
+half-moons) are a best-effort match to the classic "opens at the
+bottom"/"opens upward" gauge looks established elsewhere in this
+project - not independently confirmed against source for this exact
+API's angle convention, may need visual adjustment once tested.
+
+### Thread-safety approach
+LVGL runs on its own FreeRTOS task (their BSP's design); Arduino's
+loop() is left empty by their example and is where our CAN/TWAI polling
+and BOOT-button page-switching now live. To avoid calling any LVGL
+function from outside LVGL's own task (unsafe without their internal
+mutex, which is file-scope static in lcd_bsp.c), loop() only ever
+writes simple global values (plain volatile float/int - safe for
+single-word reads/writes on this architecture, same pattern used
+throughout this project). gauge_app.c registers one `lv_timer` (ticks
+automatically whenever LVGL's port task calls `lv_timer_handler()`,
+already properly locked) that reads those globals and performs all
+actual LVGL API calls, including page-switching via a simple
+"requested page" flag.
+
+### CAN wiring
+Using GPIO1/GPIO2 (originally-identified free/accessible pins on the
+1.27mm GPIO header) - NOT GPIO43/44, which are this board's dedicated
+UART0 pins (confirmed from the official pinout table) and were the
+likely root cause of the Serial-visibility saga on the OLDER stack -
+though with this new BSP foundation, Serial now uses whatever routing
+Waveshare's own code establishes, which has not yet been specifically
+re-verified independently.
+
+NOT yet bench-tested (real CAN data flowing into these new pages, BOOT
+button page-switching, half-moon rendering, rotation angle correctness)
+as of this writing.
