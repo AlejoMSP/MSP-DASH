@@ -167,21 +167,40 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
     let slots = [];
 
+    function moveSlot(i, dir) {
+      const j = i + dir;
+      if (j < 0 || j >= slots.length) return;
+      const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp;
+      renderSlots();
+    }
+
     function renderSlots() {
       const container = document.getElementById("slots");
       container.innerHTML = slots.map((s, i) => `
         <div class="slot">
+          <div class="row2">
+            <div><strong>Page ${i + 1}</strong></div>
+            <div style="text-align:right">
+              <button type="button" onclick="moveSlot(${i},-1)" ${i===0?"disabled":""}>&uarr; Up</button>
+              <button type="button" onclick="moveSlot(${i},1)" ${i===slots.length-1?"disabled":""}>&darr; Down</button>
+            </div>
+          </div>
           <label>Signal
             <select onchange="slots[${i}].signal=parseInt(this.value)">
               ${SIGNALS.map((name, v) => `<option value="${v}" ${s.signal===v?"selected":""}>${name}</option>`).join("")}
             </select>
           </label>
-          <label><input type="checkbox" ${s.enabled?"checked":""} onchange="slots[${i}].enabled=this.checked"> Enabled</label>
+          <label><input type="checkbox" ${s.enabled?"checked":""} onchange="slots[${i}].enabled=this.checked"> Enabled (shown on a page)</label>
           <label>Caption <input type="text" value="${s.caption}" onchange="slots[${i}].caption=this.value"></label>
           <div class="row2">
             <div><label>Min <input type="number" value="${s.min}" onchange="slots[${i}].min=parseInt(this.value)"></label></div>
             <div><label>Max <input type="number" value="${s.max}" onchange="slots[${i}].max=parseInt(this.value)"></label></div>
             <div><label>Rest <input type="number" value="${s.rest}" onchange="slots[${i}].rest=parseInt(this.value)"></label></div>
+          </div>
+          <div class="row2">
+            <div><label>Value Divisor <input type="number" step="any" value="${s.value_divisor}" onchange="slots[${i}].value_divisor=parseFloat(this.value)"></label></div>
+            <div><label>Tick Count <input type="number" value="${s.tick_count}" onchange="slots[${i}].tick_count=parseInt(this.value)"></label></div>
+            <div><label>Major Every Nth <input type="number" value="${s.major_nth}" onchange="slots[${i}].major_nth=parseInt(this.value)"></label></div>
           </div>
           <label>Needle Color <input type="color" value="#${s.color.toString(16).padStart(6,'0')}" onchange="slots[${i}].color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${s.tick_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].tick_color=parseInt(this.value.substring(1),16)"></label>
@@ -400,6 +419,9 @@ void web_monitor_init(void) {
       o["color"] = slots[i].needle_color;
       o["tick_color"] = slots[i].tick_color;
       o["bg_color"] = slots[i].bg_color;
+      o["value_divisor"] = slots[i].value_divisor;
+      o["tick_count"] = slots[i].tick_count;
+      o["major_nth"] = slots[i].major_nth;
       o["has_warning"] = slots[i].has_warning;
       o["warning_threshold"] = slots[i].warning_threshold;
       o["warning_above"] = slots[i].warning_above;
@@ -440,6 +462,9 @@ void web_monitor_init(void) {
             slots[i].needle_color = (uint32_t)(long)o["color"];
             slots[i].tick_color = (uint32_t)(long)o["tick_color"];
             slots[i].bg_color = (uint32_t)(long)o["bg_color"];
+            slots[i].value_divisor = o["value_divisor"] | 1.0f;
+            slots[i].tick_count = o["tick_count"] | 26;
+            slots[i].major_nth = o["major_nth"] | 5;
             slots[i].has_warning = o["has_warning"];
             slots[i].warning_threshold = o["warning_threshold"];
             slots[i].warning_above = o["warning_above"];

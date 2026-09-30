@@ -916,3 +916,32 @@ This adds meaningful new code (ESP-IDF SD/VFS components, directory
 listing, chunked upload/download handlers) on top of an already
 93%-flash-used build - watch the next compile's storage percentage
 closely.
+
+## SD logging, gauge reordering, RPM special display (2026-09-30)
+
+**SD logging**: new sd_logging.h/.cpp - always-on CSV logging from boot
+(session-numbered file, same pattern as the WROOM board's initSdLogging/
+updateSdLogging, adapted to POSIX file I/O matching this board's
+ESP-IDF-native VFS mount instead of Arduino's SD.h/File class). Logs
+every enabled gauge's live value every 500ms, header row uses each
+slot's caption as the column name.
+
+**Gauge reordering**: added gauge_config_swap_slots() and reorder
+Up/Down buttons on the /gauges web page - since pages are built in
+array order, swapping slot positions changes which page a gauge
+appears on. Reordering happens client-side in the browser's local copy
+and only takes effect on the board once Save is pressed (consistent
+with the existing "reboot to apply" behavior for all config changes).
+
+**RPM special display / general tick customization**: added
+value_divisor, tick_count, and major_nth fields to GaugeSlotConfig -
+value_divisor divides the live signal value before display (RPM
+defaults to 1000, captioned "RPM x1000", with tick_count=9/major_nth=1
+giving exactly 9 evenly-labeled ticks 1 through 9 on a 1-9 range,
+avoiding the same custom-per-tick-label limitation we hit with the
+boost/vacuum gauge earlier - since the underlying tracked VALUE is
+pre-divided, the tick labels lv_meter auto-generates are already
+correct without needing any override). tick_count/major_nth were
+previously hardcoded (26/5) for every gauge; now configurable per slot,
+applied consistently to both the dedicated gauge page and the
+numbers-grid page.

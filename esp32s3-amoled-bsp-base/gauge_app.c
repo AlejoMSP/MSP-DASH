@@ -67,6 +67,7 @@ typedef struct {
   SignalId signal;
   int32_t min_val;
   int32_t max_val;
+  float value_divisor; // live value divided by this before display - e.g. 1000 for "RPM x1000"
   uint32_t bg_color; // the "off" state for warning flash - was previously always assumed black
   bool has_warning;
   float warning_threshold;
@@ -85,6 +86,7 @@ static uint32_t s_flash_counter = 0;
 // Numbers-grid page value labels, one per possible slot
 static lv_obj_t *s_grid_value_labels[MAX_GAUGE_SLOTS];
 static SignalId s_grid_signals[MAX_GAUGE_SLOTS];
+static float s_grid_divisors[MAX_GAUGE_SLOTS];
 static int s_grid_count = 0;
 
 static void gesture_event_cb(lv_event_t *e);
@@ -109,8 +111,8 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   lv_obj_set_style_border_width(meter, 0, 0);
 
   lv_meter_scale_t *scale = lv_meter_add_scale(meter);
-  lv_meter_set_scale_ticks(meter, scale, 26, 2, 10, tickColor);
-  lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, tickColor, 25);
+  lv_meter_set_scale_ticks(meter, scale, cfg->tick_count, 2, 10, tickColor);
+  lv_meter_set_scale_major_ticks(meter, scale, cfg->major_nth, 4, 18, tickColor, 25);
   lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, 270, 135);
 
   lv_obj_set_style_text_font(meter, &lv_font_montserrat_36, LV_PART_TICKS); // bumped from 28 per request
@@ -133,6 +135,7 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   pages[index].signal = cfg->signal;
   pages[index].min_val = cfg->min_val;
   pages[index].max_val = cfg->max_val;
+  pages[index].value_divisor = cfg->value_divisor;
   pages[index].bg_color = cfg->bg_color;
   pages[index].has_warning = cfg->has_warning;
   pages[index].warning_threshold = cfg->warning_threshold;
@@ -174,6 +177,7 @@ static void build_numbers_page(int index, GaugeSlotConfig *slots, int slotCount)
     if (row >= 4) break; // grid layout only fits 8 (2x4)
     s_grid_value_labels[s_grid_count] = make_grid_cell(page, colX[col], rowY[row], slots[i].caption);
     s_grid_signals[s_grid_count] = slots[i].signal;
+    s_grid_divisors[s_grid_count] = slots[i].value_divisor;
     s_grid_count++;
   }
 
@@ -248,7 +252,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   for (int i = 0; i < s_num_active_pages; i++) {
     GaugePage *p = &pages[i];
     if (p->meter == NULL) continue; // numbers grid page has no meter
-    float value = gauge_config_signal_value(p->signal);
+    float value = gauge_config_signal_value(p->signal) / p->value_divisor;
     bool has_data = gauge_config_signal_has_data(p->signal);
     lv_meter_set_indicator_value(p->meter, p->needle, clamped_or_sweep(p, value, has_data));
     update_warning_flash(p, value, has_data);
@@ -256,7 +260,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
   char buf[16];
   for (int i = 0; i < s_grid_count; i++) {
-    float value = gauge_config_signal_value(s_grid_signals[i]);
+    float value = gauge_config_signal_value(s_grid_signals[i]) / s_grid_divisors[i];
     snprintf(buf, sizeof(buf), "%.1f", value);
     lv_label_set_text(s_grid_value_labels[i], buf);
   }
