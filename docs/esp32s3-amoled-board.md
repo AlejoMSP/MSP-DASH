@@ -582,3 +582,35 @@ g_requested_page flag instead). A new `s_current_page` tracker in
 gauge_app.c keeps both switching mechanisms in sync.
 
 NOT yet bench-tested as of this writing.
+
+## Full redesign: 6 full-screen analog gauges (2026-09-30)
+
+Complete rebuild of the gauge cluster to match a reference automotive
+gauge image (classic analog style: black background, white ticks/
+numbers/needle, 270-degree sweep, caption in the bottom gap). Replaced
+the earlier 3-page mixed layout (AFR needle+readout, CLT/OilP
+half-moons, 6-value grid) with 6 full-screen single-gauge pages:
+
+0: AFR (10-20), 1: Coolant Temp (65-300F), 2: Oil Pressure (0-100kPa),
+3: Oil Temp (65-240F), 4: Fuel Pressure (0-100kPa), 5: Ethanol % (0-100)
+
+All 6 share one generic builder function (build_full_gauge_page) for
+visual consistency - same tick density (26 ticks, major every 5th = 6
+labels) and styling regardless of each gauge's differing numeric range.
+
+**No-data fallback**: each signal has a has_data flag (g_afr_has_data
+etc, set true in the .ino's handleRusefiFrame the first time a real CAN
+frame updates it). Until then, that gauge's needle sits at its own
+minimum rather than showing a possibly-misleading default/zero value -
+implemented via a clamped_or_min() helper in the update timer.
+
+**Auto-cycle**: advances to the next page every 5000ms via a second
+lv_timer (autocycle_timer_cb). Manual navigation (swipe gesture or BOOT
+button) calls lv_timer_reset() on this timer via a shared switch_to_page()
+helper, so a manually-chosen page gets a full 5 seconds before
+auto-cycling resumes rather than fighting with it. Confirmed
+lv_timer_reset() exists in this v8.4.0 install before using it.
+
+NOT yet bench-tested (visual density/legibility of 26-tick scale
+across all 6 differently-ranged gauges, auto-cycle timing, no-data
+fallback behavior) as of this writing.

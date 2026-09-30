@@ -1,220 +1,173 @@
 /*
   gauge_app.c
-  Multi-page gauge cluster built on LVGL v8's lv_meter widget (the
-  classic all-in-one gauge widget removed in v9 - one of the reasons
-  we pivoted to this confirmed-working Waveshare BSP foundation).
+  Six full-screen analog gauges (one per page), matching the classic
+  automotive gauge look: black background, white ticks/numbers/needle,
+  270-degree sweep with a caption in the bottom gap - same general
+  layout as a typical aftermarket single gauge (e.g. Speedhut-style).
 
-  Page 1: AFR meter (range 10-20) + precise numeric readout below
-  Page 2: Coolant Temp + Oil Pressure as two independent half-moon
-          (180 degree) meters side by side
-  Page 3: 6-value grid - AFR/CLT, Oil Temp/Oil Press, Fuel Press/Flex%
+  Pages (swipe left/right, BOOT button, or auto-cycle every 5s to move
+  between them):
+    0: AFR          10-20
+    1: Coolant Temp 65-300 F
+    2: Oil Pressure 0-100 kPa
+    3: Oil Temp     65-240 F
+    4: Fuel Pressure 0-100 kPa
+    5: Ethanol %    0-100
 
-  All actual LVGL API calls (needle updates, label text, page
-  switching) happen from a single periodic lv_timer callback running
-  INSIDE LVGL's own task context (registered here, ticking on its own -
-  LVGL timers run automatically whenever lv_timer_handler() is called,
-  which lcd_bsp.c's example_lvgl_port_task already does continuously).
-  This avoids any cross-task LVGL API calls from Arduino's loop() -
-  CAN parsing there only touches simple global values, never LVGL
-  functions directly.
+  "No data yet" handling: each signal has a has_data flag (set true the
+  first time a real CAN frame updates it, from the .ino's CAN parsing).
+  Until then, that gauge's needle sits at its own minimum rather than
+  showing a possibly-misleading default value.
 
-  NOTE on rotation angle: lv_meter_set_scale_range's rotation parameter
-  convention (135 used below) is a best-effort match to the classic
-  "opens at the bottom" automotive gauge look established elsewhere in
-  this project - not independently verified against source for this
-  exact API, may need visual adjustment.
+  Auto-cycle: advances to the next page every 5000ms. Manual navigation
+  (swipe or BOOT button) resets this timer, so a manually-chosen page
+  gets a full 5 seconds before auto-cycling resumes.
+
+  All actual LVGL API calls happen either inside our periodic update
+  timer (runs in LVGL's own task context via lv_timer_handler(), which
+  lcd_bsp.c's port task already calls continuously) or inside the
+  gesture event callback (also fires from within LVGL's task context) -
+  never directly from Arduino's loop(), which only touches simple
+  global values.
 */
 
 #include "gauge_app.h"
 #include "lvgl.h"
-#include <stdio.h>
+#include <stdbool.h>
 
-volatile float g_afr = 14.7f;
+volatile float g_afr = 0;
 volatile float g_clt_f = 0;
 volatile float g_oilp_kpa = 0;
 volatile float g_oilt_f = 0;
 volatile float g_fuelp_kpa = 0;
 volatile float g_flex_pct = 0;
+
+volatile bool g_afr_has_data = false;
+volatile bool g_clt_has_data = false;
+volatile bool g_oilp_has_data = false;
+volatile bool g_oilt_has_data = false;
+volatile bool g_fuelp_has_data = false;
+volatile bool g_flex_has_data = false;
+
 volatile int g_requested_page = -1;
 
-static lv_obj_t *page1, *page2, *page3;
-static int s_current_page = 0; // tracked here so swipe gestures know which direction is "next"/"previous"
+#define NUM_PAGES 6
 
-static lv_obj_t *afr_meter;
-static lv_meter_indicator_t *afr_needle;
-static lv_obj_t *afr_value_label;
+typedef struct {
+  lv_obj_t *page;
+  lv_obj_t *meter;
+  lv_meter_indicator_t *needle;
+  int32_t min_val;
+  int32_t max_val;
+} GaugePage;
 
-static lv_obj_t *clt_meter, *oilp_meter;
-static lv_meter_indicator_t *clt_needle, *oilp_needle;
-static lv_obj_t *clt_value_label, *oilp_value_label;
+static GaugePage pages[NUM_PAGES];
+static int s_current_page = 0;
+static lv_timer_t *s_autocycle_timer = NULL;
 
-static lv_obj_t *g_afr_cell, *g_clt_cell, *g_oilt_cell, *g_oilp_cell, *g_fuelp_cell, *g_flex_cell;
+static void gesture_event_cb(lv_event_t *e);
 
-static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const char *caption) {
-  lv_obj_t *cap = lv_label_create(parent);
-  lv_obj_set_style_text_color(cap, lv_color_hex(0x4dd0e1), 0);
-  lv_label_set_text(cap, caption);
-  lv_obj_set_pos(cap, x, y);
-
-  lv_obj_t *val = lv_label_create(parent);
-  lv_obj_set_style_text_color(val, lv_color_white(), 0);
-  lv_label_set_text(val, "--");
-  lv_obj_set_pos(val, x, y + 20);
-  return val;
+static void switch_to_page(int index) {
+  s_current_page = index;
+  lv_disp_load_scr(pages[index].page);
+  if (s_autocycle_timer) {
+    lv_timer_reset(s_autocycle_timer); // manual navigation gets a fresh 5s before auto-cycle resumes
+  }
 }
 
-static void build_page1(void) {
-  page1 = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(page1, lv_color_black(), 0);
+static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, const char *caption) {
+  lv_obj_t *page = lv_obj_create(NULL);
+  lv_obj_set_style_bg_color(page, lv_color_black(), 0);
 
-  afr_meter = lv_meter_create(page1);
-  lv_obj_set_size(afr_meter, 400, 400);
-  lv_obj_center(afr_meter);
-
-  lv_meter_scale_t *scale = lv_meter_add_scale(afr_meter);
-  lv_meter_set_scale_ticks(afr_meter, scale, 11, 2, 10, lv_color_hex(0x888888));
-  lv_meter_set_scale_major_ticks(afr_meter, scale, 2, 4, 15, lv_color_white(), 10);
-  lv_meter_set_scale_range(afr_meter, scale, 10, 20, 270, 135);
-
-  afr_needle = lv_meter_add_needle_line(afr_meter, scale, 4, lv_color_hex(0xF44336), -10);
-  lv_meter_set_indicator_value(afr_meter, afr_needle, 15);
-
-  afr_value_label = lv_label_create(page1);
-  lv_obj_set_style_text_color(afr_value_label, lv_color_white(), 0);
-  lv_label_set_text(afr_value_label, "14.7");
-  lv_obj_align(afr_value_label, LV_ALIGN_BOTTOM_MID, 0, -30);
-
-  lv_obj_t *caption = lv_label_create(page1);
-  lv_obj_set_style_text_color(caption, lv_color_hex(0x4dd0e1), 0);
-  lv_label_set_text(caption, "AFR");
-  lv_obj_align_to(caption, afr_value_label, LV_ALIGN_OUT_TOP_MID, 0, -4);
-}
-
-static void build_half_moon(lv_obj_t *parent, lv_obj_t **meterOut, lv_meter_indicator_t **needleOut,
-                            lv_obj_t **labelOut, int32_t xOffset, int32_t rangeMin, int32_t rangeMax,
-                            const char *caption, uint32_t needleColor) {
-  lv_obj_t *meter = lv_meter_create(parent);
-  lv_obj_set_size(meter, 220, 220);
-  lv_obj_align(meter, LV_ALIGN_CENTER, xOffset, -20);
+  lv_obj_t *meter = lv_meter_create(page);
+  lv_obj_set_size(meter, 460, 460); // near-full-screen on the 466x466 panel
+  lv_obj_center(meter);
+  lv_obj_set_style_bg_color(meter, lv_color_black(), 0);
+  lv_obj_set_style_border_width(meter, 0, 0);
 
   lv_meter_scale_t *scale = lv_meter_add_scale(meter);
-  lv_meter_set_scale_ticks(meter, scale, 6, 2, 8, lv_color_hex(0x888888));
-  lv_meter_set_scale_major_ticks(meter, scale, 1, 3, 12, lv_color_white(), 8);
-  // Half-moon: 180 degree sweep, rotation 180 to open upward (best-effort,
-  // same caveat as the full gauge's rotation value - visual verification needed)
-  lv_meter_set_scale_range(meter, scale, rangeMin, rangeMax, 180, 180);
+  // 26 ticks = 5 major-to-major intervals (6 major labels), 4 minor
+  // ticks between each - consistent density across all 6 gauges
+  // regardless of their differing numeric ranges.
+  lv_meter_set_scale_ticks(meter, scale, 26, 2, 10, lv_color_white());
+  lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, lv_color_white(), 15);
+  lv_meter_set_scale_range(meter, scale, min_val, max_val, 270, 135);
 
-  lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 3, lv_color_hex(needleColor), -8);
-  lv_meter_set_indicator_value(meter, needle, rangeMin);
+  lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 5, lv_color_white(), -15);
+  lv_meter_set_indicator_value(meter, needle, min_val); // starts at minimum until real data arrives
 
-  lv_obj_t *label = lv_label_create(parent);
-  lv_obj_set_style_text_color(label, lv_color_white(), 0);
-  lv_label_set_text(label, "0");
-  lv_obj_align_to(label, meter, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-
-  lv_obj_t *capLabel = lv_label_create(parent);
-  lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
+  lv_obj_t *capLabel = lv_label_create(page);
+  lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
   lv_label_set_text(capLabel, caption);
-  lv_obj_align_to(capLabel, label, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+  lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70);
 
-  *meterOut = meter;
-  *needleOut = needle;
-  *labelOut = label;
+  lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+
+  pages[index].page = page;
+  pages[index].meter = meter;
+  pages[index].needle = needle;
+  pages[index].min_val = min_val;
+  pages[index].max_val = max_val;
 }
 
-static void build_page2(void) {
-  page2 = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(page2, lv_color_black(), 0);
-
-  build_half_moon(page2, &clt_meter, &clt_needle, &clt_value_label, -120, 0, 260, "CLT (F)", 0xF44336);
-  build_half_moon(page2, &oilp_meter, &oilp_needle, &oilp_value_label, 120, 0, 700, "OIL P (kPa)", 0x2196F3);
-}
-
-static void build_page3(void) {
-  page3 = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(page3, lv_color_black(), 0);
-
-  const int16_t colX[2] = {70, 260};
-  const int16_t rowY[3] = {90, 210, 330};
-
-  g_afr_cell   = make_grid_cell(page3, colX[0], rowY[0], "AFR");
-  g_clt_cell   = make_grid_cell(page3, colX[1], rowY[0], "CLT (F)");
-  g_oilt_cell  = make_grid_cell(page3, colX[0], rowY[1], "OIL T (F)");
-  g_oilp_cell  = make_grid_cell(page3, colX[1], rowY[1], "OIL P (kPa)");
-  g_fuelp_cell = make_grid_cell(page3, colX[0], rowY[2], "FUEL P (kPa)");
-  g_flex_cell  = make_grid_cell(page3, colX[1], rowY[2], "FLEX %");
-}
-
-// Fires from WITHIN LVGL's own task context (gesture detection happens
-// during lv_timer_handler()'s normal processing) - safe to call
-// lv_disp_load_scr() directly here, unlike Arduino's loop() which must
-// go through the g_requested_page flag instead.
+// Fires from within LVGL's own task context - safe to call
+// lv_disp_load_scr() directly here.
 static void gesture_event_cb(lv_event_t *e) {
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-  int next_page = s_current_page;
-
   if (dir == LV_DIR_LEFT) {
-    next_page = (s_current_page + 1) % 3;
+    switch_to_page((s_current_page + 1) % NUM_PAGES);
   } else if (dir == LV_DIR_RIGHT) {
-    next_page = (s_current_page + 2) % 3; // +2 mod 3 == -1 mod 3, avoids negative modulo
-  } else {
-    return; // vertical or no clear gesture - ignore
+    switch_to_page((s_current_page + NUM_PAGES - 1) % NUM_PAGES);
   }
+}
 
-  s_current_page = next_page;
-  if (next_page == 0) lv_disp_load_scr(page1);
-  else if (next_page == 1) lv_disp_load_scr(page2);
-  else lv_disp_load_scr(page3);
+static void autocycle_timer_cb(lv_timer_t *timer) {
+  switch_to_page((s_current_page + 1) % NUM_PAGES);
+}
+
+// Clamps a value into a gauge's own int32 range for lv_meter, or
+// returns the gauge's minimum if no real data has arrived yet.
+static int32_t clamped_or_min(float value, bool has_data, int32_t min_val, int32_t max_val) {
+  if (!has_data) return min_val;
+  int32_t v = (int32_t)value;
+  if (v < min_val) v = min_val;
+  if (v > max_val) v = max_val;
+  return v;
 }
 
 static void gauge_update_timer_cb(lv_timer_t *timer) {
-  char buf[16];
-
   // Handle a pending page-switch request (set from Arduino's loop() on
   // BOOT button press) - safe here since we're inside LVGL's own task.
   if (g_requested_page >= 0) {
-    if (g_requested_page == 0) lv_disp_load_scr(page1);
-    else if (g_requested_page == 1) lv_disp_load_scr(page2);
-    else lv_disp_load_scr(page3);
-    s_current_page = g_requested_page;
+    switch_to_page(g_requested_page);
     g_requested_page = -1;
   }
 
-  // Page 1
-  lv_meter_set_indicator_value(afr_meter, afr_needle, (int32_t)g_afr);
-  snprintf(buf, sizeof(buf), "%.1f", g_afr);
-  lv_label_set_text(afr_value_label, buf);
-
-  // Page 2
-  lv_meter_set_indicator_value(clt_meter, clt_needle, (int32_t)g_clt_f);
-  snprintf(buf, sizeof(buf), "%.0f", g_clt_f);
-  lv_label_set_text(clt_value_label, buf);
-  lv_meter_set_indicator_value(oilp_meter, oilp_needle, (int32_t)g_oilp_kpa);
-  snprintf(buf, sizeof(buf), "%.0f", g_oilp_kpa);
-  lv_label_set_text(oilp_value_label, buf);
-
-  // Page 3
-  snprintf(buf, sizeof(buf), "%.1f", g_afr); lv_label_set_text(g_afr_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_clt_f); lv_label_set_text(g_clt_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_oilt_f); lv_label_set_text(g_oilt_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_oilp_kpa); lv_label_set_text(g_oilp_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_fuelp_kpa); lv_label_set_text(g_fuelp_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_flex_pct); lv_label_set_text(g_flex_cell, buf);
+  lv_meter_set_indicator_value(pages[0].meter, pages[0].needle,
+    clamped_or_min(g_afr, g_afr_has_data, pages[0].min_val, pages[0].max_val));
+  lv_meter_set_indicator_value(pages[1].meter, pages[1].needle,
+    clamped_or_min(g_clt_f, g_clt_has_data, pages[1].min_val, pages[1].max_val));
+  lv_meter_set_indicator_value(pages[2].meter, pages[2].needle,
+    clamped_or_min(g_oilp_kpa, g_oilp_has_data, pages[2].min_val, pages[2].max_val));
+  lv_meter_set_indicator_value(pages[3].meter, pages[3].needle,
+    clamped_or_min(g_oilt_f, g_oilt_has_data, pages[3].min_val, pages[3].max_val));
+  lv_meter_set_indicator_value(pages[4].meter, pages[4].needle,
+    clamped_or_min(g_fuelp_kpa, g_fuelp_has_data, pages[4].min_val, pages[4].max_val));
+  lv_meter_set_indicator_value(pages[5].meter, pages[5].needle,
+    clamped_or_min(g_flex_pct, g_flex_has_data, pages[5].min_val, pages[5].max_val));
 }
 
 void build_gauge_app(void) {
-  build_page1();
-  build_page2();
-  build_page3();
+  build_full_gauge_page(0, 10, 20, "AFR");
+  build_full_gauge_page(1, 65, 300, "COOLANT TEMP (F)");
+  build_full_gauge_page(2, 0, 100, "OIL PRESSURE (kPa)");
+  build_full_gauge_page(3, 65, 240, "OIL TEMP (F)");
+  build_full_gauge_page(4, 0, 100, "FUEL PRESSURE (kPa)");
+  build_full_gauge_page(5, 0, 100, "ETHANOL %");
 
-  // Swipe left/right to change pages - attached to each page (a
-  // screen's root object) so gestures anywhere on that page's content
-  // bubble up and trigger this callback.
-  lv_obj_add_event_cb(page1, gesture_event_cb, LV_EVENT_GESTURE, NULL);
-  lv_obj_add_event_cb(page2, gesture_event_cb, LV_EVENT_GESTURE, NULL);
-  lv_obj_add_event_cb(page3, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+  s_current_page = 0;
+  lv_disp_load_scr(pages[0].page);
 
-  lv_disp_load_scr(page1);
-
-  lv_timer_create(gauge_update_timer_cb, 80, NULL); // 80ms, matches the update rate used throughout this project's other gauge sketches
+  lv_timer_create(gauge_update_timer_cb, 80, NULL);
+  s_autocycle_timer = lv_timer_create(autocycle_timer_cb, 5000, NULL);
 }

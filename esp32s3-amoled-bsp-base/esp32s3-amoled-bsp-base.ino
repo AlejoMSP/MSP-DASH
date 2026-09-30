@@ -66,26 +66,32 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
   switch (id) {
     case RUSEFI_BASE1: {
       g_flex_pct = d[7];
+      g_flex_has_data = true;
       break;
     }
     case RUSEFI_BASE3: {
       int8_t cltRaw = (int8_t)d[2];
       g_clt_f = cToF(cltRaw - 40);
+      g_clt_has_data = true;
       break;
     }
     case RUSEFI_BASE4: {
       uint16_t oilPressRaw = readU16LE(d, 2);
       g_oilp_kpa = oilPressRaw * 0.0333333f;
+      g_oilp_has_data = true;
       int8_t oilTempRaw = (int8_t)d[4];
       g_oilt_f = cToF(oilTempRaw - 40);
+      g_oilt_has_data = true;
       break;
     }
     case RUSEFI_BASE7: {
       uint16_t lam1Raw = readU16LE(d, 0);
       float lambda = lam1Raw * 0.0001f;
       g_afr = lambda * 14.7f;
+      g_afr_has_data = true;
       uint16_t fpLowRaw = readU16LE(d, 4);
       g_fuelp_kpa = fpLowRaw * 0.0333333f;
+      g_fuelp_has_data = true;
       break;
     }
   }
