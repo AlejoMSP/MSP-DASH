@@ -1,31 +1,26 @@
 /*
   gauge_app.c
   Eight pages total:
-    0: AFR           10-20
-    1: Coolant Temp  65-300 F
-    2: Oil Pressure  0-100 kPa
-    3: Oil Temp      65-240 F
-    4: Fuel Pressure 0-100 kPa
-    5: Ethanol %     0-100
-    6: Numbers grid  - all 6 values above, as plain digital readouts
-    7: Boost/Vacuum  - single kPa scale (see note below), rests at 0
+    0: CLT         65-250 F   - warning if >220
+    1: MAP         0-250 kPa  - no warning, rests at 100 (ambient)
+    2: AFR         10-20      - warning if >15
+    3: OIL PRESS   0-100 kPa  - warning if <40
+    4: OIL TEMP    65-250 F   - warning if >220
+    5: FUEL PRESS  0-100 kPa  - warning if <40
+    6: ETH %       0-100      - no warning
+    7: Numbers grid - all 6 sensor values as plain digital readouts
 
   Style: black background, white ticks/numbers/needle, 270-degree
-  sweep, caption in the bottom gap - matching a classic analog
-  automotive gauge look.
+  sweep, caption in the bottom gap.
 
-  BOOST/VACUUM UNIT NOTE: true inHg (vacuum side) and PSI (boost side)
-  are different units meeting at a zero point. lv_meter's built-in tick
-  labels only support one continuous linear numeric axis (plain
-  auto-generated integers) - not two different units on either side of
-  a scale. Rather than risk something broken/misleading, this gauge
-  uses kPa (the unit our CAN math already computes directly) as a single
-  consistent scale, captioned clearly as "BOOST/VACUUM (kPa)". A true
-  dual-unit tick face would need a custom per-tick label override, a
-  larger separate task.
+  WARNING FLASH: pages with a configured threshold flash their entire
+  background between black and red while that value is past threshold
+  (a simple phase counter in the shared 80ms update timer, no separate
+  LVGL animation needed). Only evaluated once real data has arrived for
+  that signal (has_data flag) - a gauge sitting at its rest/default
+  value never falsely triggers.
 
-  Manual navigation only now (swipe or BOOT button) - the earlier
-  5-second auto-cycle has been removed per request.
+  Manual navigation only (swipe or BOOT button) - no auto-cycle.
 
   All actual LVGL API calls happen either inside our periodic update
   timer (runs in LVGL's own task context via lv_timer_handler()) or
@@ -57,7 +52,6 @@ volatile bool g_boost_has_data = false;
 
 volatile int g_requested_page = -1;
 
-#define NUM_GAUGE_PAGES 7 // pages 0-5 are single gauges, page 6 is the numbers grid; page 7 (boost) added separately below
 #define NUM_PAGES 8
 
 typedef struct {
@@ -66,13 +60,18 @@ typedef struct {
   lv_meter_indicator_t *needle;
   int32_t min_val;
   int32_t max_val;
-  int32_t rest_val; // shown until real data arrives - usually min_val, but 0 for boost/vacuum
+  int32_t rest_val; // shown until real data arrives
+  bool has_warning;
+  float warning_threshold;
+  bool warning_above; // true: warn when value > threshold, false: warn when value < threshold
+  bool warning_active; // current flash state, tracked so we only touch bg_color on actual changes
 } GaugePage;
 
 static GaugePage pages[NUM_PAGES];
 static int s_current_page = 0;
+static uint32_t s_flash_counter = 0;
 
-// Numbers-grid page (page 6) value labels
+// Numbers-grid page (page 7) value labels
 static lv_obj_t *g_afr_cell, *g_clt_cell, *g_oilt_cell, *g_oilp_cell, *g_fuelp_cell, *g_flex_cell;
 
 static void gesture_event_cb(lv_event_t *e);
@@ -82,7 +81,8 @@ static void switch_to_page(int index) {
   lv_disp_load_scr(pages[index].page);
 }
 
-static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, int32_t rest_val, const char *caption) {
+static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, int32_t rest_val,
+                                   const char *caption, bool has_warning, float warning_threshold, bool warning_above) {
   lv_obj_t *page = lv_obj_create(NULL);
   lv_obj_set_style_bg_color(page, lv_color_black(), 0);
 
@@ -93,27 +93,19 @@ static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, i
   lv_obj_set_style_border_width(meter, 0, 0);
 
   lv_meter_scale_t *scale = lv_meter_add_scale(meter);
-  // 26 ticks = 5 major-to-major intervals (6 major labels), 4 minor
-  // ticks between each - consistent density across all gauges
-  // regardless of their differing numeric ranges.
   lv_meter_set_scale_ticks(meter, scale, 26, 2, 10, lv_color_white());
-  // label_gap increased (was 15) - numbers sit further out from the
-  // tick marks for clearer separation.
   lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, lv_color_white(), 25);
   lv_meter_set_scale_range(meter, scale, min_val, max_val, 270, 135);
 
-  // Bigger, brighter tick numbers (per reference image) - LV_PART_TICKS
-  // is the confirmed part lv_meter actually uses to draw its tick
-  // labels (checked against lv_meter.c source directly).
   lv_obj_set_style_text_font(meter, &lv_font_montserrat_28, LV_PART_TICKS);
   lv_obj_set_style_text_color(meter, lv_color_white(), LV_PART_TICKS);
 
-  // needle width increased (was 5) - thicker needle per request
   lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 8, lv_color_white(), -15);
   lv_meter_set_indicator_value(meter, needle, rest_val);
 
   lv_obj_t *capLabel = lv_label_create(page);
   lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
+  lv_obj_set_style_text_font(capLabel, &lv_font_montserrat_28, 0); // bigger caption text per request
   lv_label_set_text(capLabel, caption);
   lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70);
 
@@ -125,6 +117,10 @@ static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, i
   pages[index].min_val = min_val;
   pages[index].max_val = max_val;
   pages[index].rest_val = rest_val;
+  pages[index].has_warning = has_warning;
+  pages[index].warning_threshold = warning_threshold;
+  pages[index].warning_above = warning_above;
+  pages[index].warning_active = false;
 }
 
 static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const char *caption) {
@@ -135,9 +131,9 @@ static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const ch
 
   lv_obj_t *val = lv_label_create(parent);
   lv_obj_set_style_text_color(val, lv_color_white(), 0);
-  lv_obj_set_style_text_font(val, &lv_font_montserrat_28, 0); // bigger numbers per request
+  lv_obj_set_style_text_font(val, &lv_font_montserrat_28, 0);
   lv_label_set_text(val, "--");
-  lv_obj_set_pos(val, x, y + 24); // slightly more vertical clearance for the larger font
+  lv_obj_set_pos(val, x, y + 24);
   return val;
 }
 
@@ -148,16 +144,17 @@ static void build_numbers_page(int index) {
   const int16_t colX[2] = {70, 260};
   const int16_t rowY[3] = {90, 210, 330};
 
-  g_afr_cell   = make_grid_cell(page, colX[0], rowY[0], "AFR");
-  g_clt_cell   = make_grid_cell(page, colX[1], rowY[0], "CLT (F)");
-  g_oilt_cell  = make_grid_cell(page, colX[0], rowY[1], "OIL T (F)");
-  g_oilp_cell  = make_grid_cell(page, colX[1], rowY[1], "OIL P (kPa)");
-  g_fuelp_cell = make_grid_cell(page, colX[0], rowY[2], "FUEL P (kPa)");
-  g_flex_cell  = make_grid_cell(page, colX[1], rowY[2], "FLEX %");
+  g_clt_cell   = make_grid_cell(page, colX[0], rowY[0], "CLT (F)");
+  g_afr_cell   = make_grid_cell(page, colX[1], rowY[0], "AFR");
+  g_oilp_cell  = make_grid_cell(page, colX[0], rowY[1], "OIL PRESS (kPa)");
+  g_oilt_cell  = make_grid_cell(page, colX[1], rowY[1], "OIL TEMP (F)");
+  g_fuelp_cell = make_grid_cell(page, colX[0], rowY[2], "FUEL PRESS (kPa)");
+  g_flex_cell  = make_grid_cell(page, colX[1], rowY[2], "ETH %");
 
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
   pages[index].page = page;
   pages[index].meter = NULL; // no meter on this page
+  pages[index].has_warning = false;
 }
 
 // Fires from within LVGL's own task context - safe to call
@@ -182,7 +179,32 @@ static int32_t clamped_or_rest(float value, bool has_data, int32_t min_val, int3
   return v;
 }
 
+// Checks a page's warning condition against the live value (only when
+// real data has arrived) and updates its flashing background state.
+static void update_warning_flash(int index, float value, bool has_data) {
+  GaugePage *p = &pages[index];
+  if (!p->has_warning) return;
+
+  bool triggered = false;
+  if (has_data) {
+    triggered = p->warning_above ? (value > p->warning_threshold) : (value < p->warning_threshold);
+  }
+
+  if (triggered) {
+    // Flip phase roughly twice a second (80ms timer * 6 ticks ~= 480ms per phase)
+    bool flash_on = (s_flash_counter / 6) % 2 == 0;
+    lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_black();
+    lv_obj_set_style_bg_color(p->page, target, 0);
+    p->warning_active = true;
+  } else if (p->warning_active) {
+    lv_obj_set_style_bg_color(p->page, lv_color_black(), 0);
+    p->warning_active = false;
+  }
+}
+
 static void gauge_update_timer_cb(lv_timer_t *timer) {
+  s_flash_counter++;
+
   // Handle a pending page-switch request (set from Arduino's loop() on
   // BOOT button press) - safe here since we're inside LVGL's own task.
   if (g_requested_page >= 0) {
@@ -191,42 +213,52 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   }
 
   lv_meter_set_indicator_value(pages[0].meter, pages[0].needle,
-    clamped_or_rest(g_afr, g_afr_has_data, pages[0].min_val, pages[0].max_val, pages[0].rest_val));
+    clamped_or_rest(g_clt_f, g_clt_has_data, pages[0].min_val, pages[0].max_val, pages[0].rest_val));
+  update_warning_flash(0, g_clt_f, g_clt_has_data);
+
   lv_meter_set_indicator_value(pages[1].meter, pages[1].needle,
     clamped_or_rest(g_boost_kpa, g_boost_has_data, pages[1].min_val, pages[1].max_val, pages[1].rest_val));
+
   lv_meter_set_indicator_value(pages[2].meter, pages[2].needle,
-    clamped_or_rest(g_clt_f, g_clt_has_data, pages[2].min_val, pages[2].max_val, pages[2].rest_val));
+    clamped_or_rest(g_afr, g_afr_has_data, pages[2].min_val, pages[2].max_val, pages[2].rest_val));
+  update_warning_flash(2, g_afr, g_afr_has_data);
+
   lv_meter_set_indicator_value(pages[3].meter, pages[3].needle,
     clamped_or_rest(g_oilp_kpa, g_oilp_has_data, pages[3].min_val, pages[3].max_val, pages[3].rest_val));
+  update_warning_flash(3, g_oilp_kpa, g_oilp_has_data);
+
   lv_meter_set_indicator_value(pages[4].meter, pages[4].needle,
     clamped_or_rest(g_oilt_f, g_oilt_has_data, pages[4].min_val, pages[4].max_val, pages[4].rest_val));
+  update_warning_flash(4, g_oilt_f, g_oilt_has_data);
+
   lv_meter_set_indicator_value(pages[5].meter, pages[5].needle,
     clamped_or_rest(g_fuelp_kpa, g_fuelp_has_data, pages[5].min_val, pages[5].max_val, pages[5].rest_val));
+  update_warning_flash(5, g_fuelp_kpa, g_fuelp_has_data);
+
   lv_meter_set_indicator_value(pages[6].meter, pages[6].needle,
     clamped_or_rest(g_flex_pct, g_flex_has_data, pages[6].min_val, pages[6].max_val, pages[6].rest_val));
 
   char buf[16];
-  snprintf(buf, sizeof(buf), "%.1f", g_afr); lv_label_set_text(g_afr_cell, buf);
   snprintf(buf, sizeof(buf), "%.0f", g_clt_f); lv_label_set_text(g_clt_cell, buf);
-  snprintf(buf, sizeof(buf), "%.0f", g_oilt_f); lv_label_set_text(g_oilt_cell, buf);
+  snprintf(buf, sizeof(buf), "%.1f", g_afr); lv_label_set_text(g_afr_cell, buf);
   snprintf(buf, sizeof(buf), "%.0f", g_oilp_kpa); lv_label_set_text(g_oilp_cell, buf);
+  snprintf(buf, sizeof(buf), "%.0f", g_oilt_f); lv_label_set_text(g_oilt_cell, buf);
   snprintf(buf, sizeof(buf), "%.0f", g_fuelp_kpa); lv_label_set_text(g_fuelp_cell, buf);
   snprintf(buf, sizeof(buf), "%.0f", g_flex_pct); lv_label_set_text(g_flex_cell, buf);
 }
 
 void build_gauge_app(void) {
-  build_full_gauge_page(0, 10, 20, 10, "AFR");
-  build_full_gauge_page(1, 0, 200, 100, "MAP / BOOST (kPa) - 100 = AMBIENT"); // 100 kPa = atmospheric/ambient pressure, not 0 - a raw MAP reading, not baro-subtracted
-  build_full_gauge_page(2, 65, 300, 65, "COOLANT TEMP (F)");
-  build_full_gauge_page(3, 0, 100, 0, "OIL PRESSURE (kPa)");
-  build_full_gauge_page(4, 65, 240, 65, "OIL TEMP (F)");
-  build_full_gauge_page(5, 0, 100, 0, "FUEL PRESSURE (kPa)");
-  build_full_gauge_page(6, 0, 100, 0, "ETHANOL %");
+  build_full_gauge_page(0, 65, 250, 65, "CLT", true, 220, true);
+  build_full_gauge_page(1, 0, 250, 100, "MAP", false, 0, false);
+  build_full_gauge_page(2, 10, 20, 10, "AFR", true, 15, true);
+  build_full_gauge_page(3, 0, 100, 0, "OIL PRESS", true, 40, false);
+  build_full_gauge_page(4, 65, 250, 65, "OIL TEMP", true, 220, true);
+  build_full_gauge_page(5, 0, 100, 0, "FUEL PRESS", true, 40, false);
+  build_full_gauge_page(6, 0, 100, 0, "ETH %", false, 0, false);
   build_numbers_page(7);
 
   s_current_page = 0;
   lv_disp_load_scr(pages[0].page);
 
   lv_timer_create(gauge_update_timer_cb, 80, NULL);
-  // Auto-cycle timer removed per request - manual navigation only now.
 }

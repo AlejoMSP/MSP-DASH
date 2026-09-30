@@ -669,3 +669,26 @@ adjusted once tested.
 - Numbers-grid page (now page 7): value labels enlarged to 28px
   (lv_font_montserrat_28, already enabled), row vertical offset bumped
   slightly (20->24) for clearance under the larger font
+
+## Renamed/reordered pages, range updates, warning flash system (2026-09-30)
+
+New page order and specs, per request:
+0: CLT (65-250F, warning >220), 1: MAP (0-250kPa, rests at 100/ambient,
+no warning), 2: AFR (10-20, warning >15), 3: OIL PRESS (0-100kPa,
+warning <40), 4: OIL TEMP (65-250F, warning >220), 5: FUEL PRESS
+(0-100kPa, warning <40), 6: ETH % (0-100, no warning), 7: numbers grid.
+
+Caption font enlarged to 28px (lv_font_montserrat_28, already enabled)
+on all individual gauge pages and the numbers-grid values - was
+previously only applied to the meter's own tick numbers.
+
+**Warning flash**: pages with a configured threshold (has_warning=true)
+flash their entire page background between black and a dark red
+(0xB00000) while the live value is past threshold - a phase counter in
+the shared 80ms update timer (roughly 480ms per on/off phase), no
+separate LVGL animation subsystem needed. Only evaluated once real data
+has arrived for that signal (has_data flag), so a gauge sitting at its
+rest/default value never falsely triggers. Added has_warning/
+warning_threshold/warning_above/warning_active fields to the GaugePage
+struct and a new update_warning_flash() helper, called after each
+gauge's needle update in the main timer callback.
