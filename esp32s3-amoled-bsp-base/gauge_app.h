@@ -1,6 +1,8 @@
 #ifndef GAUGE_APP_H
 #define GAUGE_APP_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
