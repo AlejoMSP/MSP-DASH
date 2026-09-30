@@ -19,9 +19,11 @@
 
 #include "web_monitor.h"
 #include "gauge_app.h"
+#include "gauge_config.h"
 #include "ecu_config.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
 #include <string.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 
@@ -47,7 +49,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </head>
 <body>
   <h1>MSP-DASH Live Monitor</h1>
-  <p style="text-align:center"><a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a></p>
+  <p style="text-align:center">
+    <a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a> &nbsp;|&nbsp;
+    <a href="/gauges" style="color:#4dd0e1">Gauge Config &rarr;</a>
+  </p>
   <div style="text-align:center; margin-top:10px;">
     <label>ECU: <select id="ecuSelect">
       <option value="0">rusEFI</option>
@@ -121,6 +126,84 @@ static const char CAN_HTML[] PROGMEM = R"rawliteral(
     }
     setInterval(refresh, 1000);
     refresh();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Gauge Config</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
+    h1 { font-size: 1.2em; text-align:center; }
+    .slot { background:#111; border-radius:8px; padding:12px; margin-bottom:10px; }
+    .slot label { display:block; font-size:0.8em; color:#4dd0e1; margin-top:6px; }
+    .slot input, .slot select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
+    .row2 { display:flex; gap:10px; }
+    .row2 > div { flex:1; }
+    button { width:100%; padding:14px; font-size:1.1em; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin-top:16px; }
+    #status { text-align:center; margin-top:10px; color:#4dd0e1; }
+  </style>
+</head>
+<body>
+  <h1>Gauge Configuration</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div id="slots"></div>
+  <button onclick="save()">Save (reboot required to apply)</button>
+  <div id="status"></div>
+  <script>
+    const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
+    let slots = [];
+
+    function renderSlots() {
+      const container = document.getElementById("slots");
+      container.innerHTML = slots.map((s, i) => `
+        <div class="slot">
+          <label>Signal
+            <select onchange="slots[${i}].signal=parseInt(this.value)">
+              ${SIGNALS.map((name, v) => `<option value="${v}" ${s.signal===v?"selected":""}>${name}</option>`).join("")}
+            </select>
+          </label>
+          <label><input type="checkbox" ${s.enabled?"checked":""} onchange="slots[${i}].enabled=this.checked"> Enabled</label>
+          <label>Caption <input type="text" value="${s.caption}" onchange="slots[${i}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Min <input type="number" value="${s.min}" onchange="slots[${i}].min=parseInt(this.value)"></label></div>
+            <div><label>Max <input type="number" value="${s.max}" onchange="slots[${i}].max=parseInt(this.value)"></label></div>
+            <div><label>Rest <input type="number" value="${s.rest}" onchange="slots[${i}].rest=parseInt(this.value)"></label></div>
+          </div>
+          <label>Needle Color <input type="color" value="#${s.color.toString(16).padStart(6,'0')}" onchange="slots[${i}].color=parseInt(this.value.substring(1),16)"></label>
+          <label><input type="checkbox" ${s.has_warning?"checked":""} onchange="slots[${i}].has_warning=this.checked"> Warning enabled</label>
+          <div class="row2">
+            <div><label>Threshold <input type="number" value="${s.warning_threshold}" onchange="slots[${i}].warning_threshold=parseFloat(this.value)"></label></div>
+            <div><label>Direction
+              <select onchange="slots[${i}].warning_above=(this.value==='1')">
+                <option value="1" ${s.warning_above?"selected":""}>Above</option>
+                <option value="0" ${!s.warning_above?"selected":""}>Below</option>
+              </select>
+            </label></div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    async function load() {
+      const res = await fetch("/gauges.json");
+      slots = await res.json();
+      renderSlots();
+    }
+
+    async function save() {
+      document.getElementById("status").textContent = "Saving...";
+      await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(slots) });
+      document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+    }
+
+    load();
   </script>
 </body>
 </html>
@@ -232,6 +315,72 @@ void web_monitor_init(void) {
     }
     request->send(200, "text/plain", "OK");
   });
+
+  server.on("/gauges", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", GAUGES_HTML);
+  });
+
+  server.on("/gauges.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    GaugeSlotConfig *slots = gauge_config_get_slots();
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
+      JsonObject o = arr.add<JsonObject>();
+      o["signal"] = (int)slots[i].signal;
+      o["enabled"] = slots[i].enabled;
+      o["min"] = slots[i].min_val;
+      o["max"] = slots[i].max_val;
+      o["rest"] = slots[i].rest_val;
+      o["caption"] = slots[i].caption;
+      o["color"] = slots[i].needle_color;
+      o["has_warning"] = slots[i].has_warning;
+      o["warning_threshold"] = slots[i].warning_threshold;
+      o["warning_above"] = slots[i].warning_above;
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  // POST body arrives in chunks - accumulate into a static buffer, parse
+  // once the full body has been received (index + len == total).
+  server.on("/gauges", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      request->send(200, "text/plain", "OK - reboot to apply");
+    },
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      static char bodyBuf[4096];
+      if (index == 0) memset(bodyBuf, 0, sizeof(bodyBuf));
+      if (index + len < sizeof(bodyBuf)) {
+        memcpy(bodyBuf + index, data, len);
+      }
+      if (index + len == total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, bodyBuf);
+        if (!err) {
+          GaugeSlotConfig *slots = gauge_config_get_slots();
+          JsonArray arr = doc.as<JsonArray>();
+          int i = 0;
+          for (JsonObject o : arr) {
+            if (i >= MAX_GAUGE_SLOTS) break;
+            slots[i].signal = (SignalId)(int)o["signal"];
+            slots[i].enabled = o["enabled"];
+            slots[i].min_val = o["min"];
+            slots[i].max_val = o["max"];
+            slots[i].rest_val = o["rest"];
+            strlcpy(slots[i].caption, o["caption"] | "", GAUGE_CAPTION_MAXLEN);
+            slots[i].needle_color = (uint32_t)(long)o["color"];
+            slots[i].has_warning = o["has_warning"];
+            slots[i].warning_threshold = o["warning_threshold"];
+            slots[i].warning_above = o["warning_above"];
+            i++;
+          }
+          gauge_config_save();
+        }
+      }
+    }
+  );
 
   server.addHandler(&ws);
   server.begin();

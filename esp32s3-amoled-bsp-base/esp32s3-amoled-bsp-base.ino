@@ -33,6 +33,7 @@
 #include "lcd_bsp.h"
 #include "FT3168.h"
 #include "gauge_app.h"
+#include "gauge_config.h"
 #include "driver/twai.h"
 #include "web_monitor.h"
 #include "ecu_config.h"
@@ -48,6 +49,7 @@
 
 // ---- rusEFI CAN IDs (bench-confirmed elsewhere in this project) ----
 #define RUSEFI_BASE1 0x201
+#define RUSEFI_BASE2 0x202
 #define RUSEFI_BASE3 0x203
 #define RUSEFI_BASE4 0x204
 #define RUSEFI_BASE7 0x207
@@ -59,6 +61,7 @@
 // this range never overlaps rusEFI's (0x200s) and both can safely stay
 // active simultaneously, same as on the WROOM board. ----
 #define SEC_BASE      1520        // 0x5F0
+#define SEC_BLOCK0    (SEC_BASE+0)  // Seconds, PW1, PW2, RPM
 #define SEC_BLOCK2    (SEC_BASE+2)  // BARO, MAP, MAT, CLT
 #define SEC_BLOCK3    (SEC_BASE+3)  // TPS, BATT, EGO1
 #define SEC_BLOCK13   (SEC_BASE+13) // FUELP, OILP, OILT
@@ -75,11 +78,23 @@ uint16_t readU16LE(uint8_t *d, int offset) {
   return d[offset] | (d[offset + 1] << 8);
 }
 
+int16_t readS16LE(uint8_t *d, int offset) {
+  return (int16_t)(d[offset] | (d[offset + 1] << 8));
+}
+
 void handleRusefiFrame(uint32_t id, uint8_t *d) {
   switch (id) {
     case RUSEFI_BASE1: {
+      g_rpm = readU16LE(d, 0);
+      g_rpm_has_data = true;
       g_flex_pct = d[7];
       g_flex_has_data = true;
+      break;
+    }
+    case RUSEFI_BASE2: {
+      int16_t tpsRaw = readS16LE(d, 2);
+      g_tps = tpsRaw * 0.01f;
+      g_tps_has_data = true;
       break;
     }
     case RUSEFI_BASE3: {
@@ -99,6 +114,9 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       int8_t oilTempRaw = (int8_t)d[4];
       g_oilt_f = cToF(oilTempRaw - 40);
       g_oilt_has_data = true;
+      uint16_t battRaw = readU16LE(d, 6);
+      g_battv = battRaw * 0.001f;
+      g_battv_has_data = true;
       break;
     }
     case RUSEFI_BASE7: {
@@ -122,6 +140,11 @@ uint16_t readU16BE(uint8_t *d, int offset) {
 
 void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
   switch (id) {
+    case SEC_BLOCK0: {
+      g_rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
+      g_rpm_has_data = true;
+      break;
+    }
     case SEC_BLOCK2: {
       float map_ = readU16BE(d, 2) / 10.0f; // word1
       g_boost_kpa = map_;
@@ -132,6 +155,12 @@ void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
       break;
     }
     case SEC_BLOCK3: {
+      float tps = readU16BE(d, 0) / 10.0f; // word0
+      g_tps = tps;
+      g_tps_has_data = true;
+      float battV = readU16BE(d, 2) / 10.0f; // word1
+      g_battv = battV;
+      g_battv_has_data = true;
       float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per WROOM board's source comment, not lambda
       g_afr = ego1;
       g_afr_has_data = true;
@@ -168,7 +197,7 @@ void checkPageButton() {
   unsigned long now = millis();
   if (btnState == LOW && lastBtnState == HIGH && (now - lastBtnChange) > DEBOUNCE_MS) {
     lastBtnChange = now;
-    currentPage = (currentPage + 1) % 3;
+    currentPage = (currentPage + 1) % gauge_app_get_num_pages(); // was hardcoded to 3 - a stale bug from when we only had 3 pages, now uses the real dynamic count
     g_requested_page = currentPage; // gauge_app.c's timer picks this up safely inside LVGL's task
     Serial.printf("Requested page %d\n", currentPage + 1);
   }
@@ -181,6 +210,7 @@ void setup()
   pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
 
   ecu_config_init();
+  gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
 
   Touch_Init();
   lcd_lvgl_Init();

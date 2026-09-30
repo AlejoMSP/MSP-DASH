@@ -11,6 +11,12 @@ extern "C" {
 // original lv_demo_widgets() placeholder call.
 void build_gauge_app(void);
 
+// The actual number of active pages (enabled gauge slots + 1 for the
+// numbers grid) - the .ino's BOOT button handler uses this instead of
+// a hardcoded count, since the page count is now data-driven and can
+// change based on the persisted gauge configuration.
+int gauge_app_get_num_pages(void);
+
 // ---- CAN-derived values, written from Arduino's loop() (rusEFI TWAI
 // parsing), read by our LVGL timer callback running inside LVGL's task
 // context. Plain volatile floats/ints are safe here since single-word
@@ -22,6 +28,9 @@ extern volatile float g_oilt_f;
 extern volatile float g_fuelp_kpa;
 extern volatile float g_flex_pct;
 extern volatile float g_boost_kpa;
+extern volatile float g_rpm;
+extern volatile float g_tps;
+extern volatile float g_battv;
 
 // Set true the first time a real CAN frame updates each signal - until
 // then, that gauge's needle sits at its rest value (min, or 0 for
@@ -33,6 +42,9 @@ extern volatile bool g_oilt_has_data;
 extern volatile bool g_fuelp_has_data;
 extern volatile bool g_flex_has_data;
 extern volatile bool g_boost_has_data;
+extern volatile bool g_rpm_has_data;
+extern volatile bool g_tps_has_data;
+extern volatile bool g_battv_has_data;
 
 // Set from Arduino's loop() when the BOOT button is pressed (debounced
 // there) - our LVGL timer callback checks this and performs the actual

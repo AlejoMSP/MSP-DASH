@@ -808,3 +808,54 @@ selection.
 
 NOT yet bench-tested (MS/Link parsing specifically, since testing so
 far has used rusEFI) as of this writing.
+
+## Stage 4: Full gauge configuration (2026-09-30)
+
+Major rewrite - gauge pages are now entirely data-driven instead of
+hardcoded, enabling runtime configuration of signal assignment, range,
+needle color, caption, and warning threshold per gauge slot, editable
+from a new /gauges web page and persisted to NVS.
+
+**Expanded signal pool**: added RPM, TPS (throttle position), and
+BattV (battery voltage) decoding to both rusEFI and MegaSquirt/LinkECU
+parsers - ported directly from the WROOM board's confirmed byte offsets
+(rusEFI: RPM at BASE1 offset 0 no scaling, TPS at BASE2 offset 2 signed
+x0.01, BattV at BASE4 offset 6 x0.001; MS/Link: RPM at BLOCK0 offset 6,
+TPS/BattV at BLOCK3 offsets 0/2 x0.1). Full pool is now 10 signals
+(RPM, CLT, MAP, AFR, OilP, OilT, FuelP, Flex%, TPS, BattV).
+
+**New files**: gauge_config.h/.cpp - SignalId enum, GaugeSlotConfig
+struct (signal/enabled/min/max/rest/caption/color/warning fields),
+NVS persistence via ArduinoJson (whole MAX_GAUGE_SLOTS=8 array
+serialized as one JSON string under a single Preferences key, simpler
+than dozens of individual keys), default config matching the previous
+hardcoded 7-gauge setup plus one extra disabled slot (RPM) ready to
+enable. Also provides the generic gauge_config_signal_value()/
+has_data() dispatch gauge_app.c's update timer now uses instead of
+hardcoded per-gauge references.
+
+**gauge_app.c rewrite**: build_gauge_app() now loops over enabled slots
+from gauge_config_get_slots() instead of fixed calls - page count is
+genuinely dynamic based on how many slots are enabled. Needle color is
+now per-slot (was hardcoded white everywhere). The numbers-grid page is
+also data-driven, showing whatever signals are currently enabled (up
+to 8, in a 2x4 layout).
+
+**Bug fix found and fixed along the way**: checkPageButton() in the
+.ino had hardcoded `% 3` for page cycling - a stale leftover from when
+there were only 3 pages, meaning the BOOT button has only ever cycled
+among the first 3 of our now-8 pages this whole time. Added
+gauge_app_get_num_pages() so this uses the real dynamic count.
+
+**Web UI**: new /gauges page - one editable block per slot (signal
+dropdown, enabled checkbox, caption, min/max/rest, color picker,
+warning enable/threshold/direction). Saves via POST of the whole array
+as raw JSON (accumulated across chunks via ESPAsyncWebServer's body
+callback, parsed once complete) to /gauges; GET /gauges.json returns
+current config. Changes are saved to NVS immediately but require a
+reboot to actually apply (pages are built once at boot inside
+lcd_lvgl_Init() - runtime page teardown/rebuild was judged out of scope
+for this pass).
+
+NOT yet bench-tested as of this writing - this is the largest single
+rewrite in this project's history, worth extra care testing.
