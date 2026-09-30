@@ -21,11 +21,17 @@
 #include "gauge_app.h"
 #include "gauge_config.h"
 #include "ecu_config.h"
+#include "sd_storage.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <string.h>
+#include <dirent.h>
+#include <stdio.h>
+#include <sys/stat.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
+
+#define SD_MOUNT_POINT "/sd_card"
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
@@ -51,7 +57,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <h1>MSP-DASH Live Monitor</h1>
   <p style="text-align:center">
     <a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a> &nbsp;|&nbsp;
-    <a href="/gauges" style="color:#4dd0e1">Gauge Config &rarr;</a>
+    <a href="/gauges" style="color:#4dd0e1">Gauge Config &rarr;</a> &nbsp;|&nbsp;
+    <a href="/sd" style="color:#4dd0e1">SD Card &rarr;</a>
   </p>
   <div style="text-align:center; margin-top:10px;">
     <label>ECU: <select id="ecuSelect">
@@ -206,6 +213,62 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     }
 
     load();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+static const char SD_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH SD Card</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
+    h1 { font-size: 1.2em; text-align:center; }
+    table { width:100%; border-collapse: collapse; margin-top:16px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #333; }
+    th { color:#4dd0e1; }
+    a.dl { color:#4dd0e1; text-decoration:none; }
+    #uploadForm { margin-top:20px; background:#111; padding:16px; border-radius:8px; }
+    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h1>SD Card Files</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <table>
+    <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <form id="uploadForm">
+    <input type="file" id="fileInput">
+    <button type="submit">Upload to SD Card</button>
+    <div id="uploadStatus"></div>
+  </form>
+  <script>
+    async function refresh() {
+      const res = await fetch("/sd/list");
+      const files = await res.json();
+      document.getElementById("rows").innerHTML = files.map(f =>
+        `<tr><td>${f.name}</td><td>${f.size}</td><td><a class="dl" href="/sd/download?file=${encodeURIComponent(f.name)}">Download</a></td></tr>`
+      ).join("");
+    }
+    document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const file = document.getElementById("fileInput").files[0];
+      if (!file) return;
+      const status = document.getElementById("uploadStatus");
+      status.textContent = "Uploading...";
+      const formData = new FormData();
+      formData.append("file", file);
+      await fetch("/sd/upload", { method: "POST", body: formData });
+      status.textContent = "Upload complete.";
+      refresh();
+    });
+    refresh();
   </script>
 </body>
 </html>
@@ -384,6 +447,100 @@ void web_monitor_init(void) {
           }
           gauge_config_save();
         }
+      }
+    }
+  );
+
+  server.on("/sd", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", SD_HTML);
+  });
+
+  server.on("/sd/list", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    if (sd_storage_is_mounted()) {
+      DIR *dir = opendir(SD_MOUNT_POINT);
+      if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+          if (entry->d_type != DT_REG) continue; // regular files only
+          char fullpath[300];
+          snprintf(fullpath, sizeof(fullpath), "%s/%s", SD_MOUNT_POINT, entry->d_name);
+          struct stat st;
+          long size = (stat(fullpath, &st) == 0) ? st.st_size : 0;
+          JsonObject o = arr.add<JsonObject>();
+          o["name"] = entry->d_name;
+          o["size"] = size;
+        }
+        closedir(dir);
+      }
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/sd/download", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("file") || !sd_storage_is_mounted()) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+    String filename = request->getParam("file")->value();
+    char fullpath[300];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", SD_MOUNT_POINT, filename.c_str());
+
+    struct stat st;
+    if (stat(fullpath, &st) != 0) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+    size_t fileSize = st.st_size;
+
+    // Static path string kept alive for the lifetime of this one
+    // response's streaming callback (simplest safe approach given the
+    // lambda can't easily capture a local buffer safely across calls
+    // otherwise, since ESPAsyncWebServer invokes this callback
+    // repeatedly over multiple event-loop iterations).
+    static char s_downloadPath[300];
+    strlcpy(s_downloadPath, fullpath, sizeof(s_downloadPath));
+    static FILE *s_downloadFile = NULL;
+
+    AsyncWebServerResponse *response = request->beginResponse(
+      "application/octet-stream", fileSize,
+      [](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+        if (index == 0) {
+          s_downloadFile = fopen(s_downloadPath, "rb");
+        }
+        if (!s_downloadFile) return 0;
+        size_t bytesRead = fread(buffer, 1, maxLen, s_downloadFile);
+        if (bytesRead == 0) {
+          fclose(s_downloadFile);
+          s_downloadFile = NULL;
+        }
+        return bytesRead;
+      }
+    );
+    response->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+    request->send(response);
+  });
+
+  server.on("/sd/upload", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      request->send(200, "text/plain", "OK");
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      static FILE *s_uploadFile = NULL;
+      if (index == 0) {
+        char fullpath[300];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", SD_MOUNT_POINT, filename.c_str());
+        s_uploadFile = fopen(fullpath, "wb");
+      }
+      if (s_uploadFile) {
+        fwrite(data, 1, len, s_uploadFile);
+      }
+      if (final && s_uploadFile) {
+        fclose(s_uploadFile);
+        s_uploadFile = NULL;
       }
     }
   );

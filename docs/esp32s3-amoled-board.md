@@ -883,3 +883,36 @@ Tick-label font bumped from 28px to 36px (LV_FONT_MONTSERRAT_36, needs
 enabling in lv_conf.h) per request for bigger numbers - caption text
 stays at 28px. Flagged flash-storage usage (93% at last compile) as a
 real constraint going forward, before adding SD card support next.
+
+## SD card: mount, browse, upload, download (2026-09-30)
+
+New files: sd_storage.h/.cpp - mount code ported directly from
+Waveshare's confirmed 04_SD_Card example for this exact board. Uses
+ESP-IDF's native VFS/FAT + SD SPI driver (esp_vfs_fat_sdspi_mount),
+NOT Arduino's SD.h - matches their architecture pattern (native
+ESP-IDF components) used throughout this whole BSP. Confirmed pins:
+MISO=40, MOSI=39, CLK=41, CS=38, mounted at /sd_card. Once mounted,
+files are accessed via standard POSIX calls (fopen/fread/fwrite/fclose/
+opendir/readdir/stat), not any Arduino-specific filesystem API.
+
+New web page /sd: lists files (name + size) with download links, plus
+an upload form. New endpoints:
+- GET /sd/list - JSON directory listing (opendir/readdir, regular
+  files only, with stat() for size)
+- GET /sd/download?file=X - streams a file's contents via
+  ESPAsyncWebServer's chunked response callback (fopen/fread per chunk,
+  avoids loading the whole file into RAM - important for potentially
+  large log files)
+- POST /sd/upload - multipart file upload, writes directly to
+  /sd_card/<filename> via fopen/fwrite as chunks arrive
+
+sd_storage_init() called from setup(), before web_monitor_init() -
+safe to call even with no card inserted (logs a failure message,
+sd_storage_is_mounted() then returns false and /sd/list simply shows
+an empty listing rather than crashing).
+
+NOT yet bench-tested (no physical card tested yet) as of this writing.
+This adds meaningful new code (ESP-IDF SD/VFS components, directory
+listing, chunked upload/download handlers) on top of an already
+93%-flash-used build - watch the next compile's storage percentage
+closely.
