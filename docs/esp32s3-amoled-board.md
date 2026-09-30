@@ -639,3 +639,17 @@ fallback behavior) as of this writing.
   button) only now, per request.
 
 NOT yet bench-tested as of this writing.
+
+## Bigger, brighter tick numbers (2026-09-30)
+
+Enabled LV_FONT_MONTSERRAT_28 in lv_conf.h (was only 14px available
+before) and applied it to LV_PART_TICKS - confirmed via lv_meter.c
+source that this is the actual part lv_meter uses to draw tick number
+labels (lv_obj_init_draw_label_dsc(obj, LV_PART_TICKS, &label_dsc)).
+Matches a reference image showing prominently large tick numbers on a
+classic tachometer-style gauge face.
+
+NOTE: with a much larger font at the same label_gap (25) used for the
+smaller 14px font, numbers may visually crowd against tick marks or
+each other - not yet visually confirmed, may need the gap or meter size
+adjusted once tested.

@@ -102,6 +102,12 @@ static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, i
   lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, lv_color_white(), 25);
   lv_meter_set_scale_range(meter, scale, min_val, max_val, 270, 135);
 
+  // Bigger, brighter tick numbers (per reference image) - LV_PART_TICKS
+  // is the confirmed part lv_meter actually uses to draw its tick
+  // labels (checked against lv_meter.c source directly).
+  lv_obj_set_style_text_font(meter, &lv_font_montserrat_28, LV_PART_TICKS);
+  lv_obj_set_style_text_color(meter, lv_color_white(), LV_PART_TICKS);
+
   // needle width increased (was 5) - thicker needle per request
   lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 8, lv_color_white(), -15);
   lv_meter_set_indicator_value(meter, needle, rest_val);
