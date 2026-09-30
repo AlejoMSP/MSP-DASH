@@ -60,11 +60,14 @@ typedef struct {
   lv_meter_indicator_t *needle;
   int32_t min_val;
   int32_t max_val;
-  int32_t rest_val; // shown until real data arrives
+  int32_t rest_val; // unused now that sweep replaces the static rest state, kept for reference
   bool has_warning;
   float warning_threshold;
   bool warning_above; // true: warn when value > threshold, false: warn when value < threshold
   bool warning_active; // current flash state, tracked so we only touch bg_color on actual changes
+  int32_t sweep_pos; // current needle position while no real data has arrived yet
+  int32_t sweep_step; // how far the needle moves per update tick while sweeping
+  int8_t sweep_dir; // +1 or -1
 } GaugePage;
 
 static GaugePage pages[NUM_PAGES];
@@ -121,6 +124,14 @@ static void build_full_gauge_page(int index, int32_t min_val, int32_t max_val, i
   pages[index].warning_threshold = warning_threshold;
   pages[index].warning_above = warning_above;
   pages[index].warning_active = false;
+
+  // Sweep animation setup - aims for roughly a 2 second one-way sweep
+  // at the 80ms update rate (25 ticks), with a floor of 1 so very
+  // small ranges (e.g. AFR's 10-20) still move visibly each tick.
+  pages[index].sweep_pos = min_val;
+  pages[index].sweep_dir = 1;
+  int32_t step = (max_val - min_val) / 25;
+  pages[index].sweep_step = step < 1 ? 1 : step;
 }
 
 static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const char *caption) {
@@ -168,15 +179,28 @@ static void gesture_event_cb(lv_event_t *e) {
   }
 }
 
-// Clamps a value into a gauge's own int32 range for lv_meter, or
-// returns the gauge's configured rest value if no real data has
-// arrived yet.
-static int32_t clamped_or_rest(float value, bool has_data, int32_t min_val, int32_t max_val, int32_t rest_val) {
-  if (!has_data) return rest_val;
-  int32_t v = (int32_t)value;
-  if (v < min_val) v = min_val;
-  if (v > max_val) v = max_val;
-  return v;
+// Clamps a value into a gauge's own int32 range for lv_meter, or - if
+// no real data has arrived yet for that signal - advances and returns
+// a back-and-forth sweep position instead of a static rest value. Once
+// has_data goes true (a one-way latch, set on first real CAN frame),
+// this always returns the clamped real value from then on.
+static int32_t clamped_or_sweep(GaugePage *p, float value, bool has_data) {
+  if (has_data) {
+    int32_t v = (int32_t)value;
+    if (v < p->min_val) v = p->min_val;
+    if (v > p->max_val) v = p->max_val;
+    return v;
+  }
+
+  p->sweep_pos += p->sweep_dir * p->sweep_step;
+  if (p->sweep_pos >= p->max_val) {
+    p->sweep_pos = p->max_val;
+    p->sweep_dir = -1;
+  } else if (p->sweep_pos <= p->min_val) {
+    p->sweep_pos = p->min_val;
+    p->sweep_dir = 1;
+  }
+  return p->sweep_pos;
 }
 
 // Checks a page's warning condition against the live value (only when
@@ -213,30 +237,30 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   }
 
   lv_meter_set_indicator_value(pages[0].meter, pages[0].needle,
-    clamped_or_rest(g_clt_f, g_clt_has_data, pages[0].min_val, pages[0].max_val, pages[0].rest_val));
+    clamped_or_sweep(&pages[0], g_clt_f, g_clt_has_data));
   update_warning_flash(0, g_clt_f, g_clt_has_data);
 
   lv_meter_set_indicator_value(pages[1].meter, pages[1].needle,
-    clamped_or_rest(g_boost_kpa, g_boost_has_data, pages[1].min_val, pages[1].max_val, pages[1].rest_val));
+    clamped_or_sweep(&pages[1], g_boost_kpa, g_boost_has_data));
 
   lv_meter_set_indicator_value(pages[2].meter, pages[2].needle,
-    clamped_or_rest(g_afr, g_afr_has_data, pages[2].min_val, pages[2].max_val, pages[2].rest_val));
+    clamped_or_sweep(&pages[2], g_afr, g_afr_has_data));
   update_warning_flash(2, g_afr, g_afr_has_data);
 
   lv_meter_set_indicator_value(pages[3].meter, pages[3].needle,
-    clamped_or_rest(g_oilp_kpa, g_oilp_has_data, pages[3].min_val, pages[3].max_val, pages[3].rest_val));
+    clamped_or_sweep(&pages[3], g_oilp_kpa, g_oilp_has_data));
   update_warning_flash(3, g_oilp_kpa, g_oilp_has_data);
 
   lv_meter_set_indicator_value(pages[4].meter, pages[4].needle,
-    clamped_or_rest(g_oilt_f, g_oilt_has_data, pages[4].min_val, pages[4].max_val, pages[4].rest_val));
+    clamped_or_sweep(&pages[4], g_oilt_f, g_oilt_has_data));
   update_warning_flash(4, g_oilt_f, g_oilt_has_data);
 
   lv_meter_set_indicator_value(pages[5].meter, pages[5].needle,
-    clamped_or_rest(g_fuelp_kpa, g_fuelp_has_data, pages[5].min_val, pages[5].max_val, pages[5].rest_val));
+    clamped_or_sweep(&pages[5], g_fuelp_kpa, g_fuelp_has_data));
   update_warning_flash(5, g_fuelp_kpa, g_fuelp_has_data);
 
   lv_meter_set_indicator_value(pages[6].meter, pages[6].needle,
-    clamped_or_rest(g_flex_pct, g_flex_has_data, pages[6].min_val, pages[6].max_val, pages[6].rest_val));
+    clamped_or_sweep(&pages[6], g_flex_pct, g_flex_has_data));
 
   char buf[16];
   snprintf(buf, sizeof(buf), "%.0f", g_clt_f); lv_label_set_text(g_clt_cell, buf);

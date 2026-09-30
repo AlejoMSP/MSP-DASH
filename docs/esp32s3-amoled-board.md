@@ -692,3 +692,19 @@ rest/default value never falsely triggers. Added has_warning/
 warning_threshold/warning_above/warning_active fields to the GaugePage
 struct and a new update_warning_flash() helper, called after each
 gauge's needle update in the main timer callback.
+
+## Sweeping needle animation while no data present (2026-09-30)
+
+Replaced the static "sit at rest value" behavior with a back-and-forth
+sweep animation: while no real CAN frame has arrived yet for a signal
+(has_data still false), its needle sweeps between min and max at a
+speed aimed for roughly a 2-second one-way pass (step = range/25 per
+80ms tick, floored at 1 so small ranges like AFR's 10-20 still move
+visibly). Once the first real frame arrives, has_data latches true
+permanently and the gauge shows clamped real values from then on -
+sweeping only ever happens during the "waiting for CAN" state, not as
+an ongoing idle animation once live data is flowing.
+
+New clamped_or_sweep() function replaces the old clamped_or_rest();
+added sweep_pos/sweep_step/sweep_dir fields to GaugePage, initialized
+in build_full_gauge_page().
