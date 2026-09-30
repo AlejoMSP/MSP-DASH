@@ -67,6 +67,7 @@ typedef struct {
   SignalId signal;
   int32_t min_val;
   int32_t max_val;
+  uint32_t bg_color; // the "off" state for warning flash - was previously always assumed black
   bool has_warning;
   float warning_threshold;
   bool warning_above;
@@ -94,31 +95,33 @@ static void switch_to_page(int index) {
 }
 
 static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
-  lv_obj_t *page = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(page, lv_color_black(), 0);
-
+  lv_color_t bgColor = lv_color_hex(cfg->bg_color);
+  lv_color_t tickColor = lv_color_hex(cfg->tick_color);
   lv_color_t needleColor = lv_color_hex(cfg->needle_color);
+
+  lv_obj_t *page = lv_obj_create(NULL);
+  lv_obj_set_style_bg_color(page, bgColor, 0);
 
   lv_obj_t *meter = lv_meter_create(page);
   lv_obj_set_size(meter, 460, 460); // near-full-screen on the 466x466 panel
   lv_obj_center(meter);
-  lv_obj_set_style_bg_color(meter, lv_color_black(), 0);
+  lv_obj_set_style_bg_color(meter, bgColor, 0);
   lv_obj_set_style_border_width(meter, 0, 0);
 
   lv_meter_scale_t *scale = lv_meter_add_scale(meter);
-  lv_meter_set_scale_ticks(meter, scale, 26, 2, 10, lv_color_white());
-  lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, lv_color_white(), 25);
+  lv_meter_set_scale_ticks(meter, scale, 26, 2, 10, tickColor);
+  lv_meter_set_scale_major_ticks(meter, scale, 5, 4, 18, tickColor, 25);
   lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, 270, 135);
 
-  lv_obj_set_style_text_font(meter, &lv_font_montserrat_28, LV_PART_TICKS);
-  lv_obj_set_style_text_color(meter, lv_color_white(), LV_PART_TICKS);
+  lv_obj_set_style_text_font(meter, &lv_font_montserrat_36, LV_PART_TICKS); // bumped from 28 per request
+  lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
 
   lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 8, needleColor, -15);
   lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
 
   lv_obj_t *capLabel = lv_label_create(page);
   lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
-  lv_obj_set_style_text_font(capLabel, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(capLabel, &lv_font_montserrat_28, 0); // caption stays at 28 - 36 was reserved for the tick numbers specifically, per request
   lv_label_set_text(capLabel, cfg->caption);
   lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70);
 
@@ -130,6 +133,7 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   pages[index].signal = cfg->signal;
   pages[index].min_val = cfg->min_val;
   pages[index].max_val = cfg->max_val;
+  pages[index].bg_color = cfg->bg_color;
   pages[index].has_warning = cfg->has_warning;
   pages[index].warning_threshold = cfg->warning_threshold;
   pages[index].warning_above = cfg->warning_above;
@@ -224,11 +228,11 @@ static void update_warning_flash(GaugePage *p, float value, bool has_data) {
 
   if (triggered) {
     bool flash_on = (s_flash_counter / 6) % 2 == 0;
-    lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_black();
+    lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_hex(p->bg_color);
     lv_obj_set_style_bg_color(p->page, target, 0);
     p->warning_active = true;
   } else if (p->warning_active) {
-    lv_obj_set_style_bg_color(p->page, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(p->page, lv_color_hex(p->bg_color), 0);
     p->warning_active = false;
   }
 }

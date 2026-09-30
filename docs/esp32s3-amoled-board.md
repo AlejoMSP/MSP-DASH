@@ -859,3 +859,27 @@ for this pass).
 
 NOT yet bench-tested as of this writing - this is the largest single
 rewrite in this project's history, worth extra care testing.
+
+## Customization: tick/background color, bigger numbers (2026-09-30)
+
+Added tick_color and bg_color fields to GaugeSlotConfig (alongside the
+existing needle_color) - both editable from the /gauges web page via
+color pickers, persisted the same way as everything else.
+
+Tick color required no new LVGL style API - lv_meter_set_scale_ticks()
+and lv_meter_set_scale_major_ticks() already take a color parameter
+directly (confirmed via lv_meter.c source: scale->tick_color /
+scale->tick_major_color), we were just hardcoding lv_color_white() for
+both calls before.
+
+Background color applies to both the page and the meter's own
+background style. Also fixed a related correctness issue: the warning
+flash previously assumed black as its "off" state unconditionally -
+now stores each page's configured bg_color and flashes between THAT
+and red, so a custom background color doesn't break the warning
+indicator.
+
+Tick-label font bumped from 28px to 36px (LV_FONT_MONTSERRAT_36, needs
+enabling in lv_conf.h) per request for bigger numbers - caption text
+stays at 28px. Flagged flash-storage usage (93% at last compile) as a
+real constraint going forward, before adding SD card support next.

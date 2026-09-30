@@ -22,14 +22,14 @@ static Preferences prefs;
 static GaugeSlotConfig s_slots[MAX_GAUGE_SLOTS];
 
 static void applyDefaults(void) {
-  s_slots[0] = { SIG_CLT,   true,  65, 250, 65,  "CLT",        0xFFFFFF, true,  220, true  };
-  s_slots[1] = { SIG_MAP,   true,  0,  250, 100, "MAP",        0xFFFFFF, false, 0,   false };
-  s_slots[2] = { SIG_AFR,   true,  10, 20,  10,  "AFR",        0xFFFFFF, true,  15,  true  };
-  s_slots[3] = { SIG_OILP,  true,  0,  100, 0,   "OIL PRESS",  0xFFFFFF, true,  40,  false };
-  s_slots[4] = { SIG_OILT,  true,  65, 250, 65,  "OIL TEMP",   0xFFFFFF, true,  220, true  };
-  s_slots[5] = { SIG_FUELP, true,  0,  100, 0,   "FUEL PRESS", 0xFFFFFF, true,  40,  false };
-  s_slots[6] = { SIG_FLEX,  true,  0,  100, 0,   "ETH %",      0xFFFFFF, false, 0,   false };
-  s_slots[7] = { SIG_RPM,   false, 0,  8000,0,   "RPM",        0xFFFFFF, false, 0,   false };
+  s_slots[0] = { SIG_CLT,   true,  65, 250, 65,  "CLT",        0xFFFFFF, 0xFFFFFF, 0x000000, true,  220, true  };
+  s_slots[1] = { SIG_MAP,   true,  0,  250, 100, "MAP",        0xFFFFFF, 0xFFFFFF, 0x000000, false, 0,   false };
+  s_slots[2] = { SIG_AFR,   true,  10, 20,  10,  "AFR",        0xFFFFFF, 0xFFFFFF, 0x000000, true,  15,  true  };
+  s_slots[3] = { SIG_OILP,  true,  0,  100, 0,   "OIL PRESS",  0xFFFFFF, 0xFFFFFF, 0x000000, true,  40,  false };
+  s_slots[4] = { SIG_OILT,  true,  65, 250, 65,  "OIL TEMP",   0xFFFFFF, 0xFFFFFF, 0x000000, true,  220, true  };
+  s_slots[5] = { SIG_FUELP, true,  0,  100, 0,   "FUEL PRESS", 0xFFFFFF, 0xFFFFFF, 0x000000, true,  40,  false };
+  s_slots[6] = { SIG_FLEX,  true,  0,  100, 0,   "ETH %",      0xFFFFFF, 0xFFFFFF, 0x000000, false, 0,   false };
+  s_slots[7] = { SIG_RPM,   false, 0,  8000,0,   "RPM",        0xFFFFFF, 0xFFFFFF, 0x000000, false, 0,   false };
 }
 
 void gauge_config_init(void) {
@@ -59,6 +59,8 @@ void gauge_config_init(void) {
     s_slots[i].rest_val = o["rest"];
     strlcpy(s_slots[i].caption, o["caption"] | "", GAUGE_CAPTION_MAXLEN);
     s_slots[i].needle_color = (uint32_t)(long)o["color"];
+    s_slots[i].tick_color = (uint32_t)(long)o["tick_color"];
+    s_slots[i].bg_color = (uint32_t)(long)o["bg_color"];
     s_slots[i].has_warning = o["has_warning"];
     s_slots[i].warning_threshold = o["warning_threshold"];
     s_slots[i].warning_above = o["warning_above"];
@@ -82,6 +84,8 @@ void gauge_config_save(void) {
     o["rest"] = s_slots[i].rest_val;
     o["caption"] = s_slots[i].caption;
     o["color"] = s_slots[i].needle_color;
+    o["tick_color"] = s_slots[i].tick_color;
+    o["bg_color"] = s_slots[i].bg_color;
     o["has_warning"] = s_slots[i].has_warning;
     o["warning_threshold"] = s_slots[i].warning_threshold;
     o["warning_above"] = s_slots[i].warning_above;

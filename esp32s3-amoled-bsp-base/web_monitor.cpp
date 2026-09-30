@@ -177,6 +177,8 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
             <div><label>Rest <input type="number" value="${s.rest}" onchange="slots[${i}].rest=parseInt(this.value)"></label></div>
           </div>
           <label>Needle Color <input type="color" value="#${s.color.toString(16).padStart(6,'0')}" onchange="slots[${i}].color=parseInt(this.value.substring(1),16)"></label>
+          <label>Tick/Dial Color <input type="color" value="#${s.tick_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].tick_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Face/Background Color <input type="color" value="#${s.bg_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].bg_color=parseInt(this.value.substring(1),16)"></label>
           <label><input type="checkbox" ${s.has_warning?"checked":""} onchange="slots[${i}].has_warning=this.checked"> Warning enabled</label>
           <div class="row2">
             <div><label>Threshold <input type="number" value="${s.warning_threshold}" onchange="slots[${i}].warning_threshold=parseFloat(this.value)"></label></div>
@@ -333,6 +335,8 @@ void web_monitor_init(void) {
       o["rest"] = slots[i].rest_val;
       o["caption"] = slots[i].caption;
       o["color"] = slots[i].needle_color;
+      o["tick_color"] = slots[i].tick_color;
+      o["bg_color"] = slots[i].bg_color;
       o["has_warning"] = slots[i].has_warning;
       o["warning_threshold"] = slots[i].warning_threshold;
       o["warning_above"] = slots[i].warning_above;
@@ -371,6 +375,8 @@ void web_monitor_init(void) {
             slots[i].rest_val = o["rest"];
             strlcpy(slots[i].caption, o["caption"] | "", GAUGE_CAPTION_MAXLEN);
             slots[i].needle_color = (uint32_t)(long)o["color"];
+            slots[i].tick_color = (uint32_t)(long)o["tick_color"];
+            slots[i].bg_color = (uint32_t)(long)o["bg_color"];
             slots[i].has_warning = o["has_warning"];
             slots[i].warning_threshold = o["warning_threshold"];
             slots[i].warning_above = o["warning_above"];

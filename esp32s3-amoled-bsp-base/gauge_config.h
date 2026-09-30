@@ -37,6 +37,8 @@ typedef struct {
   int32_t rest_val;
   char caption[GAUGE_CAPTION_MAXLEN];
   uint32_t needle_color; // 0xRRGGBB
+  uint32_t tick_color;   // 0xRRGGBB - minor/major tick marks and their number labels
+  uint32_t bg_color;     // 0xRRGGBB - page/meter face background (also the "off" state of the warning flash, instead of assuming black)
   bool has_warning;
   float warning_threshold;
   bool warning_above;
