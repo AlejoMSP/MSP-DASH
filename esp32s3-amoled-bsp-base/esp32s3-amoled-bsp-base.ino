@@ -22,11 +22,12 @@
   inside LVGL's task, registered via lv_timer_create) reads those values
   and performs all actual LVGL API calls safely.
 
-  CAN wiring: GPIO43/44 was ruled out earlier (those are this board's
-  dedicated UART0 pins, not general-purpose) - using GPIO1/GPIO2 instead
-  (the originally-identified free/accessible pins on the 1.27mm GPIO
-  header), OR whichever pins you've actually wired - update below if
-  different.
+  CAN wiring: GPIO43/44 (the UART connector, JST-SH cable) - the only
+  physically accessible connector available (the 1.27mm GPIO header
+  where GPIO1/GPIO2 live needs a cable not currently on hand). These are
+  this board's dedicated UART0 pins, which Serial defaults to unless
+  CDCOnBoot=cdc is set - compile with that option to avoid Serial/CAN
+  conflicting over the same physical UART.
 */
 
 #include "lcd_bsp.h"
@@ -34,9 +35,13 @@
 #include "gauge_app.h"
 #include "driver/twai.h"
 
-// ---- CAN pins ----
-#define CAN_TX_PIN GPIO_NUM_1
-#define CAN_RX_PIN GPIO_NUM_2
+// ---- CAN pins - using the UART connector (JST-SH cable available),
+// same as our earlier v9-based sketch. These are this board's dedicated
+// UART0 pins, which Serial defaults to unless CDCOnBoot=cdc is set -
+// MUST compile with that option to avoid Serial/CAN fighting over the
+// same physical UART. ----
+#define CAN_TX_PIN GPIO_NUM_43
+#define CAN_RX_PIN GPIO_NUM_44
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
 
 // ---- rusEFI CAN IDs (bench-confirmed elsewhere in this project) ----
