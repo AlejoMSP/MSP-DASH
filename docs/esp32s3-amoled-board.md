@@ -733,3 +733,24 @@ parser, persisted via NVS), full gauge configuration (color/range/
 add/remove/rename, requires a data-driven gauge-config refactor).
 
 NOT yet bench-tested as of this writing.
+
+## Fixed boot crash after adding WiFi: shrunk LVGL's DMA buffer (2026-09-30)
+
+Adding web_monitor.cpp (WiFi AP + AsyncWebServer) caused an immediate
+boot crash-loop: `assert failed: lcd_lvgl_Init lcd_bsp.c:87 (buf2)`.
+Root cause: LVGL's display draw buffers are allocated with
+MALLOC_CAP_DMA (line 87 of lcd_bsp.c, part of Waveshare's original BSP
+code) - a much smaller, more limited memory pool on the ESP32-S3 than
+general heap. WiFi's networking stack also needs DMA-capable memory for
+its own radio/buffer operations. At the original buffer size
+(EXAMPLE_LVGL_BUF_HEIGHT = screen_height/4, ~216KB total for double
+buffering), the two subsystems were competing for the same limited
+pool and LVGL's second buffer allocation failed outright.
+
+Fix: reduced EXAMPLE_LVGL_BUF_HEIGHT from /4 to /10 in lcd_config.h
+(the one other targeted edit made to Waveshare's originally-untouched
+BSP files, alongside the earlier lv_demo_widgets() -> build_gauge_app()
+swap in lcd_bsp.c) - frees up enough DMA RAM for WiFi to coexist.
+Trade-off: slightly more frequent partial-screen flushes, matches the
+buffer fraction our earlier v9-based sketches used successfully with
+no visible downside.

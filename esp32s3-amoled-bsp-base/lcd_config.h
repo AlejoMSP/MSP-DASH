@@ -15,7 +15,15 @@
 #define EXAMPLE_PIN_NUM_LCD_RST           21
 #define EXAMPLE_PIN_NUM_BK_LIGHT          (-1)
 
-#define EXAMPLE_LVGL_BUF_HEIGHT        (EXAMPLE_LCD_V_RES / 4)
+// Reduced from /4 to /10 (was ~216KB of DMA-capable RAM for double
+// buffering) - WiFi/AsyncWebServer also need DMA-capable memory for
+// their own radio/buffer operations, and the two were competing for
+// the same limited pool, causing a buf2 allocation assert-failure/
+// crash-loop on boot once web_monitor.cpp was added. This smaller
+// buffer trades slightly more frequent partial-screen flushes for
+// comfortable headroom - matches the buffer fraction our earlier
+// v9-based sketches used successfully.
+#define EXAMPLE_LVGL_BUF_HEIGHT        (EXAMPLE_LCD_V_RES / 10)
 #define EXAMPLE_LVGL_TICK_PERIOD_MS    2                          //Timer time
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500                        //LVGL Indicates the maximum time for a task to run
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1                          //LVGL Minimum time to run a task
