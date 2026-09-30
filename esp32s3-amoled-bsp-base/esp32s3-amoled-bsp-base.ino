@@ -145,6 +145,7 @@ void loop()
 {
   twai_message_t message;
   if (twai_receive(&message, pdMS_TO_TICKS(20)) == ESP_OK) {
+    web_monitor_track_can_frame(message.identifier, message.data, message.data_length_code);
     handleRusefiFrame(message.identifier, message.data);
   }
   checkPageButton();

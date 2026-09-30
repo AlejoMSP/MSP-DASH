@@ -765,3 +765,22 @@ wifi_config.h (local only) with a committed wifi_config.h.example
 template. Connection progress and the assigned IP address print to
 Serial on boot (20 second connection timeout, prints a clear failure
 message if it doesn't connect in that window).
+
+## Stage 2: Raw CAN broadcast monitor (2026-09-30)
+
+New /can web page + /can.json endpoint - shows every CAN ID actually
+arriving on the bus (up to 32 tracked at once), regardless of whether
+we know how to decode it. Table shows ID (hex), DLC, raw data bytes
+(hex), frequency (Hz, recalculated once per second), and how many ms
+ago each was last seen. Polls /can.json every 1 second via plain
+fetch() rather than a second WebSocket connection - simpler, and this
+data doesn't need sub-second responsiveness.
+
+New web_monitor_track_can_frame() function, called from the .ino's
+loop() for every successfully received CAN frame (before
+handleRusefiFrame() - runs independently of whether that frame's ID is
+one we recognize/decode).
+
+Confirmed twai_message_t's actual field name (data_length_code) from
+ESP-IDF's hal/twai_types_deprecated.h header before using it - matched
+the initial guess, no correction needed.
