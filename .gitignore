@@ -15,3 +15,4 @@ Thumbs.db
 
 # WiFi credentials - never commit real network passwords
 esp32-main/wifi_config.h
+esp32s3-amoled-bsp-base/wifi_config.h

@@ -21,6 +21,7 @@
 #include "gauge_app.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
@@ -74,9 +75,24 @@ static unsigned long s_lastBroadcast = 0;
 static const unsigned long BROADCAST_INTERVAL_MS = 500;
 
 void web_monitor_init(void) {
-  WiFi.softAP("MSP-DASH", "turbomiata"); // SSID/password - change as desired
-  Serial.print("Web monitor AP started, IP: ");
-  Serial.println(WiFi.softAPIP());
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("Connecting to WiFi network \"%s\"", WIFI_SSID);
+
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 20000) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.print("WiFi connected. IP address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println();
+    Serial.println("WiFi connection FAILED - web monitor will not be reachable.");
+  }
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", INDEX_HTML);

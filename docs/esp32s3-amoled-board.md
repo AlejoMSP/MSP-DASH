@@ -754,3 +754,14 @@ swap in lcd_bsp.c) - frees up enough DMA RAM for WiFi to coexist.
 Trade-off: slightly more frequent partial-screen flushes, matches the
 buffer fraction our earlier v9-based sketches used successfully with
 no visible downside.
+
+## Switched web monitor to STA mode, joins home network (2026-09-30)
+
+Changed from WiFi AP mode to STA (joins an existing WiFi network)
+so the board and a phone/laptop can be on the same network for
+testing, rather than needing to connect directly to the board's own
+AP. Credentials handled the same way as the WROOM board: a git-ignored
+wifi_config.h (local only) with a committed wifi_config.h.example
+template. Connection progress and the assigned IP address print to
+Serial on boot (20 second connection timeout, prints a clear failure
+message if it doesn't connect in that window).
