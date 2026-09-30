@@ -85,3 +85,18 @@ The WROOM board (esp32-main) uses the plain default profile:
 arduino-cli compile --fqbn esp32:esp32:esp32 esp32-main
 arduino-cli upload -p COMx --fqbn esp32:esp32:esp32 esp32-main
 ```
+
+## IMPORTANT: partition scheme required
+
+This board's default partition scheme is sized for 4MB flash chips,
+NOT this board's actual 16MB - even with FlashSize=16M set, the app
+partition stayed tiny (~1.25MB), which we discovered the hard way once
+the sketch grew past that ceiling (103% overflow). Compile and upload
+commands for esp32s3-amoled-bsp-base MUST include
+PartitionScheme=app3M_fat9M_16MB (a real 16MB-sized scheme, 3MB app
+partition) or the build will fail once the sketch grows large enough:
+
+```powershell
+arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB esp32s3-amoled-bsp-base
+arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB esp32s3-amoled-bsp-base
+```
