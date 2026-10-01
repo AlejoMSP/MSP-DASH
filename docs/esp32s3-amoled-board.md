@@ -1079,3 +1079,19 @@ offset to LV_ALIGN_TOP_MID with a +350px offset (350 = 75% of the
 request ("3/4 below top, center from left to right"). The value label
 (when shown) is positioned relative to the caption, so it automatically
 follows this change without needing a separate edit.
+
+## Correction: FPS monitor position, not caption (2026-09-30)
+
+Clarified: the earlier "3/4 down, centered" request was for the LVGL
+FPS/perf monitor overlay, not the gauge caption - reverted the caption
+back to its original LV_ALIGN_BOTTOM_MID/-70 position.
+
+Confirmed from lv_refr.c source that the built-in perf monitor calls
+lv_obj_align(perf_label, LV_USE_PERF_MONITOR_POS, 0, 0) - offset is
+hardcoded to (0,0), meaning only LVGL's standard alignment presets are
+available, not an arbitrary custom pixel position. Set
+LV_USE_PERF_MONITOR_POS to LV_ALIGN_BOTTOM_MID (closest available
+option to the requested "3/4 down, centered" - centered horizontally,
+though anchored at the very bottom edge rather than exactly 75% down).
+A fully custom-built FPS counter would be needed for exact positioning,
+not pursued for now.
