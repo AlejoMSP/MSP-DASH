@@ -8,6 +8,10 @@
 
   Always-on from boot to power-off - no start/stop trigger, per project
   decision.
+
+  Updated for the page/cell config redesign - iterates every enabled
+  cell across every enabled page (instead of the old flat gauge-slot
+  array) to build the CSV header and each logged row.
 */
 
 #include "sd_logging.h"
@@ -42,12 +46,17 @@ void sd_logging_init(void) {
     return;
   }
 
-  // Header row: millis + caption of every enabled gauge slot.
-  GaugeSlotConfig *slots = gauge_config_get_slots();
+  // Header row: millis + caption of every enabled cell on every
+  // enabled page.
+  PageConfig *pages = gauge_config_get_pages();
   fprintf(f, "millis");
-  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
-    if (!slots[i].enabled) continue;
-    fprintf(f, ",%s", slots[i].caption);
+  for (int p = 0; p < MAX_PAGES; p++) {
+    if (!pages[p].enabled) continue;
+    int numCells = gauge_config_cells_for_layout(pages[p].layout);
+    for (int c = 0; c < numCells; c++) {
+      if (!pages[p].cells[c].enabled) continue;
+      fprintf(f, ",%s", pages[p].cells[c].caption);
+    }
   }
   fprintf(f, "\n");
   fclose(f);
@@ -65,12 +74,16 @@ void sd_logging_loop(void) {
   FILE *f = fopen(s_logPath, "a");
   if (!f) return;
 
-  GaugeSlotConfig *slots = gauge_config_get_slots();
+  PageConfig *pages = gauge_config_get_pages();
   fprintf(f, "%lu", now);
-  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
-    if (!slots[i].enabled) continue;
-    float value = gauge_config_signal_value(slots[i].signal);
-    fprintf(f, ",%.3f", value);
+  for (int p = 0; p < MAX_PAGES; p++) {
+    if (!pages[p].enabled) continue;
+    int numCells = gauge_config_cells_for_layout(pages[p].layout);
+    for (int c = 0; c < numCells; c++) {
+      if (!pages[p].cells[c].enabled) continue;
+      float value = gauge_config_signal_value(pages[p].cells[c].signal);
+      fprintf(f, ",%.3f", value);
+    }
   }
   fprintf(f, "\n");
   fclose(f);

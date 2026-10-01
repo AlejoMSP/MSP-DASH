@@ -52,16 +52,33 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .label { font-size:0.9em; color:#4dd0e1; }
     .value { font-size:2em; font-weight:bold; margin-top:6px; }
     .warn { color:#ff4444; }
+    .navbar { display:flex; align-items:center; justify-content:space-between; }
+    .hamburger { background:none; border:1px solid #444; font-size:1.4em; padding:4px 12px; }
+    .navmenu { display:none; flex-direction:column; background:#111; border-radius:8px; padding:10px; margin-top:10px; }
+    .navmenu.open { display:flex; }
+    .navmenu a { color:#4dd0e1; padding:8px; text-decoration:none; }
   </style>
 </head>
 <body>
-  <h1>MSP-DASH Live Monitor</h1>
-  <p style="text-align:center">
-    <a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a> &nbsp;|&nbsp;
-    <a href="/update" style="color:#4dd0e1">Firmware Update &rarr;</a> &nbsp;|&nbsp;
-    <a href="/gauges" style="color:#4dd0e1">Gauge Config &rarr;</a> &nbsp;|&nbsp;
-    <a href="/sd" style="color:#4dd0e1">SD Card &rarr;</a>
+  <div class="navbar">
+    <h1 style="margin:0">MSP-DASH</h1>
+    <button class="hamburger" onclick="document.getElementById('navmenu').classList.toggle('open')">&#9776;</button>
+  </div>
+  <div class="navmenu" id="navmenu">
+    <a href="/can">Raw CAN Monitor &rarr;</a>
+    <a href="/update">Firmware Update &rarr;</a>
+    <a href="/gauges">Gauge Config &rarr;</a>
+    <a href="/sd">SD Card &rarr;</a>
+  </div>
+  <p style="text-align:center; margin-top:10px;">
+    <button onclick="pageNav(-1)">&larr; Prev Page</button>
+    <button onclick="pageNav(1)">Next Page &rarr;</button>
   </p>
+  <script>
+    function pageNav(delta) {
+      fetch("/page-nav", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded"}, body: "delta=" + delta });
+    }
+  </script>
   <div style="text-align:center; margin-top:10px;">
     <label>ECU: <select id="ecuSelect">
       <option value="0">rusEFI</option>
@@ -150,106 +167,176 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
   <style>
     body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
     h1 { font-size: 1.2em; text-align:center; }
-    .slot { background:#111; border-radius:8px; padding:12px; margin-bottom:10px; }
-    .slot label { display:block; font-size:0.8em; color:#4dd0e1; margin-top:6px; }
-    .slot input, .slot select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
-    .row2 { display:flex; gap:10px; }
+    h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
+    .page-card { background:#0a0a0a; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .page-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+    .cell { background:#111; border-radius:8px; padding:10px; margin-top:10px; }
+    .cell label { display:block; font-size:0.78em; color:#4dd0e1; margin-top:5px; }
+    .cell input, .cell select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
+    .row2 { display:flex; gap:8px; }
     .row2 > div { flex:1; }
-    button { width:100%; padding:14px; font-size:1.1em; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin-top:16px; }
-    #status { text-align:center; margin-top:10px; color:#4dd0e1; }
+    button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
+    button.danger { background:#F44336; color:#fff; }
+    .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
+    #status { text-align:center; margin-top:10px; color:#4dd0e1; position:sticky; bottom:0; background:#000; padding:8px; }
   </style>
 </head>
 <body>
   <h1>Gauge Configuration</h1>
   <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
-  <div class="slot">
-    <strong>Apply colors to ALL gauges</strong>
+
+  <div class="bulk">
+    <strong>Apply colors to ALL cells on ALL pages</strong>
     <div class="row2">
       <div><label>Needle <input type="color" id="bulkNeedle" value="#ffffff"></label></div>
       <div><label>Tick/Dial <input type="color" id="bulkTick" value="#ffffff"></label></div>
       <div><label>Background <input type="color" id="bulkBg" value="#000000"></label></div>
     </div>
-    <button type="button" onclick="applyColorsToAll()">Apply to All (saves immediately, reboot to see it)</button>
+    <button type="button" onclick="applyColorsToAll()">Apply to All</button>
   </div>
-  <div id="slots"></div>
+
+  <button type="button" onclick="addPage()">+ Add Page</button>
+  <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
   <div id="status"></div>
+
   <script>
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
-    let slots = [];
+    const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
+    const CELLS_PER_LAYOUT = [1, 2, 3, 4];
+    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    let pages = [];
+    let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
 
-    function moveSlot(i, dir) {
-      const j = i + dir;
-      if (j < 0 || j >= slots.length) return;
-      const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp;
-      renderSlots();
+    function emptyCell() {
+      return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
+        needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
+        has_warning:false, warning_threshold:0, warning_above:false };
     }
 
-    function renderSlots() {
-      const container = document.getElementById("slots");
-      container.innerHTML = slots.map((s, i) => `
-        <div class="slot">
+    function signalOptionsHtml(selected) {
+      // Sorted by activity (lowest age_ms first = most live), "never seen" last, name as secondary sort.
+      const sorted = signalActivity.slice().sort((a, b) => {
+        if (a.age_ms !== b.age_ms) return a.age_ms - b.age_ms;
+        return a.name.localeCompare(b.name);
+      });
+      let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
+      for (const s of sorted) {
+        if (s.id === 0) continue;
+        const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
+        html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
+      }
+      return html;
+    }
+
+    function renderCell(pIdx, cIdx, c) {
+      return `
+        <div class="cell">
+          <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
+          ${!c.enabled ? "" : `
+          <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
+          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value)">
+            ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
+          </select></label>
+          <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
           <div class="row2">
-            <div><strong>Page ${i + 1}</strong></div>
-            <div style="text-align:right">
-              <button type="button" onclick="moveSlot(${i},-1)" ${i===0?"disabled":""}>&uarr; Up</button>
-              <button type="button" onclick="moveSlot(${i},1)" ${i===slots.length-1?"disabled":""}>&darr; Down</button>
-            </div>
+            <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
+            <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>
+            <div><label>Rest <input type="number" value="${c.rest}" onchange="pages[${pIdx}].cells[${cIdx}].rest=parseInt(this.value)"></label></div>
           </div>
-          <label>Signal
-            <select onchange="slots[${i}].signal=parseInt(this.value)">
-              ${SIGNALS.map((name, v) => `<option value="${v}" ${s.signal===v?"selected":""}>${name}</option>`).join("")}
-            </select>
-          </label>
-          <label><input type="checkbox" ${s.enabled?"checked":""} onchange="slots[${i}].enabled=this.checked"> Enabled (shown on a page)</label>
-          <label>Caption <input type="text" value="${s.caption}" onchange="slots[${i}].caption=this.value"></label>
           <div class="row2">
-            <div><label>Min <input type="number" value="${s.min}" onchange="slots[${i}].min=parseInt(this.value)"></label></div>
-            <div><label>Max <input type="number" value="${s.max}" onchange="slots[${i}].max=parseInt(this.value)"></label></div>
-            <div><label>Rest <input type="number" value="${s.rest}" onchange="slots[${i}].rest=parseInt(this.value)"></label></div>
+            <div><label>Value Divisor <input type="number" step="any" value="${c.value_divisor}" onchange="pages[${pIdx}].cells[${cIdx}].value_divisor=parseFloat(this.value)"></label></div>
+            <div><label>Tick Count <input type="number" value="${c.tick_count}" onchange="pages[${pIdx}].cells[${cIdx}].tick_count=parseInt(this.value)"></label></div>
+            <div><label>Major Every Nth <input type="number" value="${c.major_nth}" onchange="pages[${pIdx}].cells[${cIdx}].major_nth=parseInt(this.value)"></label></div>
           </div>
           <div class="row2">
-            <div><label>Value Divisor <input type="number" step="any" value="${s.value_divisor}" onchange="slots[${i}].value_divisor=parseFloat(this.value)"></label></div>
-            <div><label>Tick Count <input type="number" value="${s.tick_count}" onchange="slots[${i}].tick_count=parseInt(this.value)"></label></div>
-            <div><label>Major Every Nth <input type="number" value="${s.major_nth}" onchange="slots[${i}].major_nth=parseInt(this.value)"></label></div>
-          </div>
-          <div class="row2">
-            <div><label>Refresh Rate (Hz) <input type="number" value="${s.refresh_hz}" onchange="slots[${i}].refresh_hz=parseInt(this.value)"></label></div>
-            <div><label><input type="checkbox" ${s.show_value?"checked":""} onchange="slots[${i}].show_value=this.checked"> Show value above name</label></div>
+            <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
+            <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
             <div><label>Value Text Size
-              <select onchange="slots[${i}].value_font_size=parseInt(this.value)">
-                <option value="14" ${s.value_font_size===14?"selected":""}>Small (14px)</option>
-                <option value="28" ${s.value_font_size===28?"selected":""}>Medium (28px)</option>
-                <option value="36" ${s.value_font_size===36?"selected":""}>Large (36px)</option>
+              <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
+                <option value="14" ${c.value_font_size===14?"selected":""}>Small</option>
+                <option value="28" ${c.value_font_size===28?"selected":""}>Medium</option>
+                <option value="36" ${c.value_font_size===36?"selected":""}>Large</option>
               </select>
             </label></div>
           </div>
-          <label>Needle Color <input type="color" value="#${s.color.toString(16).padStart(6,'0')}" onchange="slots[${i}].color=parseInt(this.value.substring(1),16)"></label>
-          <label>Tick/Dial Color <input type="color" value="#${s.tick_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].tick_color=parseInt(this.value.substring(1),16)"></label>
-          <label>Face/Background Color <input type="color" value="#${s.bg_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].bg_color=parseInt(this.value.substring(1),16)"></label>
-          <label><input type="checkbox" ${s.has_warning?"checked":""} onchange="slots[${i}].has_warning=this.checked"> Warning enabled</label>
+          <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
+          <label><input type="checkbox" ${c.has_warning?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].has_warning=this.checked"> Warning enabled</label>
           <div class="row2">
-            <div><label>Threshold <input type="number" value="${s.warning_threshold}" onchange="slots[${i}].warning_threshold=parseFloat(this.value)"></label></div>
+            <div><label>Threshold <input type="number" value="${c.warning_threshold}" onchange="pages[${pIdx}].cells[${cIdx}].warning_threshold=parseFloat(this.value)"></label></div>
             <div><label>Direction
-              <select onchange="slots[${i}].warning_above=(this.value==='1')">
-                <option value="1" ${s.warning_above?"selected":""}>Above</option>
-                <option value="0" ${!s.warning_above?"selected":""}>Below</option>
+              <select onchange="pages[${pIdx}].cells[${cIdx}].warning_above=(this.value==='1')">
+                <option value="1" ${c.warning_above?"selected":""}>Above</option>
+                <option value="0" ${!c.warning_above?"selected":""}>Below</option>
               </select>
             </label></div>
           </div>
+          `}
         </div>
-      `).join("");
+      `;
+    }
+
+    function changeLayout(pIdx, newLayout) {
+      pages[pIdx].layout = newLayout;
+      const needed = CELLS_PER_LAYOUT[newLayout];
+      while (pages[pIdx].cells.length < needed) pages[pIdx].cells.push(emptyCell());
+      renderPages();
+    }
+
+    function pageAction(pIdx, action) {
+      if (action === "delete") {
+        pages.splice(pIdx, 1);
+      } else if (action === "empty") {
+        pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
+      } else if (action === "copy") {
+        const copy = JSON.parse(JSON.stringify(pages[pIdx]));
+        pages.push(copy);
+      }
+      renderPages();
+    }
+
+    function addPage() {
+      pages.push({ enabled:true, layout:0, cells:[emptyCell()] });
+      renderPages();
+    }
+
+    function renderPages() {
+      const container = document.getElementById("pages");
+      container.innerHTML = pages.map((p, pIdx) => {
+        const needed = CELLS_PER_LAYOUT[p.layout];
+        while (p.cells.length < needed) p.cells.push(emptyCell());
+        let cellsHtml = "";
+        for (let c = 0; c < needed; c++) cellsHtml += renderCell(pIdx, c, p.cells[c]);
+        return `
+          <div class="page-card">
+            <div class="page-header">
+              <strong>Page ${pIdx + 1}</strong>
+              <select onchange="changeLayout(${pIdx}, parseInt(this.value))">
+                ${LAYOUTS.map((l,v)=>`<option value="${v}" ${p.layout===v?"selected":""}>${l}</option>`).join("")}
+              </select>
+              <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
+              <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
+              <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>
+            </div>
+            ${cellsHtml}
+          </div>
+        `;
+      }).join("");
     }
 
     async function load() {
-      const res = await fetch("/gauges.json");
-      slots = await res.json();
-      renderSlots();
+      const [pagesRes, signalsRes] = await Promise.all([fetch("/gauges.json"), fetch("/signals.json")]);
+      pages = await pagesRes.json();
+      signalActivity = await signalsRes.json();
+      renderPages();
     }
 
     async function save() {
       document.getElementById("status").textContent = "Saving...";
-      await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(slots) });
+      await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
       document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
     }
 
@@ -257,14 +344,15 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
       const needle = document.getElementById("bulkNeedle").value.substring(1);
       const tick = document.getElementById("bulkTick").value.substring(1);
       const bg = document.getElementById("bulkBg").value.substring(1);
-      document.getElementById("status").textContent = "Applying colors to all gauges...";
-      const formData = new URLSearchParams();
-      formData.append("needle", needle);
-      formData.append("tick", tick);
-      formData.append("bg", bg);
-      await fetch("/gauges/apply-colors", { method: "POST", body: formData });
-      document.getElementById("status").textContent = "Applied and saved. Reboot the board to apply changes.";
-      load(); // refresh the displayed per-slot colors to reflect the bulk change
+      for (const p of pages) {
+        for (const c of p.cells) {
+          c.needle_color = parseInt(needle, 16);
+          c.tick_color = parseInt(tick, 16);
+          c.bg_color = parseInt(bg, 16);
+        }
+      }
+      renderPages();
+      document.getElementById("status").textContent = "Applied locally - click Save to persist.";
     }
 
     load();
@@ -272,7 +360,6 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
 </body>
 </html>
 )rawliteral";
-
 static const char SD_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -499,34 +586,66 @@ void web_monitor_init(void) {
     request->send(200, "text/plain", "OK");
   });
 
+  server.on("/page-nav", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("delta", true)) {
+      int delta = request->getParam("delta", true)->value().toInt();
+      g_page_nav_delta = (delta > 0) ? 1 : (delta < 0) ? -1 : 0;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+
   server.on("/gauges", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", GAUGES_HTML);
   });
 
-  server.on("/gauges.json", HTTP_GET, [](AsyncWebServerRequest *request) {
-    GaugeSlotConfig *slots = gauge_config_get_slots();
+  server.on("/signals.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
+    for (int sig = 0; sig < SIG_COUNT; sig++) {
       JsonObject o = arr.add<JsonObject>();
-      o["signal"] = (int)slots[i].signal;
-      o["enabled"] = slots[i].enabled;
-      o["min"] = slots[i].min_val;
-      o["max"] = slots[i].max_val;
-      o["rest"] = slots[i].rest_val;
-      o["caption"] = slots[i].caption;
-      o["color"] = slots[i].needle_color;
-      o["tick_color"] = slots[i].tick_color;
-      o["bg_color"] = slots[i].bg_color;
-      o["value_divisor"] = slots[i].value_divisor;
-      o["tick_count"] = slots[i].tick_count;
-      o["major_nth"] = slots[i].major_nth;
-      o["refresh_hz"] = slots[i].refresh_hz;
-      o["show_value"] = slots[i].show_value;
-      o["value_font_size"] = slots[i].value_font_size;
-      o["has_warning"] = slots[i].has_warning;
-      o["warning_threshold"] = slots[i].warning_threshold;
-      o["warning_above"] = slots[i].warning_above;
+      o["id"] = sig;
+      o["name"] = gauge_config_signal_name((SignalId)sig);
+      o["age_ms"] = gauge_config_signal_age_ms((SignalId)sig);
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/gauges.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    PageConfig *pageConfigs = gauge_config_get_pages();
+    JsonDocument doc;
+    JsonArray pagesArr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_PAGES; i++) {
+      if (!pageConfigs[i].enabled) continue;
+      JsonObject pageObj = pagesArr.add<JsonObject>();
+      pageObj["enabled"] = pageConfigs[i].enabled;
+      pageObj["layout"] = (int)pageConfigs[i].layout;
+      JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
+      int numCells = gauge_config_cells_for_layout(pageConfigs[i].layout);
+      for (int c = 0; c < numCells; c++) {
+        CellConfig *cell = &pageConfigs[i].cells[c];
+        JsonObject o = cellsArr.add<JsonObject>();
+        o["enabled"] = cell->enabled;
+        o["signal"] = (int)cell->signal;
+        o["gauge_type"] = (int)cell->gauge_type;
+        o["min"] = cell->min_val;
+        o["max"] = cell->max_val;
+        o["rest"] = cell->rest_val;
+        o["caption"] = cell->caption;
+        o["needle_color"] = cell->needle_color;
+        o["tick_color"] = cell->tick_color;
+        o["bg_color"] = cell->bg_color;
+        o["value_divisor"] = cell->value_divisor;
+        o["tick_count"] = cell->tick_count;
+        o["major_nth"] = cell->major_nth;
+        o["refresh_hz"] = cell->refresh_hz;
+        o["show_value"] = cell->show_value;
+        o["value_font_size"] = cell->value_font_size;
+        o["has_warning"] = cell->has_warning;
+        o["warning_threshold"] = cell->warning_threshold;
+        o["warning_above"] = cell->warning_above;
+      }
     }
     String out;
     serializeJson(doc, out);
@@ -534,23 +653,16 @@ void web_monitor_init(void) {
   });
 
   // POST body arrives in chunks - accumulate into a static buffer, parse
-  // once the full body has been received (index + len == total).
-  server.on("/gauges/apply-colors", HTTP_POST, [](AsyncWebServerRequest *request) {
-    uint32_t needleColor = request->hasParam("needle", true) ? strtoul(request->getParam("needle", true)->value().c_str(), NULL, 16) : 0xFFFFFF;
-    uint32_t tickColor = request->hasParam("tick", true) ? strtoul(request->getParam("tick", true)->value().c_str(), NULL, 16) : 0xFFFFFF;
-    uint32_t bgColor = request->hasParam("bg", true) ? strtoul(request->getParam("bg", true)->value().c_str(), NULL, 16) : 0x000000;
-    gauge_config_apply_colors_to_all(needleColor, tickColor, bgColor);
-    gauge_config_save();
-    request->send(200, "text/plain", "OK");
-  });
-
+  // once the full body has been received (index + len == total). Buffer
+  // is larger now (nested pages/cells structure) - up to 8 pages x 4
+  // cells x ~250 bytes/cell is comfortably under 8KB.
   server.on("/gauges", HTTP_POST,
     [](AsyncWebServerRequest *request) {
       request->send(200, "text/plain", "OK - reboot to apply");
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static char bodyBuf[4096];
+      static char bodyBuf[8192];
       if (index == 0) memset(bodyBuf, 0, sizeof(bodyBuf));
       if (index + len < sizeof(bodyBuf)) {
         memcpy(bodyBuf + index, data, len);
@@ -559,30 +671,45 @@ void web_monitor_init(void) {
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, bodyBuf);
         if (!err) {
-          GaugeSlotConfig *slots = gauge_config_get_slots();
-          JsonArray arr = doc.as<JsonArray>();
+          PageConfig *pageConfigs = gauge_config_get_pages();
+          JsonArray pagesArr = doc.as<JsonArray>();
           int i = 0;
-          for (JsonObject o : arr) {
-            if (i >= MAX_GAUGE_SLOTS) break;
-            slots[i].signal = (SignalId)(int)o["signal"];
-            slots[i].enabled = o["enabled"];
-            slots[i].min_val = o["min"];
-            slots[i].max_val = o["max"];
-            slots[i].rest_val = o["rest"];
-            strlcpy(slots[i].caption, o["caption"] | "", GAUGE_CAPTION_MAXLEN);
-            slots[i].needle_color = (uint32_t)(long)o["color"];
-            slots[i].tick_color = (uint32_t)(long)o["tick_color"];
-            slots[i].bg_color = (uint32_t)(long)o["bg_color"];
-            slots[i].value_divisor = o["value_divisor"] | 1.0f;
-            slots[i].tick_count = o["tick_count"] | 26;
-            slots[i].major_nth = o["major_nth"] | 5;
-            slots[i].refresh_hz = o["refresh_hz"] | 10;
-            slots[i].show_value = o["show_value"] | false;
-            slots[i].value_font_size = o["value_font_size"] | 28;
-            slots[i].has_warning = o["has_warning"];
-            slots[i].warning_threshold = o["warning_threshold"];
-            slots[i].warning_above = o["warning_above"];
+          for (JsonObject pageObj : pagesArr) {
+            if (i >= MAX_PAGES) break;
+            pageConfigs[i].enabled = pageObj["enabled"] | false;
+            pageConfigs[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
+            JsonArray cellsArr = pageObj["cells"];
+            int c = 0;
+            for (JsonObject o : cellsArr) {
+              if (c >= MAX_CELLS_PER_PAGE) break;
+              CellConfig *cell = &pageConfigs[i].cells[c];
+              cell->enabled = o["enabled"] | false;
+              cell->signal = (SignalId)(int)(o["signal"] | 0);
+              cell->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
+              cell->min_val = o["min"] | 0;
+              cell->max_val = o["max"] | 100;
+              cell->rest_val = o["rest"] | 0;
+              strlcpy(cell->caption, (o["caption"] | ""), GAUGE_CAPTION_MAXLEN);
+              cell->needle_color = (uint32_t)(long)(o["needle_color"] | 0xFFFFFF);
+              cell->tick_color = (uint32_t)(long)(o["tick_color"] | 0xFFFFFF);
+              cell->bg_color = (uint32_t)(long)(o["bg_color"] | 0x000000);
+              cell->value_divisor = o["value_divisor"] | 1.0f;
+              cell->tick_count = o["tick_count"] | 26;
+              cell->major_nth = o["major_nth"] | 5;
+              cell->refresh_hz = o["refresh_hz"] | 10;
+              cell->show_value = o["show_value"] | false;
+              cell->value_font_size = o["value_font_size"] | 28;
+              cell->has_warning = o["has_warning"] | false;
+              cell->warning_threshold = o["warning_threshold"] | 0.0f;
+              cell->warning_above = o["warning_above"] | false;
+              c++;
+            }
             i++;
+          }
+          // Any remaining page slots beyond what was POSTed are disabled -
+          // handles the case where pages were deleted in the UI.
+          for (; i < MAX_PAGES; i++) {
+            pageConfigs[i].enabled = false;
           }
           gauge_config_save();
         }

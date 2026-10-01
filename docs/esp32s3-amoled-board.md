@@ -1193,3 +1193,55 @@ STILL NOT COMPILABLE: web_monitor.cpp (Stage C - the web UI) still
 references the old flat GaugeSlotConfig-based API (gauge_config_get_slots,
 MAX_GAUGE_SLOTS, gauge_config_swap_slots, gauge_config_apply_colors_to_all)
 which no longer exists. Stage C needed before this builds.
+
+## Page/cell redesign - Stage C: web UI rewrite (2026-09-30)
+
+Completed the 3-stage redesign - web_monitor.cpp fully rewritten for
+the new nested page/cell model, plus sd_logging.cpp updated (was still
+using the old flat API, caught in a final sweep before considering this
+done).
+
+**New /gauges page**: page cards, each showing a layout dropdown
+(1 Cell/2-Up/3-Up/2x2), per-page action buttons (Copy/Empty/Delete -
+matching the reference screenshot's action menu), and a full editor
+per cell (signal, gauge type, range, colors, divisor, tick config,
+refresh rate, show-value+size, warning) - reusing the same fields from
+the pre-redesign per-slot editor, now scoped per-cell. "+ Add Page"
+button appends a new LAYOUT_1CELL page. All edits happen in the
+browser's local copy; Save POSTs the whole structure at once (same
+"edit locally, persist on Save" pattern used throughout).
+
+**Sensor picker with activity**: new GET /signals.json returns every
+signal's id/name/age_ms (via Stage A's gauge_config_signal_age_ms()).
+Each cell's signal dropdown is sorted by activity (lowest age first =
+most live) with alphabetical tiebreak, and each option is annotated
+("(live)" / "Xs ago" / "(no data)"). Simplification: fetched once on
+page load rather than continuously re-sorting, to avoid disrupting
+in-progress edits - flagged as a reasonable first-pass choice.
+
+**Bulk color apply**: reworked to be fully client-side (modifies the
+local page/cell array, applies on Save) instead of a separate immediate
+server endpoint - more consistent with how every other edit works now.
+Removed the old /gauges/apply-colors endpoint entirely.
+
+**Hamburger menu**: nav links (Raw CAN Monitor/Firmware Update/Gauge
+Config/SD Card) now collapse behind a hamburger button instead of
+always being visible on the main monitor page.
+
+**Remote page navigation**: new g_page_nav_delta global (gauge_app.h/.c)
++ POST /page-nav endpoint + Prev/Next buttons on the main page - lets
+you step through the physical display's pages remotely from the
+browser, handled the same safe way as the existing BOOT-button
+g_requested_page mechanism (checked/cleared inside the LVGL timer
+callback, never called directly from the web server's own task context).
+
+**sd_logging.cpp fix**: was still iterating the old flat
+gauge_config_get_slots()/MAX_GAUGE_SLOTS API (missed in Stages A/B since
+it's not part of the rendering or web-UI code) - caught via a final
+grep sweep across every file. Updated to iterate every enabled cell
+across every enabled page for both the CSV header and each logged row.
+
+This completes the 3-stage page/cell redesign. NOT yet bench-tested as
+of this writing - this was the largest architectural change in the
+project's history, spanning 3 stages across the data model, rendering,
+and web UI.

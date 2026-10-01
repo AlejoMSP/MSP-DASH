@@ -50,6 +50,12 @@ extern volatile bool g_battv_has_data;
 // lv_disp_load_scr() call safely from within LVGL's own task context.
 extern volatile int g_requested_page; // -1 = no change requested, 0-7 = switch to that page
 
+// Set from the web server (remote next/prev page arrows) - 0 = no
+// action, 1 = advance one page, -1 = go back one page. Handled the
+// same safe way as g_requested_page (checked/cleared inside the LVGL
+// timer callback).
+extern volatile int g_page_nav_delta;
+
 #ifdef __cplusplus
 }
 #endif

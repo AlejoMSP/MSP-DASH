@@ -51,6 +51,7 @@ volatile bool g_tps_has_data = false;
 volatile bool g_battv_has_data = false;
 
 volatile int g_requested_page = -1;
+volatile int g_page_nav_delta = 0;
 
 #define ENABLE_TOUCH_SWIPE_NAV 0 // disabled per earlier request - BOOT button only
 
@@ -293,6 +294,12 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   if (g_requested_page >= 0 && g_requested_page < s_num_active_pages) {
     switch_to_page(g_requested_page);
     g_requested_page = -1;
+  }
+
+  if (g_page_nav_delta != 0 && s_num_active_pages > 0) {
+    int next = (s_current_page + g_page_nav_delta + s_num_active_pages) % s_num_active_pages;
+    switch_to_page(next);
+    g_page_nav_delta = 0;
   }
 
   uint32_t now = lv_tick_get();
