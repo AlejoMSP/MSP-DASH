@@ -24,12 +24,3 @@ void ecu_config_set(EcuSelection sel) {
   s_current = sel;
   prefs.putUChar("ecu", (uint8_t)sel);
 }
-
-const char *ecu_config_name(EcuSelection sel) {
-  switch (sel) {
-    case ECU_RUSEFI: return "rusEFI";
-    case ECU_MEGASQUIRT: return "MegaSquirt";
-    case ECU_LINKECU: return "LinkECU";
-    default: return "Unknown";
-  }
-}

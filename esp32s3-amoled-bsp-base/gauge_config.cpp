@@ -205,45 +205,6 @@ void gauge_config_save(void) {
   prefs.putString("pages", out);
 }
 
-int gauge_config_add_page(void) {
-  for (int i = 0; i < MAX_PAGES; i++) {
-    if (!s_pages[i].enabled) {
-      memset(&s_pages[i], 0, sizeof(PageConfig));
-      s_pages[i].enabled = true;
-      s_pages[i].layout = LAYOUT_1CELL;
-      return i;
-    }
-  }
-  return -1; // full
-}
-
-void gauge_config_delete_page(int index) {
-  if (index < 0 || index >= MAX_PAGES) return;
-  for (int i = index; i < MAX_PAGES - 1; i++) {
-    s_pages[i] = s_pages[i + 1];
-  }
-  memset(&s_pages[MAX_PAGES - 1], 0, sizeof(PageConfig));
-}
-
-void gauge_config_empty_page(int index) {
-  if (index < 0 || index >= MAX_PAGES) return;
-  LayoutType keepLayout = s_pages[index].layout;
-  memset(&s_pages[index].cells, 0, sizeof(s_pages[index].cells));
-  s_pages[index].layout = keepLayout;
-}
-
-int gauge_config_copy_page(int srcIndex) {
-  if (srcIndex < 0 || srcIndex >= MAX_PAGES) return -1;
-  int dest = gauge_config_add_page();
-  if (dest < 0) return -1;
-  LayoutType srcLayout = s_pages[srcIndex].layout;
-  CellConfig srcCells[MAX_CELLS_PER_PAGE];
-  memcpy(srcCells, s_pages[srcIndex].cells, sizeof(srcCells));
-  s_pages[dest].layout = srcLayout;
-  memcpy(s_pages[dest].cells, srcCells, sizeof(srcCells));
-  return dest;
-}
-
 void gauge_config_web_init(void) {
   webPrefs.begin("webcfg2", false);
   String json = webPrefs.getString("pages", "");
@@ -297,45 +258,6 @@ void gauge_config_web_save(void) {
   String out;
   serializeJson(doc, out);
   webPrefs.putString("pages", out);
-}
-
-int gauge_config_web_add_page(void) {
-  for (int i = 0; i < MAX_PAGES; i++) {
-    if (!s_webPages[i].enabled) {
-      memset(&s_webPages[i], 0, sizeof(PageConfig));
-      s_webPages[i].enabled = true;
-      s_webPages[i].layout = LAYOUT_1CELL;
-      return i;
-    }
-  }
-  return -1;
-}
-
-void gauge_config_web_delete_page(int index) {
-  if (index < 0 || index >= MAX_PAGES) return;
-  for (int i = index; i < MAX_PAGES - 1; i++) {
-    s_webPages[i] = s_webPages[i + 1];
-  }
-  memset(&s_webPages[MAX_PAGES - 1], 0, sizeof(PageConfig));
-}
-
-void gauge_config_web_empty_page(int index) {
-  if (index < 0 || index >= MAX_PAGES) return;
-  LayoutType keepLayout = s_webPages[index].layout;
-  memset(&s_webPages[index].cells, 0, sizeof(s_webPages[index].cells));
-  s_webPages[index].layout = keepLayout;
-}
-
-int gauge_config_web_copy_page(int srcIndex) {
-  if (srcIndex < 0 || srcIndex >= MAX_PAGES) return -1;
-  int dest = gauge_config_web_add_page();
-  if (dest < 0) return -1;
-  LayoutType srcLayout = s_webPages[srcIndex].layout;
-  CellConfig srcCells[MAX_CELLS_PER_PAGE];
-  memcpy(srcCells, s_webPages[srcIndex].cells, sizeof(srcCells));
-  s_webPages[dest].layout = srcLayout;
-  memcpy(s_webPages[dest].cells, srcCells, sizeof(srcCells));
-  return dest;
 }
 
 const char *gauge_config_signal_name(SignalId sig) {

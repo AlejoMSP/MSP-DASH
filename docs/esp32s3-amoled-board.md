@@ -1318,3 +1318,45 @@ for the browser is part of the separate HTML5 live-preview feature
 both in one pass.
 
 NOT yet bench-tested as of this writing.
+
+## Project review: stale data, dead code, and .ino reorganization (2026-10-01)
+
+Full review of the esp32s3-amoled-bsp-base sketch for errors/stale data,
+requested as a checkpoint after the large page/cell redesign and
+web-dashboard separation work. No actual compile-breaking errors found
+- everything was consistently wired. Findings and fixes:
+
+**Stale comment** (gauge_app.h): referenced "0 for boost/vacuum" as a
+special hardcoded rest-value case - that design no longer exists (rest
+value is now just a normal per-cell configurable field for every
+signal equally). Corrected to describe the actual current behavior
+(sweep animation while waiting for data).
+
+**Dead code removed** (8 functions): gauge_config_add_page/
+delete_page/empty_page/copy_page and their gauge_config_web_* 
+counterparts - declared and defined but never called anywhere, since
+the actual /gauges and /web-config editors implement add/delete/
+empty/copy entirely client-side in JS (the whole page/cell array is
+just re-POSTed on Save). Removed from both gauge_config.h and
+gauge_config.cpp.
+
+**Dead code removed**: ecu_config_name() - never called; the web page
+hardcodes its own dropdown option labels instead of fetching names
+from the board.
+
+**Wording inconsistency fixed**: the CAN monitor page said "Back to
+gauges" while SD/OTA pages said "Back to monitor" - standardized to
+"Back to monitor" everywhere.
+
+**Main .ino reorganized** (269 lines -> 96 lines): extracted into two
+new header files, following the same "included only by the .ino, so
+full function bodies are safe" pattern already used for the BSP's own
+driver files:
+- can_parsing.h: all CAN ID defines, byte-reading helpers (readU16LE/
+  readS16LE/readU16BE), cToF(), and both ECU frame handlers
+  (handleRusefiFrame/handleSecondaryEcuFrame)
+- page_button.h: BOOT_BTN_PIN, button-debounce state, checkPageButton()
+
+The .ino itself is now just: includes, the board's CAN pin/bitrate
+config (kept here since it's wiring-specific to this physical board,
+not protocol-parsing logic), and setup()/loop() orchestration.

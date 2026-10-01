@@ -32,8 +32,9 @@ extern volatile float g_tps;
 extern volatile float g_battv;
 
 // Set true the first time a real CAN frame updates each signal - until
-// then, that gauge's needle sits at its rest value (min, or 0 for
-// boost/vacuum) rather than showing a possibly-misleading default value.
+// then, that cell's needle sweeps back and forth within its range
+// rather than showing a possibly-misleading default value (see
+// clamped_or_sweep() in gauge_app.c).
 extern volatile bool g_afr_has_data;
 extern volatile bool g_clt_has_data;
 extern volatile bool g_oilp_has_data;

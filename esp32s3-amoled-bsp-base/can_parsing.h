@@ -1,0 +1,175 @@
+#ifndef CAN_PARSING_H
+#define CAN_PARSING_H
+
+/*
+  can_parsing.h
+  CAN frame decoding for both supported ECU protocols - extracted from
+  the main .ino to keep setup()/loop() as the only thing living there,
+  per project reorganization. Included only by the main .ino (never by
+  any other .cpp/.c file), so defining full function bodies here
+  (rather than just declarations) is safe - no risk of a "multiple
+  definition" linker error, since this amounts to one translation unit.
+
+  rusEFI: little-endian, base 0x200 (bench-confirmed, cross-checked
+  against the actual rusEFI DBC file).
+  MegaSquirt/LinkECU: big-endian, base 0x5F0 - shared parser, ported
+  directly from the WROOM board's confirmed handleSecondaryEcuFrame.
+  Both ID ranges are disjoint, so both parsers stay active
+  simultaneously regardless of the ECU selection in ecu_config.h/.cpp
+  (which is purely a display label, not a parsing gate).
+*/
+
+#include "gauge_app.h"
+#include "gauge_config.h"
+
+// ---- rusEFI CAN IDs ----
+#define RUSEFI_BASE1 0x201
+#define RUSEFI_BASE2 0x202
+#define RUSEFI_BASE3 0x203
+#define RUSEFI_BASE4 0x204
+#define RUSEFI_BASE7 0x207
+
+// ---- MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0) ----
+#define SEC_BASE      1520        // 0x5F0
+#define SEC_BLOCK0    (SEC_BASE+0)  // Seconds, PW1, PW2, RPM
+#define SEC_BLOCK2    (SEC_BASE+2)  // BARO, MAP, MAT, CLT
+#define SEC_BLOCK3    (SEC_BASE+3)  // TPS, BATT, EGO1
+#define SEC_BLOCK13   (SEC_BASE+13) // FUELP, OILP, OILT
+#define SEC_BLOCK47   (SEC_BASE+47) // Ethanol %
+
+static float cToF(float c) {
+  return c * 9.0f / 5.0f + 32.0f;
+}
+
+static uint16_t readU16LE(uint8_t *d, int offset) {
+  return d[offset] | (d[offset + 1] << 8);
+}
+
+static int16_t readS16LE(uint8_t *d, int offset) {
+  return (int16_t)(d[offset] | (d[offset + 1] << 8));
+}
+
+static uint16_t readU16BE(uint8_t *d, int offset) {
+  return (d[offset] << 8) | d[offset + 1];
+}
+
+static void handleRusefiFrame(uint32_t id, uint8_t *d) {
+  switch (id) {
+    case RUSEFI_BASE1: {
+      g_rpm = readU16LE(d, 0);
+      g_rpm_has_data = true;
+      gauge_config_mark_signal_active(SIG_RPM);
+      g_flex_pct = d[7];
+      g_flex_has_data = true;
+      gauge_config_mark_signal_active(SIG_FLEX);
+      break;
+    }
+    case RUSEFI_BASE2: {
+      int16_t tpsRaw = readS16LE(d, 2);
+      g_tps = tpsRaw * 0.01f;
+      g_tps_has_data = true;
+      gauge_config_mark_signal_active(SIG_TPS);
+      break;
+    }
+    case RUSEFI_BASE3: {
+      uint16_t mapRaw = readU16LE(d, 0);
+      float mapKpa = mapRaw * 0.0333333f;
+      g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-250 with 100 as the "ambient/zero" reference point
+      g_boost_has_data = true;
+      gauge_config_mark_signal_active(SIG_MAP);
+      uint8_t cltRaw = d[2]; // CONFIRMED against rusEFI's actual DBC: unsigned (8@1+), offset -40
+      g_clt_f = cToF(cltRaw - 40);
+      g_clt_has_data = true;
+      gauge_config_mark_signal_active(SIG_CLT);
+      break;
+    }
+    case RUSEFI_BASE4: {
+      uint16_t oilPressRaw = readU16LE(d, 2);
+      g_oilp_kpa = oilPressRaw * 0.0333333f;
+      g_oilp_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILP);
+      uint8_t oilTempRaw = d[4]; // same unsigned-vs-signed fix as CLT above
+      g_oilt_f = cToF(oilTempRaw - 40);
+      g_oilt_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILT);
+      uint16_t battRaw = readU16LE(d, 6);
+      g_battv = battRaw * 0.001f;
+      g_battv_has_data = true;
+      gauge_config_mark_signal_active(SIG_BATTV);
+      break;
+    }
+    case RUSEFI_BASE7: {
+      uint16_t lam1Raw = readU16LE(d, 0);
+      float lambda = lam1Raw * 0.0001f;
+      g_afr = lambda * 14.7f;
+      g_afr_has_data = true;
+      gauge_config_mark_signal_active(SIG_AFR);
+      uint16_t fpLowRaw = readU16LE(d, 4);
+      g_fuelp_kpa = fpLowRaw * 0.0333333f;
+      g_fuelp_has_data = true;
+      gauge_config_mark_signal_active(SIG_FUELP);
+      break;
+    }
+  }
+}
+
+static void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
+  switch (id) {
+    case SEC_BLOCK0: {
+      g_rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
+      g_rpm_has_data = true;
+      gauge_config_mark_signal_active(SIG_RPM);
+      break;
+    }
+    case SEC_BLOCK2: {
+      float map_ = readU16BE(d, 2) / 10.0f; // word1
+      g_boost_kpa = map_;
+      g_boost_has_data = true;
+      gauge_config_mark_signal_active(SIG_MAP);
+      float clt = cToF(readU16BE(d, 6) / 10.0f); // word3 - assumes Celsius source config, matching WROOM board's noted caveat
+      g_clt_f = clt;
+      g_clt_has_data = true;
+      gauge_config_mark_signal_active(SIG_CLT);
+      break;
+    }
+    case SEC_BLOCK3: {
+      float tps = readU16BE(d, 0) / 10.0f; // word0
+      g_tps = tps;
+      g_tps_has_data = true;
+      gauge_config_mark_signal_active(SIG_TPS);
+      float battV = readU16BE(d, 2) / 10.0f; // word1
+      g_battv = battV;
+      g_battv_has_data = true;
+      gauge_config_mark_signal_active(SIG_BATTV);
+      float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per WROOM board's source comment, not lambda
+      g_afr = ego1;
+      g_afr_has_data = true;
+      gauge_config_mark_signal_active(SIG_AFR);
+      break;
+    }
+    case SEC_BLOCK13: {
+      float fuelp = readU16BE(d, 0) / 10.0f; // word0
+      g_fuelp_kpa = fuelp;
+      g_fuelp_has_data = true;
+      gauge_config_mark_signal_active(SIG_FUELP);
+      float oilp = readU16BE(d, 2) / 10.0f; // word1
+      g_oilp_kpa = oilp;
+      g_oilp_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILP);
+      float oilt = cToF(readU16BE(d, 4) / 10.0f); // word2 - assumes Celsius source config, matching WROOM board's noted caveat
+      g_oilt_f = oilt;
+      g_oilt_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILT);
+      break;
+    }
+    case SEC_BLOCK47: {
+      float eth = readU16BE(d, 0) / 10.0f; // word0
+      g_flex_pct = eth;
+      g_flex_has_data = true;
+      gauge_config_mark_signal_active(SIG_FLEX);
+      break;
+    }
+  }
+}
+
+#endif

@@ -23,9 +23,6 @@ EcuSelection ecu_config_get(void);
 // Updates the selection and persists it to NVS.
 void ecu_config_set(EcuSelection sel);
 
-// Human-readable name, for display on the web page.
-const char *ecu_config_name(EcuSelection sel);
-
 #ifdef __cplusplus
 }
 #endif

@@ -94,39 +94,23 @@ PageConfig *gauge_config_get_pages(void);
 // web browser dashboard - independent of the physical display's pages
 // above. Same CellConfig/PageConfig/LayoutType/GaugeType types (the
 // data model is generic, not display-specific), just a different
-// in-memory array and NVS key, with its own defaults, load/save, and
-// page-management functions. This lets you configure what shows on
-// your phone's browser completely differently from what shows on the
-// physical gauge cluster. ----
+// in-memory array and NVS key, with its own defaults and load/save.
+// This lets you configure what shows on your phone's browser
+// completely differently from what shows on the physical gauge
+// cluster. ----
 void gauge_config_web_init(void);
 PageConfig *gauge_config_get_web_pages(void);
 void gauge_config_web_save(void);
-int gauge_config_web_add_page(void);
-void gauge_config_web_delete_page(int index);
-void gauge_config_web_empty_page(int index);
-int gauge_config_web_copy_page(int srcIndex);
 
 // How many cells a given layout actually uses (1/2/3/4).
 int gauge_config_cells_for_layout(LayoutType layout);
 
-// Saves the current in-memory page/cell array to NVS.
+// Saves the current in-memory page/cell array to NVS. Note: page
+// add/delete/empty/copy for BOTH configs is handled entirely
+// client-side in the /gauges and /web-config editors (the whole
+// array is just re-POSTed on Save) - there's no server-side
+// per-action API for this.
 void gauge_config_save(void);
-
-// ---- Page management (matches the add/delete/empty/copy workflow) ----
-// Appends a new page (LAYOUT_1CELL, single empty cell) if room remains
-// (MAX_PAGES not yet reached). Returns the new page's index, or -1 if
-// full.
-int gauge_config_add_page(void);
-
-// Removes a page and shifts subsequent pages up to fill the gap.
-void gauge_config_delete_page(int index);
-
-// Clears a page's cells (all disabled) but keeps its chosen layout.
-void gauge_config_empty_page(int index);
-
-// Duplicates a page, appending the copy (if room remains). Returns the
-// new page's index, or -1 if full.
-int gauge_config_copy_page(int srcIndex);
 
 // Human-readable signal name, for the web UI's sensor picker.
 const char *gauge_config_signal_name(SignalId sig);

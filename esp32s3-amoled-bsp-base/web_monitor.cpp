@@ -186,7 +186,7 @@ static const char CAN_HTML[] PROGMEM = R"rawliteral(
 </head>
 <body>
   <h1>Raw CAN Monitor</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to gauges</a></p>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <table>
     <thead><tr><th>ID (hex)</th><th>DLC</th><th>Data (hex)</th><th>Hz</th><th>Last seen (ms ago)</th></tr></thead>
     <tbody id="rows"></tbody>

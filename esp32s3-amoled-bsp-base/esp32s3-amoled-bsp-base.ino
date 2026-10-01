@@ -13,14 +13,17 @@
   except one targeted edit: lv_demo_widgets() was replaced with our own
   build_gauge_app() call - see gauge_app.c for the actual gauge cluster.
 
-  CAN reading (rusEFI, little-endian, base 0x200 - bench-confirmed
-  elsewhere in this project) happens entirely in Arduino's loop(), which
-  their BSP leaves empty (LVGL runs on its own dedicated FreeRTOS task).
-  This keeps CAN parsing completely independent of LVGL's task - we only
+  CAN reading (rusEFI + MegaSquirt/LinkECU, bench-confirmed elsewhere in
+  this project) happens entirely in Arduino's loop(), which their BSP
+  leaves empty (LVGL runs on its own dedicated FreeRTOS task). This
+  keeps CAN parsing completely independent of LVGL's task - we only
   ever touch simple global values here, never call any LVGL function
   directly from this context. gauge_app.c's own periodic timer (running
   inside LVGL's task, registered via lv_timer_create) reads those values
-  and performs all actual LVGL API calls safely.
+  and performs all actual LVGL API calls safely. The actual frame
+  decoding lives in can_parsing.h (extracted here to keep this file as
+  just setup()/loop() orchestration); BOOT button page-cycling lives in
+  page_button.h, same rationale.
 
   CAN wiring: GPIO43/44 (the UART connector, JST-SH cable) - the only
   physically accessible connector available (the 1.27mm GPIO header
@@ -39,192 +42,16 @@
 #include "ecu_config.h"
 #include "sd_storage.h"
 #include "sd_logging.h"
+#include "can_parsing.h"
+#include "page_button.h"
 
-// ---- CAN pins - using the UART connector (JST-SH cable available),
-// same as our earlier v9-based sketch. These are this board's dedicated
-// UART0 pins, which Serial defaults to unless CDCOnBoot=cdc is set -
-// MUST compile with that option to avoid Serial/CAN fighting over the
-// same physical UART. ----
+// ---- CAN pins - using the UART connector (JST-SH cable available).
+// These are this board's dedicated UART0 pins, which Serial defaults
+// to unless CDCOnBoot=cdc is set - MUST compile with that option to
+// avoid Serial/CAN fighting over the same physical UART. ----
 #define CAN_TX_PIN GPIO_NUM_43
 #define CAN_RX_PIN GPIO_NUM_44
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
-
-// ---- rusEFI CAN IDs (bench-confirmed elsewhere in this project) ----
-#define RUSEFI_BASE1 0x201
-#define RUSEFI_BASE2 0x202
-#define RUSEFI_BASE3 0x203
-#define RUSEFI_BASE4 0x204
-#define RUSEFI_BASE7 0x207
-
-// ---- MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0) -
-// ported directly from the WROOM board's confirmed handleSecondaryEcuFrame
-// (esp32-main.ino). Both protocols share this same ID range/parser - the
-// ECU selection is purely a display label, not a parsing gate, since
-// this range never overlaps rusEFI's (0x200s) and both can safely stay
-// active simultaneously, same as on the WROOM board. ----
-#define SEC_BASE      1520        // 0x5F0
-#define SEC_BLOCK0    (SEC_BASE+0)  // Seconds, PW1, PW2, RPM
-#define SEC_BLOCK2    (SEC_BASE+2)  // BARO, MAP, MAT, CLT
-#define SEC_BLOCK3    (SEC_BASE+3)  // TPS, BATT, EGO1
-#define SEC_BLOCK13   (SEC_BASE+13) // FUELP, OILP, OILT
-#define SEC_BLOCK47   (SEC_BASE+47) // Ethanol %
-
-// ---- Page-switch button (board's physical BOOT button) ----
-#define BOOT_BTN_PIN 0
-
-float cToF(float c) {
-  return c * 9.0f / 5.0f + 32.0f;
-}
-
-uint16_t readU16LE(uint8_t *d, int offset) {
-  return d[offset] | (d[offset + 1] << 8);
-}
-
-int16_t readS16LE(uint8_t *d, int offset) {
-  return (int16_t)(d[offset] | (d[offset + 1] << 8));
-}
-
-void handleRusefiFrame(uint32_t id, uint8_t *d) {
-  switch (id) {
-    case RUSEFI_BASE1: {
-      g_rpm = readU16LE(d, 0);
-      g_rpm_has_data = true;
-      gauge_config_mark_signal_active(SIG_RPM);
-      g_flex_pct = d[7];
-      g_flex_has_data = true;
-      gauge_config_mark_signal_active(SIG_FLEX);
-      break;
-    }
-    case RUSEFI_BASE2: {
-      int16_t tpsRaw = readS16LE(d, 2);
-      g_tps = tpsRaw * 0.01f;
-      g_tps_has_data = true;
-      gauge_config_mark_signal_active(SIG_TPS);
-      break;
-    }
-    case RUSEFI_BASE3: {
-      uint16_t mapRaw = readU16LE(d, 0);
-      float mapKpa = mapRaw * 0.0333333f;
-      g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-200 with 100 as the "ambient/zero" reference point
-      g_boost_has_data = true;
-      gauge_config_mark_signal_active(SIG_MAP);
-      uint8_t cltRaw = d[2]; // CONFIRMED FIX: rusEFI's actual DBC specifies this as UNSIGNED (8@1+) - was incorrectly cast to signed int8_t, causing wrong readings above ~87C/189F (wraps negative)
-      g_clt_f = cToF(cltRaw - 40);
-      g_clt_has_data = true;
-      gauge_config_mark_signal_active(SIG_CLT);
-      break;
-    }
-    case RUSEFI_BASE4: {
-      uint16_t oilPressRaw = readU16LE(d, 2);
-      g_oilp_kpa = oilPressRaw * 0.0333333f;
-      g_oilp_has_data = true;
-      gauge_config_mark_signal_active(SIG_OILP);
-      uint8_t oilTempRaw = d[4]; // CONFIRMED FIX: same unsigned-vs-signed bug as CLT above, per rusEFI's actual DBC (8@1+)
-      g_oilt_f = cToF(oilTempRaw - 40);
-      g_oilt_has_data = true;
-      gauge_config_mark_signal_active(SIG_OILT);
-      uint16_t battRaw = readU16LE(d, 6);
-      g_battv = battRaw * 0.001f;
-      g_battv_has_data = true;
-      gauge_config_mark_signal_active(SIG_BATTV);
-      break;
-    }
-    case RUSEFI_BASE7: {
-      uint16_t lam1Raw = readU16LE(d, 0);
-      float lambda = lam1Raw * 0.0001f;
-      g_afr = lambda * 14.7f;
-      g_afr_has_data = true;
-      gauge_config_mark_signal_active(SIG_AFR);
-      uint16_t fpLowRaw = readU16LE(d, 4);
-      g_fuelp_kpa = fpLowRaw * 0.0333333f;
-      g_fuelp_has_data = true;
-      gauge_config_mark_signal_active(SIG_FUELP);
-      break;
-    }
-  }
-}
-
-// MegaSquirt/LinkECU: big-endian, ported directly from the WROOM
-// board's confirmed handleSecondaryEcuFrame.
-uint16_t readU16BE(uint8_t *d, int offset) {
-  return (d[offset] << 8) | d[offset + 1];
-}
-
-void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
-  switch (id) {
-    case SEC_BLOCK0: {
-      g_rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
-      g_rpm_has_data = true;
-      gauge_config_mark_signal_active(SIG_RPM);
-      break;
-    }
-    case SEC_BLOCK2: {
-      float map_ = readU16BE(d, 2) / 10.0f; // word1
-      g_boost_kpa = map_;
-      g_boost_has_data = true;
-      gauge_config_mark_signal_active(SIG_MAP);
-      float clt = cToF(readU16BE(d, 6) / 10.0f); // word3 - ASSUMES Celsius source config, matching WROOM board's noted caveat
-      g_clt_f = clt;
-      g_clt_has_data = true;
-      gauge_config_mark_signal_active(SIG_CLT);
-      break;
-    }
-    case SEC_BLOCK3: {
-      float tps = readU16BE(d, 0) / 10.0f; // word0
-      g_tps = tps;
-      g_tps_has_data = true;
-      gauge_config_mark_signal_active(SIG_TPS);
-      float battV = readU16BE(d, 2) / 10.0f; // word1
-      g_battv = battV;
-      g_battv_has_data = true;
-      gauge_config_mark_signal_active(SIG_BATTV);
-      float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per WROOM board's source comment, not lambda
-      g_afr = ego1;
-      g_afr_has_data = true;
-      gauge_config_mark_signal_active(SIG_AFR);
-      break;
-    }
-    case SEC_BLOCK13: {
-      float fuelp = readU16BE(d, 0) / 10.0f; // word0
-      g_fuelp_kpa = fuelp;
-      g_fuelp_has_data = true;
-      gauge_config_mark_signal_active(SIG_FUELP);
-      float oilp = readU16BE(d, 2) / 10.0f; // word1
-      g_oilp_kpa = oilp;
-      g_oilp_has_data = true;
-      gauge_config_mark_signal_active(SIG_OILP);
-      float oilt = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, matching WROOM board's noted caveat
-      g_oilt_f = oilt;
-      g_oilt_has_data = true;
-      gauge_config_mark_signal_active(SIG_OILT);
-      break;
-    }
-    case SEC_BLOCK47: {
-      float eth = readU16BE(d, 0) / 10.0f; // word0
-      g_flex_pct = eth;
-      g_flex_has_data = true;
-      gauge_config_mark_signal_active(SIG_FLEX);
-      break;
-    }
-  }
-}
-
-int currentPage = 0;
-bool lastBtnState = HIGH;
-unsigned long lastBtnChange = 0;
-const unsigned long DEBOUNCE_MS = 200;
-
-void checkPageButton() {
-  bool btnState = digitalRead(BOOT_BTN_PIN);
-  unsigned long now = millis();
-  if (btnState == LOW && lastBtnState == HIGH && (now - lastBtnChange) > DEBOUNCE_MS) {
-    lastBtnChange = now;
-    currentPage = (currentPage + 1) % gauge_app_get_num_pages(); // was hardcoded to 3 - a stale bug from when we only had 3 pages, now uses the real dynamic count
-    g_requested_page = currentPage; // gauge_app.c's timer picks this up safely inside LVGL's task
-    Serial.printf("Requested page %d\n", currentPage + 1);
-  }
-  lastBtnState = btnState;
-}
 
 void setup()
 {
@@ -248,7 +75,7 @@ void setup()
   if (twai_start() != ESP_OK) {
     Serial.println("TWAI start FAILED");
   }
-  Serial.println("CAN running - waiting for rusEFI frames...");
+  Serial.println("CAN running - waiting for rusEFI/MegaSquirt/LinkECU frames...");
 
   sd_storage_init();
   sd_logging_init();
