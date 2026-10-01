@@ -104,7 +104,7 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       float mapKpa = mapRaw * 0.0333333f;
       g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-200 with 100 as the "ambient/zero" reference point
       g_boost_has_data = true;
-      int8_t cltRaw = (int8_t)d[2];
+      uint8_t cltRaw = d[2]; // CONFIRMED FIX: rusEFI's actual DBC specifies this as UNSIGNED (8@1+) - was incorrectly cast to signed int8_t, causing wrong readings above ~87C/189F (wraps negative)
       g_clt_f = cToF(cltRaw - 40);
       g_clt_has_data = true;
       break;
@@ -113,7 +113,7 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       uint16_t oilPressRaw = readU16LE(d, 2);
       g_oilp_kpa = oilPressRaw * 0.0333333f;
       g_oilp_has_data = true;
-      int8_t oilTempRaw = (int8_t)d[4];
+      uint8_t oilTempRaw = d[4]; // CONFIRMED FIX: same unsigned-vs-signed bug as CLT above, per rusEFI's actual DBC (8@1+)
       g_oilt_f = cToF(oilTempRaw - 40);
       g_oilt_has_data = true;
       uint16_t battRaw = readU16LE(d, 6);

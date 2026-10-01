@@ -945,3 +945,31 @@ correct without needing any override). tick_count/major_nth were
 previously hardcoded (26/5) for every gauge; now configurable per slot,
 applied consistently to both the dedicated gauge page and the
 numbers-grid page.
+
+## Confirmed bug fix via actual rusEFI DBC (2026-09-30)
+
+User shared the real rusEFI DBC file, letting us cross-check every
+currently-decoded signal's byte offset/scale/sign against the
+authoritative source rather than our earlier best-effort assumptions.
+Everything matched exactly (RPM, TPS, MAP, OilPress, BattVolt, Lam1/
+AFR, FpLow, FlexPct) EXCEPT two fields with a real bug:
+
+CoolantTemp and OilTemp were being read as `(int8_t)` (signed) when
+the DBC explicitly specifies them as unsigned (`8@1+`, offset -40).
+This produces correct results only below ~87C/189F raw value - above
+that, the signed interpretation wraps negative, giving wildly wrong
+readings right at normal/hot engine operating temperatures. Fixed by
+reading as plain uint8_t (no cast needed, d[] is already uint8_t).
+
+Confirmed DBC base IDs now also documented precisely: BASE0=0x200
+(warnings/flags/gear/distance), BASE1=0x201 (RPM/ignition timing/inj
+duty/ign duty/VSS/flex%), BASE2=0x202 (PPS/TPS1/TPS2/wastegate),
+BASE3=0x203 (MAP/CLT/IAT/AUX1/AUX2/MCU temp/fuel level), BASE4=0x204
+(OilPress/OilTemp/FuelTemp/BattVolt), BASE5=0x205 (cyl airmass/MAF/
+InjPW/knock count), BASE6=0x206 (fuel used/flow/trims), BASE7=0x207
+(Lam1/Lam2/FpLow/FpHigh), BASE8=0x208 (cam angles), BASE9=0x209 (EGT
+x8), BASE10=0x20A (knock x8), BASE11=0x20B (brake pedal).
+
+Confirmed via live /can monitor capture: 0x200-0x20A all present at
+20Hz exactly as expected - wiring/reception/ID-range all validated
+working correctly end to end.
