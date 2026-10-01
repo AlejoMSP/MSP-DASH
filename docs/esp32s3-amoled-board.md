@@ -973,3 +973,40 @@ x8), BASE10=0x20A (knock x8), BASE11=0x20B (brake pedal).
 Confirmed via live /can monitor capture: 0x200-0x20A all present at
 20Hz exactly as expected - wiring/reception/ID-range all validated
 working correctly end to end.
+
+## IMU/G-meter integration complete (2026-09-30)
+
+Wired the full G-force meter into the gauge cluster:
+- imu_reader.h/.cpp: calls qmi8658_init() once in setup() (AFTER
+  Touch_Init(), since the IMU shares the same physical I2C bus as touch
+  - Touch_Init() already installs that bus; calling I2C_master_Init()
+  separately would conflict). Reads fresh data every 50ms via
+  qmi8658_read_xyz(), exposing g_accel_lateral/g_accel_longitudinal.
+- gmeter_widget.h/.c: the actual custom widget (cross + main dot + an
+  8-step fading/shrinking trail of recent positions, pre-allocated
+  once rather than created per-frame). Dot color: blue while
+  accelerating, red while braking, gray near steady-state.
+- gauge_app.c: G-meter added as one more page (after the numbers grid),
+  using the same shared 80ms update timer and gesture-navigation
+  wiring as every other page.
+
+Resolved a real conflict discovered along the way: i2c_bsp.cpp
+(Waveshare's confirmed IMU example's I2C bus layer) duplicated both
+the I2C bus install (already done by Touch_Init()/FT3168.cpp) and the
+exact function names FT3168.cpp already defines (I2C_writr_buff etc) -
+would have caused both a driver-conflict crash and a linker "multiple
+definition" error. Removed i2c_bsp.cpp entirely; kept i2c_bsp.h for the
+declarations qmi8658c.cpp needs, confirmed its internal I2C calls use
+the exact same function names/signatures FT3168.cpp already provides.
+
+KNOWN UNVERIFIED ASSUMPTIONS (flagged for testing once the board is
+physically mounted and the car is moving):
+- Axis mapping (acc[0]=lateral, acc[1]=longitudinal) - depends on the
+  board's actual mounting orientation, not independently confirmed
+- PX_PER_G scale factor (150px/g) - a rough estimate, not calibrated
+  against real measured G-forces
+- Longitudinal sign convention (positive=accelerating=blue,
+  negative=braking=red) - may need flipping if backward in practice
+
+NOT yet bench-tested as of this writing - this is a substantial new
+subsystem (IMU + custom widget), expect some iteration once tested.

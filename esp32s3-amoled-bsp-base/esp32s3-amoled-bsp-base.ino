@@ -39,6 +39,7 @@
 #include "ecu_config.h"
 #include "sd_storage.h"
 #include "sd_logging.h"
+#include "imu_reader.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available),
 // same as our earlier v9-based sketch. These are this board's dedicated
@@ -215,6 +216,8 @@ void setup()
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
 
   Touch_Init();
+  imu_reader_init(); // after Touch_Init() - shares the same I2C bus, already installed by touch
+
   lcd_lvgl_Init();
 
   // --- CAN init ---
@@ -245,4 +248,5 @@ void loop()
   checkPageButton();
   web_monitor_loop();
   sd_logging_loop();
+  imu_reader_loop();
 }

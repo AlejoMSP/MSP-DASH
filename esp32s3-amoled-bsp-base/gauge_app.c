@@ -30,6 +30,7 @@
 
 #include "gauge_app.h"
 #include "gauge_config.h"
+#include "gmeter_widget.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -58,7 +59,7 @@ volatile bool g_battv_has_data = false;
 
 volatile int g_requested_page = -1;
 
-#define MAX_PAGES (MAX_GAUGE_SLOTS + 1) // +1 for the numbers grid
+#define MAX_PAGES (MAX_GAUGE_SLOTS + 2) // +1 numbers grid, +1 G-meter
 
 typedef struct {
   lv_obj_t *page;
@@ -243,6 +244,7 @@ static void update_warning_flash(GaugePage *p, float value, bool has_data) {
 
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   s_flash_counter++;
+  gmeter_update(); // harmless even when its page isn't currently visible
 
   if (g_requested_page >= 0 && g_requested_page < s_num_active_pages) {
     switch_to_page(g_requested_page);
@@ -280,6 +282,11 @@ void build_gauge_app(void) {
     pageIdx++;
   }
   build_numbers_page(pageIdx, slots, MAX_GAUGE_SLOTS);
+  pageIdx++;
+
+  pages[pageIdx].page = build_gmeter_page(gesture_event_cb);
+  pages[pageIdx].meter = NULL; // not a meter-based page, handled specially in the update timer
+  pages[pageIdx].has_warning = false;
   pageIdx++;
 
   s_num_active_pages = pageIdx;
