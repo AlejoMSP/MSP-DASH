@@ -1158,3 +1158,38 @@ IMPORTANT: this is Stage A of a 3-stage plan (data model only).
 gauge_app.c (rendering) and web_monitor.cpp (web UI) still reference
 the OLD GaugeSlotConfig-based API and have NOT been updated yet - this
 will NOT compile as-is until Stage B (rendering rewrite) is done.
+
+## Page/cell redesign - Stage B: rendering rewrite (2026-09-30)
+
+Rewrote gauge_app.c entirely to build pages from the new PageConfig/
+CellConfig model (Stage A). Key pieces:
+
+- get_cell_rect(): returns the pixel rect for a given cell index within
+  a given layout, on the 466x466 panel (1CELL=full screen, 2UP=stacked
+  halves, 3UP=full-width top + split bottom, 2X2=four even quadrants)
+- build_cell(): builds ONE cell's content inside its own lv_obj
+  container, sized/positioned to its rect - all gauge content (meter,
+  needle, labels) uses the same relative positioning (center/align)
+  already used throughout this project, which naturally scopes to the
+  container's bounds instead of the whole screen regardless of cell
+  size
+- Three gauge types per cell: NEEDLE (270-degree sweep, as before),
+  HALFMOON (180-degree, rotation=180, brought back from the earlier
+  full-page-only implementation), NUMBER (plain big digital readout,
+  no meter widget at all)
+- Per-cell warning flash now flashes just that CELL's own container
+  background, not the whole page (meaningful now that multiple cells
+  share one page)
+- The old hardcoded "numbers grid" page is REMOVED - redundant now that
+  a LAYOUT_2X2 page of GAUGE_TYPE_NUMBER cells achieves the same thing
+  with full user control over which signals appear there
+
+Added gauge_config_mark_signal_active() calls in the .ino, right after
+every has_data=true assignment in both the rusEFI and MegaSquirt/LinkECU
+handlers (20 call sites total) - wires up Stage A's activity-tracking
+feature for the upcoming sensor-picker UI.
+
+STILL NOT COMPILABLE: web_monitor.cpp (Stage C - the web UI) still
+references the old flat GaugeSlotConfig-based API (gauge_config_get_slots,
+MAX_GAUGE_SLOTS, gauge_config_swap_slots, gauge_config_apply_colors_to_all)
+which no longer exists. Stage C needed before this builds.

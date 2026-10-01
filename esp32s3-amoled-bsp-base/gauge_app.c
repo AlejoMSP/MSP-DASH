@@ -1,31 +1,25 @@
 /*
   gauge_app.c
-  Data-driven gauge pages - built from gauge_config.c's persisted slot
-  array (signal assignment, range, needle color, caption, warning
-  threshold) instead of hardcoded literals. Up to MAX_GAUGE_SLOTS
-  enabled gauge pages, plus one numbers-grid page showing all enabled
-  signals as plain digital readouts.
+  Stage B of the page/cell redesign - rendering rewrite. Pages are now
+  built from PageConfig (a layout template + array of CellConfig),
+  supporting 1/2/3/4 cells per page in fixed arrangements, with each
+  cell independently rendering as a needle meter, half-moon meter, or
+  plain number readout.
 
-  Style: black background, ticks/numbers/needle in each slot's
-  configured color, 270-degree sweep, caption in the bottom gap.
+  Each cell gets its own lv_obj_t container, sized/positioned to its
+  slice of the 466x466 screen per the page's layout - all gauge content
+  (meter, needle, labels) is built as children of that container using
+  the same relative positioning (lv_obj_center, lv_obj_align) used
+  throughout this project, which naturally scopes to the container's
+  bounds rather than the whole screen.
 
-  WARNING FLASH: pages with a configured threshold flash their entire
-  background between black and red while that value is past threshold
-  (a simple phase counter in the shared 80ms update timer). Only
-  evaluated once real data has arrived for that signal (has_data flag).
+  The old hardcoded "numbers grid" page is removed - the new model
+  makes it redundant, since a LAYOUT_2X2 page of GAUGE_TYPE_NUMBER
+  cells achieves the same thing, now with full user control over which
+  signals/captions appear there.
 
-  SWEEP: while no real data has arrived yet for a slot's signal, its
-  needle sweeps back and forth between min and max instead of sitting
-  static, so an unconnected/idle gauge is visually distinct from one
-  genuinely reading its rest value.
-
-  Manual navigation only (swipe or BOOT button) - no auto-cycle.
-
-  All actual LVGL API calls happen either inside our periodic update
-  timer (runs in LVGL's own task context via lv_timer_handler()) or
-  inside the gesture event callback (also fires from within LVGL's task
-  context) - never directly from Arduino's loop(), which only touches
-  simple global values.
+  Manual navigation only (swipe or BOOT button) - navigates between
+  PAGES, not between cells within a page.
 */
 
 #include "gauge_app.h"
@@ -58,48 +52,74 @@ volatile bool g_battv_has_data = false;
 
 volatile int g_requested_page = -1;
 
-#define MAX_PAGES (MAX_GAUGE_SLOTS + 1) // +1 for the numbers grid (G-meter removed - IMU mounting orientation didn't work for a vertically-mounted display)
+#define ENABLE_TOUCH_SWIPE_NAV 0 // disabled per earlier request - BOOT button only
 
 typedef struct {
-  lv_obj_t *page;
-  lv_obj_t *meter;
-  lv_meter_indicator_t *needle;
-  lv_obj_t *valueLabel; // optional precise numeric readout above the caption - NULL if show_value is off
+  int16_t x, y, w, h;
+} CellRect;
+
+// Returns the pixel rect for a given cell index within a given layout,
+// on the 466x466 panel.
+static CellRect get_cell_rect(LayoutType layout, int cellIndex) {
+  const int16_t S = 466;
+  const int16_t H = S / 2; // 233
+
+  switch (layout) {
+    case LAYOUT_1CELL:
+      return (CellRect){0, 0, S, S};
+    case LAYOUT_2UP:
+      if (cellIndex == 0) return (CellRect){0, 0, S, H};
+      return (CellRect){0, H, S, H};
+    case LAYOUT_3UP:
+      if (cellIndex == 0) return (CellRect){0, 0, S, H};
+      if (cellIndex == 1) return (CellRect){0, H, H, H};
+      return (CellRect){H, H, H, H};
+    case LAYOUT_2X2:
+      if (cellIndex == 0) return (CellRect){0, 0, H, H};
+      if (cellIndex == 1) return (CellRect){H, 0, H, H};
+      if (cellIndex == 2) return (CellRect){0, H, H, H};
+      return (CellRect){H, H, H, H};
+    default:
+      return (CellRect){0, 0, S, S};
+  }
+}
+
+typedef struct {
+  lv_obj_t *container;
+  lv_obj_t *meter;         // NULL for GAUGE_TYPE_NUMBER
+  lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
+  lv_obj_t *numberLabel;   // used by GAUGE_TYPE_NUMBER; also doubles as the "show_value" readout for other types
+  bool enabled;
+  GaugeType gauge_type;
   SignalId signal;
-  int32_t min_val;
-  int32_t max_val;
-  float value_divisor; // live value divided by this before display - e.g. 1000 for "RPM x1000"
-  uint32_t bg_color; // the "off" state for warning flash - was previously always assumed black
+  int32_t min_val, max_val;
+  float value_divisor;
+  uint32_t bg_color;
   bool has_warning;
   float warning_threshold;
   bool warning_above;
   bool warning_active;
-  int32_t sweep_pos;
-  int32_t sweep_step;
+  int32_t sweep_pos, sweep_step;
   int8_t sweep_dir;
-  uint32_t refresh_interval_ms; // how often THIS gauge's needle/value actually updates, once real data is flowing
-  uint32_t last_update_ms;
-} GaugePage;
+  uint32_t refresh_interval_ms, last_update_ms;
+} CellRuntime;
 
-// Maps a requested font size to the nearest ACTUALLY ENABLED one
-// (14/28/36 in lv_conf.h) - avoids ever referencing an unenabled font
-// object regardless of what gets typed into the web config page.
+typedef struct {
+  lv_obj_t *page;
+  int numCells;
+  CellRuntime cells[MAX_CELLS_PER_PAGE];
+} GaugePageRuntime;
+
+static GaugePageRuntime pages[MAX_PAGES];
+static int s_num_active_pages = 0;
+static int s_current_page = 0;
+static uint32_t s_flash_counter = 0;
+
 static const lv_font_t *get_font_for_size(int32_t size) {
   if (size <= 14) return &lv_font_montserrat_14;
   if (size <= 28) return &lv_font_montserrat_28;
   return &lv_font_montserrat_36;
 }
-
-static GaugePage pages[MAX_PAGES];
-static int s_num_active_pages = 0;
-static int s_current_page = 0;
-static uint32_t s_flash_counter = 0;
-
-// Numbers-grid page value labels, one per possible slot
-static lv_obj_t *s_grid_value_labels[MAX_GAUGE_SLOTS];
-static SignalId s_grid_signals[MAX_GAUGE_SLOTS];
-static float s_grid_divisors[MAX_GAUGE_SLOTS];
-static int s_grid_count = 0;
 
 static void gesture_event_cb(lv_event_t *e);
 
@@ -108,127 +128,124 @@ static void switch_to_page(int index) {
   lv_disp_load_scr(pages[index].page);
 }
 
-static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
-  lv_color_t bgColor = lv_color_hex(cfg->bg_color);
-  lv_color_t tickColor = lv_color_hex(cfg->tick_color);
+// Builds one cell's content (meter+needle, or plain number) inside its
+// own container, sized/positioned to the given rect. Content is built
+// using relative positioning (center/align) within the container, so
+// the same logic works regardless of the cell's actual size.
+static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRuntime *rt) {
+  rt->enabled = cfg->enabled;
+  rt->gauge_type = cfg->gauge_type;
+  rt->signal = cfg->signal;
+  rt->min_val = cfg->min_val;
+  rt->max_val = cfg->max_val;
+  rt->value_divisor = cfg->value_divisor;
+  rt->bg_color = cfg->bg_color;
+  rt->has_warning = cfg->has_warning;
+  rt->warning_threshold = cfg->warning_threshold;
+  rt->warning_above = cfg->warning_above;
+  rt->warning_active = false;
+  rt->meter = NULL;
+  rt->needle = NULL;
+  rt->numberLabel = NULL;
+
+  lv_obj_t *container = lv_obj_create(page);
+  lv_obj_set_pos(container, rect.x, rect.y);
+  lv_obj_set_size(container, rect.w, rect.h);
+  lv_obj_set_style_bg_color(container, lv_color_hex(cfg->bg_color), 0);
+  lv_obj_set_style_border_width(container, 1, 0);
+  lv_obj_set_style_border_color(container, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_radius(container, 0, 0);
+  lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+  rt->container = container;
+
+  if (!cfg->enabled) return; // empty cell - just the bare container
+
   lv_color_t needleColor = lv_color_hex(cfg->needle_color);
+  lv_color_t tickColor = lv_color_hex(cfg->tick_color);
+  int16_t minDim = rect.w < rect.h ? rect.w : rect.h;
+  const lv_font_t *tickFont = get_font_for_size(cfg->value_font_size);
 
-  lv_obj_t *page = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(page, bgColor, 0);
+  if (cfg->gauge_type == GAUGE_TYPE_NUMBER) {
+    lv_obj_t *numLabel = lv_label_create(container);
+    lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
+    lv_obj_set_style_text_font(numLabel, tickFont, 0);
+    lv_label_set_text(numLabel, "--");
+    lv_obj_center(numLabel);
+    rt->numberLabel = numLabel;
 
-  lv_obj_t *meter = lv_meter_create(page);
-  lv_obj_set_size(meter, 460, 460); // near-full-screen on the 466x466 panel
-  lv_obj_center(meter);
-  lv_obj_set_style_bg_color(meter, bgColor, 0);
-  lv_obj_set_style_border_width(meter, 0, 0);
+    lv_obj_t *capLabel = lv_label_create(container);
+    lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
+    lv_label_set_text(capLabel, cfg->caption);
+    lv_obj_align_to(capLabel, numLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+  } else {
+    // NEEDLE or HALFMOON
+    int32_t angleRange = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 270;
+    int32_t rotation = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 135;
+    int16_t meterSize = (int16_t)(minDim * 0.88f);
 
-  lv_meter_scale_t *scale = lv_meter_add_scale(meter);
-  lv_meter_set_scale_ticks(meter, scale, cfg->tick_count, 2, 10, tickColor);
-  lv_meter_set_scale_major_ticks(meter, scale, cfg->major_nth, 4, 18, tickColor, 25);
-  lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, 270, 135);
+    lv_obj_t *meter = lv_meter_create(container);
+    lv_obj_set_size(meter, meterSize, meterSize);
+    lv_obj_align(meter, LV_ALIGN_CENTER, 0, (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? (meterSize / 6) : 0);
+    lv_obj_set_style_bg_color(meter, lv_color_hex(cfg->bg_color), 0);
+    lv_obj_set_style_border_width(meter, 0, 0);
 
-  lv_obj_set_style_text_font(meter, &lv_font_montserrat_36, LV_PART_TICKS); // bumped from 28 per request
-  lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
+    lv_meter_scale_t *scale = lv_meter_add_scale(meter);
+    lv_meter_set_scale_ticks(meter, scale, cfg->tick_count, 2, 10, tickColor);
+    lv_meter_set_scale_major_ticks(meter, scale, cfg->major_nth, 4, 18, tickColor, 25);
+    lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, angleRange, rotation);
+    lv_obj_set_style_text_font(meter, tickFont, LV_PART_TICKS);
+    lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
 
-  lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 8, needleColor, -15);
-  lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
+    lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 6, needleColor, -12);
+    lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
+    rt->meter = meter;
+    rt->needle = needle;
 
-  lv_obj_t *capLabel = lv_label_create(page);
-  lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
-  lv_obj_set_style_text_font(capLabel, &lv_font_montserrat_28, 0); // caption stays at 28 - 36 was reserved for the tick numbers specifically, per request
-  lv_label_set_text(capLabel, cfg->caption);
-  lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70); // reverted - "3/4 down, centered" was meant for the FPS monitor overlay, not the caption
+    lv_obj_t *capLabel = lv_label_create(container);
+    lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
+    lv_label_set_text(capLabel, cfg->caption);
+    lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
 
-  lv_obj_t *valueLabel = NULL;
-  if (cfg->show_value) {
-    valueLabel = lv_label_create(page);
-    lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
-    lv_obj_set_style_text_font(valueLabel, get_font_for_size(cfg->value_font_size), 0);
-    lv_label_set_text(valueLabel, "--");
-    lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -8); // "above the gauge name" per request
+    if (cfg->show_value) {
+      lv_obj_t *valueLabel = lv_label_create(container);
+      lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
+      lv_obj_set_style_text_font(valueLabel, get_font_for_size(cfg->value_font_size), 0);
+      lv_label_set_text(valueLabel, "--");
+      lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+      rt->numberLabel = valueLabel; // reuse the same field - only one of these two paths is active per cell
+    }
   }
 
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
 
-  pages[index].page = page;
-  pages[index].meter = meter;
-  pages[index].needle = needle;
-  pages[index].valueLabel = valueLabel;
-  pages[index].signal = cfg->signal;
-  pages[index].min_val = cfg->min_val;
-  pages[index].max_val = cfg->max_val;
-  pages[index].value_divisor = cfg->value_divisor;
-  pages[index].bg_color = cfg->bg_color;
-  pages[index].has_warning = cfg->has_warning;
-  pages[index].warning_threshold = cfg->warning_threshold;
-  pages[index].warning_above = cfg->warning_above;
-  pages[index].warning_active = false;
-
-  pages[index].sweep_pos = cfg->min_val;
-  pages[index].sweep_dir = 1;
+  rt->sweep_pos = cfg->min_val;
+  rt->sweep_dir = 1;
   int32_t step = (cfg->max_val - cfg->min_val) / 25;
-  pages[index].sweep_step = step < 1 ? 1 : step;
+  rt->sweep_step = step < 1 ? 1 : step;
 
   int32_t hz = cfg->refresh_hz < 1 ? 1 : cfg->refresh_hz;
-  pages[index].refresh_interval_ms = 1000 / hz;
-  pages[index].last_update_ms = 0;
+  rt->refresh_interval_ms = 1000 / hz;
+  rt->last_update_ms = 0;
 }
 
-static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const char *caption) {
-  lv_obj_t *cap = lv_label_create(parent);
-  lv_obj_set_style_text_color(cap, lv_color_white(), 0);
-  lv_label_set_text(cap, caption);
-  lv_obj_set_pos(cap, x, y);
-
-  lv_obj_t *val = lv_label_create(parent);
-  lv_obj_set_style_text_color(val, lv_color_white(), 0);
-  lv_obj_set_style_text_font(val, &lv_font_montserrat_28, 0);
-  lv_label_set_text(val, "--");
-  lv_obj_set_pos(val, x, y + 24);
-  return val;
-}
-
-static void build_numbers_page(int index, GaugeSlotConfig *slots, int slotCount) {
+static void build_page(int pageIndex, PageConfig *cfg) {
   lv_obj_t *page = lv_obj_create(NULL);
   lv_obj_set_style_bg_color(page, lv_color_black(), 0);
+  lv_obj_set_style_pad_all(page, 0, 0);
+  lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
 
-  const int16_t colX[2] = {70, 260};
-  const int16_t rowY[4] = {70, 170, 270, 370}; // up to 4 rows (8 cells) to fit MAX_GAUGE_SLOTS
+  int numCells = gauge_config_cells_for_layout(cfg->layout);
+  pages[pageIndex].page = page;
+  pages[pageIndex].numCells = numCells;
 
-  s_grid_count = 0;
-  for (int i = 0; i < slotCount && s_grid_count < MAX_GAUGE_SLOTS; i++) {
-    if (!slots[i].enabled) continue;
-    int col = s_grid_count % 2;
-    int row = s_grid_count / 2;
-    if (row >= 4) break; // grid layout only fits 8 (2x4)
-    s_grid_value_labels[s_grid_count] = make_grid_cell(page, colX[col], rowY[row], slots[i].caption);
-    s_grid_signals[s_grid_count] = slots[i].signal;
-    s_grid_divisors[s_grid_count] = slots[i].value_divisor;
-    s_grid_count++;
+  for (int i = 0; i < numCells; i++) {
+    CellRect rect = get_cell_rect(cfg->layout, i);
+    build_cell(page, rect, &cfg->cells[i], &pages[pageIndex].cells[i]);
   }
-
-  lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
-  pages[index].page = page;
-  pages[index].meter = NULL; // no meter on this page
-  pages[index].has_warning = false;
 }
 
-// Swipe navigation disabled per request - this gauge cluster doesn't
-// need a touchscreen, BOOT button is the only navigation method now.
-// Touch_Init() itself is intentionally left running elsewhere (it
-// shares the same physical I2C bus the IMU depends on for the G-meter
-// page - disabling navigation here, rather than removing touch
-// entirely, avoids any risk to that shared dependency). Flip to 1 to
-// re-enable swipe without needing to touch the 3 call sites that
-// attach this callback.
-#define ENABLE_TOUCH_SWIPE_NAV 0
-
-// Fires from within LVGL's own task context - safe to call
-// lv_disp_load_scr() directly here.
+#if ENABLE_TOUCH_SWIPE_NAV
 static void gesture_event_cb(lv_event_t *e) {
-#if !ENABLE_TOUCH_SWIPE_NAV
-  return;
-#endif
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
   if (dir == LV_DIR_LEFT) {
     switch_to_page((s_current_page + 1) % s_num_active_pages);
@@ -236,47 +253,37 @@ static void gesture_event_cb(lv_event_t *e) {
     switch_to_page((s_current_page + s_num_active_pages - 1) % s_num_active_pages);
   }
 }
+#else
+static void gesture_event_cb(lv_event_t *e) {
+  (void)e; // swipe navigation disabled - BOOT button only, see ENABLE_TOUCH_SWIPE_NAV
+}
+#endif
 
-// Clamps a value into a gauge's own int32 range for lv_meter, or - if
-// no real data has arrived yet for that signal - advances and returns
-// a back-and-forth sweep position instead.
-static int32_t clamped_or_sweep(GaugePage *p, float value, bool has_data) {
+static int32_t clamped_or_sweep(CellRuntime *c, float value, bool has_data) {
   if (has_data) {
     int32_t v = (int32_t)value;
-    if (v < p->min_val) v = p->min_val;
-    if (v > p->max_val) v = p->max_val;
+    if (v < c->min_val) v = c->min_val;
+    if (v > c->max_val) v = c->max_val;
     return v;
   }
-
-  p->sweep_pos += p->sweep_dir * p->sweep_step;
-  if (p->sweep_pos >= p->max_val) {
-    p->sweep_pos = p->max_val;
-    p->sweep_dir = -1;
-  } else if (p->sweep_pos <= p->min_val) {
-    p->sweep_pos = p->min_val;
-    p->sweep_dir = 1;
-  }
-  return p->sweep_pos;
+  c->sweep_pos += c->sweep_dir * c->sweep_step;
+  if (c->sweep_pos >= c->max_val) { c->sweep_pos = c->max_val; c->sweep_dir = -1; }
+  else if (c->sweep_pos <= c->min_val) { c->sweep_pos = c->min_val; c->sweep_dir = 1; }
+  return c->sweep_pos;
 }
 
-// Checks a page's warning condition against the live value (only when
-// real data has arrived) and updates its flashing background state.
-static void update_warning_flash(GaugePage *p, float value, bool has_data) {
-  if (!p->has_warning) return;
-
-  bool triggered = false;
-  if (has_data) {
-    triggered = p->warning_above ? (value > p->warning_threshold) : (value < p->warning_threshold);
-  }
+static void update_warning_flash(CellRuntime *c, float value, bool has_data) {
+  if (!c->has_warning) return;
+  bool triggered = has_data && (c->warning_above ? (value > c->warning_threshold) : (value < c->warning_threshold));
 
   if (triggered) {
-    bool flash_on = (s_flash_counter / 24) % 2 == 0; // 24 ticks at the 20ms master rate = ~480ms per phase, same real-world blink speed as before the rate change
-    lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_hex(p->bg_color);
-    lv_obj_set_style_bg_color(p->page, target, 0);
-    p->warning_active = true;
-  } else if (p->warning_active) {
-    lv_obj_set_style_bg_color(p->page, lv_color_hex(p->bg_color), 0);
-    p->warning_active = false;
+    bool flash_on = (s_flash_counter / 24) % 2 == 0;
+    lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_hex(c->bg_color);
+    lv_obj_set_style_bg_color(c->container, target, 0);
+    c->warning_active = true;
+  } else if (c->warning_active) {
+    lv_obj_set_style_bg_color(c->container, lv_color_hex(c->bg_color), 0);
+    c->warning_active = false;
   }
 }
 
@@ -289,37 +296,36 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   }
 
   uint32_t now = lv_tick_get();
-  for (int i = 0; i < s_num_active_pages; i++) {
-    GaugePage *p = &pages[i];
-    if (p->meter == NULL) continue; // numbers grid page has no meter
-    float value = gauge_config_signal_value(p->signal) / p->value_divisor;
-    bool has_data = gauge_config_signal_has_data(p->signal);
+  for (int p = 0; p < s_num_active_pages; p++) {
+    for (int i = 0; i < pages[p].numCells; i++) {
+      CellRuntime *c = &pages[p].cells[i];
+      if (!c->enabled) continue;
 
-    // While waiting for real data, always update (keeps the sweep
-    // animation smooth regardless of the configured refresh rate).
-    // Once real data is flowing, respect each gauge's own configured
-    // refresh_hz - fast-changing signals (RPM, boost) can update often,
-    // slow ones (temps) don't need to.
-    bool shouldUpdate = !has_data || (now - p->last_update_ms >= p->refresh_interval_ms);
-    if (!shouldUpdate) continue;
-    if (has_data) p->last_update_ms = now;
+      float value = gauge_config_signal_value(c->signal) / c->value_divisor;
+      bool has_data = gauge_config_signal_has_data(c->signal);
 
-    int32_t displayValue = clamped_or_sweep(p, value, has_data);
-    lv_meter_set_indicator_value(p->meter, p->needle, displayValue);
-    update_warning_flash(p, value, has_data);
+      bool shouldUpdate = !has_data || (now - c->last_update_ms >= c->refresh_interval_ms);
+      if (!shouldUpdate) continue;
+      if (has_data) c->last_update_ms = now;
 
-    if (p->valueLabel) {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%.1f", value);
-      lv_label_set_text(p->valueLabel, buf);
+      int32_t displayValue = clamped_or_sweep(c, value, has_data);
+
+      if (c->gauge_type == GAUGE_TYPE_NUMBER) {
+        if (c->numberLabel) {
+          char buf[16];
+          snprintf(buf, sizeof(buf), "%.1f", value);
+          lv_label_set_text(c->numberLabel, buf);
+        }
+      } else {
+        if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
+        update_warning_flash(c, value, has_data);
+        if (c->numberLabel) { // the optional "show_value" readout for NEEDLE/HALFMOON
+          char buf[16];
+          snprintf(buf, sizeof(buf), "%.1f", value);
+          lv_label_set_text(c->numberLabel, buf);
+        }
+      }
     }
-  }
-
-  char buf[16];
-  for (int i = 0; i < s_grid_count; i++) {
-    float value = gauge_config_signal_value(s_grid_signals[i]) / s_grid_divisors[i];
-    snprintf(buf, sizeof(buf), "%.1f", value);
-    lv_label_set_text(s_grid_value_labels[i], buf);
   }
 }
 
@@ -328,20 +334,20 @@ int gauge_app_get_num_pages(void) {
 }
 
 void build_gauge_app(void) {
-  GaugeSlotConfig *slots = gauge_config_get_slots();
+  PageConfig *pageConfigs = gauge_config_get_pages();
 
   int pageIdx = 0;
-  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
-    if (!slots[i].enabled) continue;
-    build_full_gauge_page(pageIdx, &slots[i]);
+  for (int i = 0; i < MAX_PAGES; i++) {
+    if (!pageConfigs[i].enabled) continue;
+    build_page(pageIdx, &pageConfigs[i]);
     pageIdx++;
   }
-  build_numbers_page(pageIdx, slots, MAX_GAUGE_SLOTS);
-  pageIdx++;
 
-  s_num_active_pages = pageIdx;
-  s_current_page = 0;
-  lv_disp_load_scr(pages[0].page);
+  s_num_active_pages = pageIdx > 0 ? pageIdx : 0;
+  if (s_num_active_pages > 0) {
+    s_current_page = 0;
+    lv_disp_load_scr(pages[0].page);
+  }
 
-  lv_timer_create(gauge_update_timer_cb, 20, NULL); // 20ms = 50Hz, the fastest per-gauge refresh rate requested (RPM/boost/pressure) - slower gauges throttle themselves via refresh_interval_ms
+  lv_timer_create(gauge_update_timer_cb, 20, NULL); // 20ms = 50Hz, fastest per-cell refresh rate supported
 }

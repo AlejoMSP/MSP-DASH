@@ -89,14 +89,17 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
     case RUSEFI_BASE1: {
       g_rpm = readU16LE(d, 0);
       g_rpm_has_data = true;
+      gauge_config_mark_signal_active(SIG_RPM);
       g_flex_pct = d[7];
       g_flex_has_data = true;
+      gauge_config_mark_signal_active(SIG_FLEX);
       break;
     }
     case RUSEFI_BASE2: {
       int16_t tpsRaw = readS16LE(d, 2);
       g_tps = tpsRaw * 0.01f;
       g_tps_has_data = true;
+      gauge_config_mark_signal_active(SIG_TPS);
       break;
     }
     case RUSEFI_BASE3: {
@@ -104,21 +107,26 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       float mapKpa = mapRaw * 0.0333333f;
       g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-200 with 100 as the "ambient/zero" reference point
       g_boost_has_data = true;
+      gauge_config_mark_signal_active(SIG_MAP);
       uint8_t cltRaw = d[2]; // CONFIRMED FIX: rusEFI's actual DBC specifies this as UNSIGNED (8@1+) - was incorrectly cast to signed int8_t, causing wrong readings above ~87C/189F (wraps negative)
       g_clt_f = cToF(cltRaw - 40);
       g_clt_has_data = true;
+      gauge_config_mark_signal_active(SIG_CLT);
       break;
     }
     case RUSEFI_BASE4: {
       uint16_t oilPressRaw = readU16LE(d, 2);
       g_oilp_kpa = oilPressRaw * 0.0333333f;
       g_oilp_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILP);
       uint8_t oilTempRaw = d[4]; // CONFIRMED FIX: same unsigned-vs-signed bug as CLT above, per rusEFI's actual DBC (8@1+)
       g_oilt_f = cToF(oilTempRaw - 40);
       g_oilt_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILT);
       uint16_t battRaw = readU16LE(d, 6);
       g_battv = battRaw * 0.001f;
       g_battv_has_data = true;
+      gauge_config_mark_signal_active(SIG_BATTV);
       break;
     }
     case RUSEFI_BASE7: {
@@ -126,9 +134,11 @@ void handleRusefiFrame(uint32_t id, uint8_t *d) {
       float lambda = lam1Raw * 0.0001f;
       g_afr = lambda * 14.7f;
       g_afr_has_data = true;
+      gauge_config_mark_signal_active(SIG_AFR);
       uint16_t fpLowRaw = readU16LE(d, 4);
       g_fuelp_kpa = fpLowRaw * 0.0333333f;
       g_fuelp_has_data = true;
+      gauge_config_mark_signal_active(SIG_FUELP);
       break;
     }
   }
@@ -145,45 +155,55 @@ void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
     case SEC_BLOCK0: {
       g_rpm = readU16BE(d, 6); // word3: Seconds/PW1/PW2/RPM
       g_rpm_has_data = true;
+      gauge_config_mark_signal_active(SIG_RPM);
       break;
     }
     case SEC_BLOCK2: {
       float map_ = readU16BE(d, 2) / 10.0f; // word1
       g_boost_kpa = map_;
       g_boost_has_data = true;
+      gauge_config_mark_signal_active(SIG_MAP);
       float clt = cToF(readU16BE(d, 6) / 10.0f); // word3 - ASSUMES Celsius source config, matching WROOM board's noted caveat
       g_clt_f = clt;
       g_clt_has_data = true;
+      gauge_config_mark_signal_active(SIG_CLT);
       break;
     }
     case SEC_BLOCK3: {
       float tps = readU16BE(d, 0) / 10.0f; // word0
       g_tps = tps;
       g_tps_has_data = true;
+      gauge_config_mark_signal_active(SIG_TPS);
       float battV = readU16BE(d, 2) / 10.0f; // word1
       g_battv = battV;
       g_battv_has_data = true;
+      gauge_config_mark_signal_active(SIG_BATTV);
       float ego1 = readU16BE(d, 4) / 10.0f; // word2 - already AFR units per WROOM board's source comment, not lambda
       g_afr = ego1;
       g_afr_has_data = true;
+      gauge_config_mark_signal_active(SIG_AFR);
       break;
     }
     case SEC_BLOCK13: {
       float fuelp = readU16BE(d, 0) / 10.0f; // word0
       g_fuelp_kpa = fuelp;
       g_fuelp_has_data = true;
+      gauge_config_mark_signal_active(SIG_FUELP);
       float oilp = readU16BE(d, 2) / 10.0f; // word1
       g_oilp_kpa = oilp;
       g_oilp_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILP);
       float oilt = cToF(readU16BE(d, 4) / 10.0f); // word2 - ASSUMES Celsius source config, matching WROOM board's noted caveat
       g_oilt_f = oilt;
       g_oilt_has_data = true;
+      gauge_config_mark_signal_active(SIG_OILT);
       break;
     }
     case SEC_BLOCK47: {
       float eth = readU16BE(d, 0) / 10.0f; // word0
       g_flex_pct = eth;
       g_flex_has_data = true;
+      gauge_config_mark_signal_active(SIG_FLEX);
       break;
     }
   }

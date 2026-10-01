@@ -11,10 +11,9 @@ extern "C" {
 // original lv_demo_widgets() placeholder call.
 void build_gauge_app(void);
 
-// The actual number of active pages (enabled gauge slots + 1 for the
-// numbers grid) - the .ino's BOOT button handler uses this instead of
-// a hardcoded count, since the page count is now data-driven and can
-// change based on the persisted gauge configuration.
+// The actual number of active pages - the .ino's BOOT button handler
+// uses this instead of a hardcoded count, since the page count is now
+// fully data-driven (page/cell config) and can change at runtime.
 int gauge_app_get_num_pages(void);
 
 // ---- CAN-derived values, written from Arduino's loop() (rusEFI TWAI
