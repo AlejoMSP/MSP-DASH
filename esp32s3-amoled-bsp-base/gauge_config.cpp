@@ -1,15 +1,15 @@
 /*
   gauge_config.cpp
-  Persisted, data-driven gauge slot configuration - signal assignment,
-  range, needle color, caption, and warning threshold per slot, all
-  editable from the web config page and saved to NVS via ArduinoJson
-  (the whole slot array serialized as one JSON string under a single
-  Preferences key - simpler than dozens of individual keys for this
-  many fields per slot).
+  Stage A of the page/cell redesign - data model only (no rendering or
+  web UI changes yet, per the staged plan). Pages now contain a chosen
+  layout template plus an array of cells, each cell holding everything
+  a single gauge needs (signal, type, range, colors, warning, etc -
+  essentially the full per-gauge config from before this redesign, now
+  scoped per-cell instead of per-page).
 
-  Defaults match the previously-hardcoded 7-gauge setup exactly, plus
-  one extra disabled slot (defaulted to RPM) as a ready-to-enable spot
-  for "add more gauges" without needing a firmware change.
+  NVS persistence via ArduinoJson, same pattern as before - the whole
+  page/cell array serialized as one JSON string under a single
+  Preferences key.
 */
 
 #include "gauge_config.h"
@@ -17,25 +17,127 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <string.h>
+#include <Arduino.h>
 
 static Preferences prefs;
-static GaugeSlotConfig s_slots[MAX_GAUGE_SLOTS];
+static PageConfig s_pages[MAX_PAGES];
+static uint32_t s_signalLastSeenMs[SIG_COUNT];
+
+int gauge_config_cells_for_layout(LayoutType layout) {
+  switch (layout) {
+    case LAYOUT_1CELL: return 1;
+    case LAYOUT_2UP: return 2;
+    case LAYOUT_3UP: return 3;
+    case LAYOUT_2X2: return 4;
+    default: return 1;
+  }
+}
+
+static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_t min, int32_t max, int32_t rest,
+                            const char *caption, uint32_t needle, uint32_t tick, uint32_t bg, float divisor,
+                            int32_t tickCount, int32_t majorNth, int32_t refreshHz, bool hasWarning,
+                            float warnThresh, bool warnAbove) {
+  CellConfig c;
+  c.enabled = enabled;
+  c.signal = signal;
+  c.gauge_type = type;
+  c.min_val = min;
+  c.max_val = max;
+  c.rest_val = rest;
+  strlcpy(c.caption, caption, GAUGE_CAPTION_MAXLEN);
+  c.needle_color = needle;
+  c.tick_color = tick;
+  c.bg_color = bg;
+  c.value_divisor = divisor;
+  c.tick_count = tickCount;
+  c.major_nth = majorNth;
+  c.refresh_hz = refreshHz;
+  c.show_value = false;
+  c.value_font_size = 28;
+  c.has_warning = hasWarning;
+  c.warning_threshold = warnThresh;
+  c.warning_above = warnAbove;
+  return c;
+}
 
 static void applyDefaults(void) {
-  // { signal, enabled, min, max, rest, caption, needle_color, tick_color, bg_color, value_divisor, tick_count, major_nth, refresh_hz, show_value, value_font_size, has_warning, warning_threshold, warning_above }
-  s_slots[0] = { SIG_CLT,   true,  65, 250, 65,  "CLT",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 1,  false, 28, true,  220, true  };
-  s_slots[1] = { SIG_MAP,   true,  0,  250, 100, "MAP",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, false, 0,   false };
-  s_slots[2] = { SIG_AFR,   true,  10, 20,  10,  "AFR",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  15,  true  };
-  s_slots[3] = { SIG_OILP,  true,  0,  100, 0,   "OIL PRESS",    0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  40,  false };
-  s_slots[4] = { SIG_OILT,  true,  65, 250, 65,  "OIL TEMP",     0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 1,  false, 28, true,  220, true  };
-  s_slots[5] = { SIG_FUELP, true,  0,  100, 0,   "FUEL PRESS",   0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  40,  false };
-  s_slots[6] = { SIG_FLEX,  true,  0,  100, 0,   "ETH %",        0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 5,  false, 28, false, 0,   false };
-  s_slots[7] = { SIG_RPM,   false, 1,  9,   1,   "RPM x1000",    0xFFFFFF, 0xFFFFFF, 0x000000, 1000.0f, 9,  1, 50, false, 28, false, 0,   false };
+  memset(s_pages, 0, sizeof(s_pages));
+
+  // Matches the pre-redesign 7-gauge default set, one signal per page
+  // via LAYOUT_1CELL, plus one reserved-but-disabled RPM page, same as
+  // before.
+  struct { SignalId sig; int32_t min, max, rest; const char *cap; bool warn; float thresh; bool above; } defs[8] = {
+    { SIG_CLT,   65, 250, 65,  "CLT",        true,  220, true  },
+    { SIG_MAP,   0,  250, 100, "MAP",        false, 0,   false },
+    { SIG_AFR,   10, 20,  10,  "AFR",        true,  15,  true  },
+    { SIG_OILP,  0,  100, 0,   "OIL PRESS",  true,  40,  false },
+    { SIG_OILT,  65, 250, 65,  "OIL TEMP",   true,  220, true  },
+    { SIG_FUELP, 0,  100, 0,   "FUEL PRESS", true,  40,  false },
+    { SIG_FLEX,  0,  100, 0,   "ETH %",      false, 0,   false },
+    { SIG_RPM,   1,  9,   1,   "RPM x1000",  false, 0,   false },
+  };
+
+  for (int i = 0; i < 8; i++) {
+    s_pages[i].enabled = (i < 7); // RPM page starts disabled, same as before
+    s_pages[i].layout = LAYOUT_1CELL;
+    float divisor = (defs[i].sig == SIG_RPM) ? 1000.0f : 1.0f;
+    int32_t tickCount = (defs[i].sig == SIG_RPM) ? 9 : 26;
+    int32_t majorNth = (defs[i].sig == SIG_RPM) ? 1 : 5;
+    int32_t refreshHz = (defs[i].sig == SIG_CLT || defs[i].sig == SIG_OILT) ? 1
+                       : (defs[i].sig == SIG_FLEX) ? 5 : 50;
+    s_pages[i].cells[0] = makeCell(true, defs[i].sig, GAUGE_TYPE_NEEDLE, defs[i].min, defs[i].max, defs[i].rest,
+                                    defs[i].cap, 0xFFFFFF, 0xFFFFFF, 0x000000, divisor, tickCount, majorNth,
+                                    refreshHz, defs[i].warn, defs[i].thresh, defs[i].above);
+  }
+}
+
+static void serializeCell(JsonObject o, CellConfig *c) {
+  o["enabled"] = c->enabled;
+  o["signal"] = (int)c->signal;
+  o["gauge_type"] = (int)c->gauge_type;
+  o["min"] = c->min_val;
+  o["max"] = c->max_val;
+  o["rest"] = c->rest_val;
+  o["caption"] = c->caption;
+  o["needle_color"] = c->needle_color;
+  o["tick_color"] = c->tick_color;
+  o["bg_color"] = c->bg_color;
+  o["value_divisor"] = c->value_divisor;
+  o["tick_count"] = c->tick_count;
+  o["major_nth"] = c->major_nth;
+  o["refresh_hz"] = c->refresh_hz;
+  o["show_value"] = c->show_value;
+  o["value_font_size"] = c->value_font_size;
+  o["has_warning"] = c->has_warning;
+  o["warning_threshold"] = c->warning_threshold;
+  o["warning_above"] = c->warning_above;
+}
+
+static void deserializeCell(JsonObject o, CellConfig *c) {
+  c->enabled = o["enabled"] | false;
+  c->signal = (SignalId)(int)(o["signal"] | 0);
+  c->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
+  c->min_val = o["min"] | 0;
+  c->max_val = o["max"] | 100;
+  c->rest_val = o["rest"] | 0;
+  strlcpy(c->caption, (o["caption"] | ""), GAUGE_CAPTION_MAXLEN);
+  c->needle_color = (uint32_t)(long)(o["needle_color"] | 0xFFFFFF);
+  c->tick_color = (uint32_t)(long)(o["tick_color"] | 0xFFFFFF);
+  c->bg_color = (uint32_t)(long)(o["bg_color"] | 0x000000);
+  c->value_divisor = o["value_divisor"] | 1.0f;
+  c->tick_count = o["tick_count"] | 26;
+  c->major_nth = o["major_nth"] | 5;
+  c->refresh_hz = o["refresh_hz"] | 10;
+  c->show_value = o["show_value"] | false;
+  c->value_font_size = o["value_font_size"] | 28;
+  c->has_warning = o["has_warning"] | false;
+  c->warning_threshold = o["warning_threshold"] | 0.0f;
+  c->warning_above = o["warning_above"] | false;
 }
 
 void gauge_config_init(void) {
-  prefs.begin("gaugecfg", false);
-  String json = prefs.getString("slots", "");
+  prefs.begin("gaugecfg2", false); // new key namespace - old flat-slot format isn't compatible with this nested structure
+  String json = prefs.getString("pages", "");
 
   if (json.length() == 0) {
     applyDefaults();
@@ -49,78 +151,82 @@ void gauge_config_init(void) {
     return;
   }
 
-  JsonArray arr = doc.as<JsonArray>();
+  JsonArray pagesArr = doc.as<JsonArray>();
   int i = 0;
-  for (JsonObject o : arr) {
-    if (i >= MAX_GAUGE_SLOTS) break;
-    s_slots[i].signal = (SignalId)(int)o["signal"];
-    s_slots[i].enabled = o["enabled"];
-    s_slots[i].min_val = o["min"];
-    s_slots[i].max_val = o["max"];
-    s_slots[i].rest_val = o["rest"];
-    strlcpy(s_slots[i].caption, o["caption"] | "", GAUGE_CAPTION_MAXLEN);
-    s_slots[i].needle_color = (uint32_t)(long)o["color"];
-    s_slots[i].tick_color = (uint32_t)(long)o["tick_color"];
-    s_slots[i].bg_color = (uint32_t)(long)o["bg_color"];
-    s_slots[i].value_divisor = o["value_divisor"] | 1.0f;
-    s_slots[i].tick_count = o["tick_count"] | 26;
-    s_slots[i].major_nth = o["major_nth"] | 5;
-    s_slots[i].refresh_hz = o["refresh_hz"] | 10;
-    s_slots[i].show_value = o["show_value"] | false;
-    s_slots[i].value_font_size = o["value_font_size"] | 28;
-    s_slots[i].has_warning = o["has_warning"];
-    s_slots[i].warning_threshold = o["warning_threshold"];
-    s_slots[i].warning_above = o["warning_above"];
+  for (JsonObject pageObj : pagesArr) {
+    if (i >= MAX_PAGES) break;
+    s_pages[i].enabled = pageObj["enabled"] | false;
+    s_pages[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
+    JsonArray cellsArr = pageObj["cells"];
+    int j = 0;
+    for (JsonObject cellObj : cellsArr) {
+      if (j >= MAX_CELLS_PER_PAGE) break;
+      deserializeCell(cellObj, &s_pages[i].cells[j]);
+      j++;
+    }
     i++;
   }
 }
 
-GaugeSlotConfig *gauge_config_get_slots(void) {
-  return s_slots;
-}
-
-void gauge_config_swap_slots(int a, int b) {
-  if (a < 0 || a >= MAX_GAUGE_SLOTS || b < 0 || b >= MAX_GAUGE_SLOTS) return;
-  GaugeSlotConfig tmp = s_slots[a];
-  s_slots[a] = s_slots[b];
-  s_slots[b] = tmp;
-}
-
-void gauge_config_apply_colors_to_all(uint32_t needle_color, uint32_t tick_color, uint32_t bg_color) {
-  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
-    s_slots[i].needle_color = needle_color;
-    s_slots[i].tick_color = tick_color;
-    s_slots[i].bg_color = bg_color;
-  }
+PageConfig *gauge_config_get_pages(void) {
+  return s_pages;
 }
 
 void gauge_config_save(void) {
   JsonDocument doc;
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
-    JsonObject o = arr.add<JsonObject>();
-    o["signal"] = (int)s_slots[i].signal;
-    o["enabled"] = s_slots[i].enabled;
-    o["min"] = s_slots[i].min_val;
-    o["max"] = s_slots[i].max_val;
-    o["rest"] = s_slots[i].rest_val;
-    o["caption"] = s_slots[i].caption;
-    o["color"] = s_slots[i].needle_color;
-    o["tick_color"] = s_slots[i].tick_color;
-    o["bg_color"] = s_slots[i].bg_color;
-    o["value_divisor"] = s_slots[i].value_divisor;
-    o["tick_count"] = s_slots[i].tick_count;
-    o["major_nth"] = s_slots[i].major_nth;
-    o["refresh_hz"] = s_slots[i].refresh_hz;
-    o["show_value"] = s_slots[i].show_value;
-    o["value_font_size"] = s_slots[i].value_font_size;
-    o["has_warning"] = s_slots[i].has_warning;
-    o["warning_threshold"] = s_slots[i].warning_threshold;
-    o["warning_above"] = s_slots[i].warning_above;
+  JsonArray pagesArr = doc.to<JsonArray>();
+  for (int i = 0; i < MAX_PAGES; i++) {
+    JsonObject pageObj = pagesArr.add<JsonObject>();
+    pageObj["enabled"] = s_pages[i].enabled;
+    pageObj["layout"] = (int)s_pages[i].layout;
+    JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
+    for (int j = 0; j < MAX_CELLS_PER_PAGE; j++) {
+      JsonObject cellObj = cellsArr.add<JsonObject>();
+      serializeCell(cellObj, &s_pages[i].cells[j]);
+    }
   }
   String out;
   serializeJson(doc, out);
-  prefs.putString("slots", out);
+  prefs.putString("pages", out);
+}
+
+int gauge_config_add_page(void) {
+  for (int i = 0; i < MAX_PAGES; i++) {
+    if (!s_pages[i].enabled) {
+      memset(&s_pages[i], 0, sizeof(PageConfig));
+      s_pages[i].enabled = true;
+      s_pages[i].layout = LAYOUT_1CELL;
+      return i;
+    }
+  }
+  return -1; // full
+}
+
+void gauge_config_delete_page(int index) {
+  if (index < 0 || index >= MAX_PAGES) return;
+  for (int i = index; i < MAX_PAGES - 1; i++) {
+    s_pages[i] = s_pages[i + 1];
+  }
+  memset(&s_pages[MAX_PAGES - 1], 0, sizeof(PageConfig));
+}
+
+void gauge_config_empty_page(int index) {
+  if (index < 0 || index >= MAX_PAGES) return;
+  LayoutType keepLayout = s_pages[index].layout;
+  memset(&s_pages[index].cells, 0, sizeof(s_pages[index].cells));
+  s_pages[index].layout = keepLayout;
+}
+
+int gauge_config_copy_page(int srcIndex) {
+  if (srcIndex < 0 || srcIndex >= MAX_PAGES) return -1;
+  int dest = gauge_config_add_page();
+  if (dest < 0) return -1;
+  LayoutType srcLayout = s_pages[srcIndex].layout;
+  CellConfig srcCells[MAX_CELLS_PER_PAGE];
+  memcpy(srcCells, s_pages[srcIndex].cells, sizeof(srcCells));
+  s_pages[dest].layout = srcLayout;
+  memcpy(s_pages[dest].cells, srcCells, sizeof(srcCells));
+  return dest;
 }
 
 const char *gauge_config_signal_name(SignalId sig) {
@@ -169,4 +275,15 @@ bool gauge_config_signal_has_data(SignalId sig) {
     case SIG_BATTV: return g_battv_has_data;
     default: return false;
   }
+}
+
+void gauge_config_mark_signal_active(SignalId sig) {
+  if (sig < 0 || sig >= SIG_COUNT) return;
+  s_signalLastSeenMs[sig] = millis();
+}
+
+uint32_t gauge_config_signal_age_ms(SignalId sig) {
+  if (sig < 0 || sig >= SIG_COUNT) return UINT32_MAX;
+  if (s_signalLastSeenMs[sig] == 0) return UINT32_MAX; // never seen
+  return millis() - s_signalLastSeenMs[sig];
 }

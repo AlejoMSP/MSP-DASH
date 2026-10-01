@@ -1123,3 +1123,38 @@ near the end of a verbose compile, or findable via
 accessible output location) for a file ending in .ino.bin.
 
 NOT yet bench-tested as of this writing.
+
+## Page/cell redesign - Stage A: new data model (2026-09-30)
+
+Rewrote gauge_config.h/.cpp entirely, replacing the old flat
+"one-gauge-per-page" GaugeSlotConfig model with a nested
+page/layout/cell model, matching the reference screenshots shared
+(fixed layout templates, multi-cell pages, per-cell sensor assignment):
+
+- LayoutType: LAYOUT_1CELL/2UP/3UP/2X2 (fixed set, not a fully
+  arbitrary grid, per project decision to keep this simpler for now)
+- GaugeType: NEEDLE/NUMBER/HALFMOON per cell (addresses "change gauge
+  type" - previously each page was hardcoded to a full needle meter)
+- CellConfig: essentially the full prior per-gauge config
+  (signal/range/colors/warning/etc), now scoped to one cell instead of
+  a whole page
+- PageConfig: a chosen layout + up to MAX_CELLS_PER_PAGE (4) cells
+- Page management: gauge_config_add_page/delete_page/empty_page/
+  copy_page - matches the reference screenshot's page action menu
+- Signal activity tracking: gauge_config_mark_signal_active() (called
+  from CAN frame handlers whenever a signal updates) +
+  gauge_config_signal_age_ms() - supports the sensor picker's
+  "sort by activity" requirement from the reference screenshots (their
+  ping-time column)
+
+NVS persistence uses a NEW Preferences key ("gaugecfg2" instead of
+"gaugecfg") since the old flat-slot JSON format is structurally
+incompatible with this nested one - avoids misparsing old saved data
+under the new schema. Defaults match the pre-redesign 7-gauge set
+exactly, each as a LAYOUT_1CELL page with one cell, plus the
+previously-reserved disabled RPM page.
+
+IMPORTANT: this is Stage A of a 3-stage plan (data model only).
+gauge_app.c (rendering) and web_monitor.cpp (web UI) still reference
+the OLD GaugeSlotConfig-based API and have NOT been updated yet - this
+will NOT compile as-is until Stage B (rendering rewrite) is done.

@@ -8,9 +8,8 @@
 extern "C" {
 #endif
 
-// The pool of signals available to assign to any gauge slot - every
-// value we currently know how to decode from either rusEFI or
-// MegaSquirt/LinkECU.
+// ---- Signal pool - every value we currently know how to decode from
+// either rusEFI or MegaSquirt/LinkECU. ----
 typedef enum {
   SIG_NONE = 0,
   SIG_RPM,
@@ -26,61 +25,109 @@ typedef enum {
   SIG_COUNT
 } SignalId;
 
-#define MAX_GAUGE_SLOTS 8
-#define GAUGE_CAPTION_MAXLEN 24
+// ---- Page layout templates - a fixed set of common arrangements
+// rather than a fully arbitrary grid, per project decision. ----
+typedef enum {
+  LAYOUT_1CELL = 0, // one cell, full screen
+  LAYOUT_2UP,       // two cells, stacked top/bottom
+  LAYOUT_3UP,       // one cell on top (full width), two below (split)
+  LAYOUT_2X2,       // four even cells
+  LAYOUT_COUNT
+} LayoutType;
 
+// ---- How a cell displays its assigned signal. ----
+typedef enum {
+  GAUGE_TYPE_NEEDLE = 0,   // full needle meter (what every gauge was before this redesign)
+  GAUGE_TYPE_NUMBER,       // plain big digital readout, no needle
+  GAUGE_TYPE_HALFMOON,     // 180-degree meter (previously only available full-page)
+  GAUGE_TYPE_COUNT
+} GaugeType;
+
+#define GAUGE_CAPTION_MAXLEN 24
+#define MAX_CELLS_PER_PAGE 4   // matches the largest fixed layout (2x2)
+#define MAX_PAGES 8
+
+// Everything a single cell needs to render and behave - essentially
+// the full per-gauge config from before this redesign, now scoped to
+// one cell within a page's layout instead of an entire page.
 typedef struct {
+  bool enabled;            // false = this cell is empty (shows nothing)
   SignalId signal;
-  bool enabled;
+  GaugeType gauge_type;
   int32_t min_val;
   int32_t max_val;
   int32_t rest_val;
   char caption[GAUGE_CAPTION_MAXLEN];
-  uint32_t needle_color; // 0xRRGGBB
-  uint32_t tick_color;   // 0xRRGGBB - minor/major tick marks and their number labels
-  uint32_t bg_color;     // 0xRRGGBB - page/meter face background (also the "off" state of the warning flash, instead of assuming black)
-  float value_divisor;   // live signal value is divided by this before display - e.g. 1000 for RPM shown as "RPM x1000" with clean 1-9 ticks. 1.0 for no scaling.
-  int32_t tick_count;    // total ticks across the sweep (minor+major combined) - lets a gauge like RPM (range 1-9, wants exactly 9 evenly labeled ticks) differ from the standard density used elsewhere
-  int32_t major_nth;     // every Nth tick is a labeled major tick
-  int32_t refresh_hz;    // how often THIS gauge's needle/value actually updates - fast-changing signals (RPM, boost) can refresh often, slow ones (temps) don't need to
-  bool show_value;        // show a precise numeric readout above the caption, in addition to the needle
-  int32_t value_font_size; // 14, 28, or 36 - must match a font size actually enabled in lv_conf.h
+  uint32_t needle_color;   // 0xRRGGBB
+  uint32_t tick_color;     // 0xRRGGBB
+  uint32_t bg_color;       // 0xRRGGBB - also the warning-flash "off" state
+  float value_divisor;     // e.g. 1000 for "RPM x1000"
+  int32_t tick_count;
+  int32_t major_nth;
+  int32_t refresh_hz;
+  bool show_value;         // precise numeric readout alongside the needle (GAUGE_TYPE_NEEDLE/HALFMOON only - NUMBER type always shows a value by definition)
+  int32_t value_font_size; // 14/28/36 - must match a font actually enabled in lv_conf.h
   bool has_warning;
   float warning_threshold;
   bool warning_above;
-} GaugeSlotConfig;
+} CellConfig;
 
-// Loads the persisted slot configuration from NVS (falls back to the
-// current 7-gauge defaults if nothing has been saved yet) - call once
-// from setup(), before build_gauge_app().
+// A page: a chosen layout template plus however many cells that
+// layout needs (unused cells beyond the layout's count are ignored).
+typedef struct {
+  bool enabled;    // false = this page is skipped in the page cycle
+  LayoutType layout;
+  CellConfig cells[MAX_CELLS_PER_PAGE];
+} PageConfig;
+
+// Loads the persisted page/cell configuration from NVS (falls back to
+// sensible defaults matching the pre-redesign gauge set, one signal
+// per page via LAYOUT_1CELL, if nothing has been saved yet) - call
+// once from setup(), before build_gauge_app().
 void gauge_config_init(void);
 
-// Returns a pointer to the live in-memory config array (MAX_GAUGE_SLOTS
+// Returns a pointer to the live in-memory page array (MAX_PAGES
 // entries) - gauge_app.c reads this to build pages.
-GaugeSlotConfig *gauge_config_get_slots(void);
+PageConfig *gauge_config_get_pages(void);
 
-// Saves the current in-memory config array to NVS - call after
-// applying changes received from the web config page.
+// How many cells a given layout actually uses (1/2/3/4).
+int gauge_config_cells_for_layout(LayoutType layout);
+
+// Saves the current in-memory page/cell array to NVS.
 void gauge_config_save(void);
 
-// Swaps two slots' positions in the array - the basis for reordering
-// which page a gauge appears on, since build_gauge_app() builds pages
-// in array order.
-void gauge_config_swap_slots(int a, int b);
+// ---- Page management (matches the add/delete/empty/copy workflow) ----
+// Appends a new page (LAYOUT_1CELL, single empty cell) if room remains
+// (MAX_PAGES not yet reached). Returns the new page's index, or -1 if
+// full.
+int gauge_config_add_page(void);
 
-// Applies the same needle/tick/background color to every slot - saves
-// configuring each gauge individually when you just want a uniform
-// look across the whole cluster.
-void gauge_config_apply_colors_to_all(uint32_t needle_color, uint32_t tick_color, uint32_t bg_color);
+// Removes a page and shifts subsequent pages up to fill the gap.
+void gauge_config_delete_page(int index);
 
-// Human-readable signal name, for the web UI's dropdown and captions.
+// Clears a page's cells (all disabled) but keeps its chosen layout.
+void gauge_config_empty_page(int index);
+
+// Duplicates a page, appending the copy (if room remains). Returns the
+// new page's index, or -1 if full.
+int gauge_config_copy_page(int srcIndex);
+
+// Human-readable signal name, for the web UI's sensor picker.
 const char *gauge_config_signal_name(SignalId sig);
 
-// Reads the live current value and has_data flag for a given signal -
-// the generic dispatch gauge_app.c's update timer uses instead of
-// hardcoded per-gauge references, now that pages are data-driven.
+// Reads the live current value and has_data flag for a given signal.
 float gauge_config_signal_value(SignalId sig);
 bool gauge_config_signal_has_data(SignalId sig);
+
+// ---- Signal activity tracking (for the sensor picker's "how live is
+// this signal" sort/display, matching the ping-time-style column in
+// the reference screenshots) - call from the CAN frame handlers
+// whenever a signal's value actually gets updated. ----
+void gauge_config_mark_signal_active(SignalId sig);
+
+// Milliseconds since this signal was last updated (very large if never
+// seen) - lower means "more active/live" for sorting purposes.
+uint32_t gauge_config_signal_age_ms(SignalId sig);
 
 #ifdef __cplusplus
 }
