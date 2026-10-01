@@ -30,7 +30,6 @@
 
 #include "gauge_app.h"
 #include "gauge_config.h"
-#include "gmeter_widget.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -59,12 +58,13 @@ volatile bool g_battv_has_data = false;
 
 volatile int g_requested_page = -1;
 
-#define MAX_PAGES (MAX_GAUGE_SLOTS + 2) // +1 numbers grid, +1 G-meter
+#define MAX_PAGES (MAX_GAUGE_SLOTS + 1) // +1 for the numbers grid (G-meter removed - IMU mounting orientation didn't work for a vertically-mounted display)
 
 typedef struct {
   lv_obj_t *page;
   lv_obj_t *meter;
   lv_meter_indicator_t *needle;
+  lv_obj_t *valueLabel; // optional precise numeric readout above the caption - NULL if show_value is off
   SignalId signal;
   int32_t min_val;
   int32_t max_val;
@@ -77,7 +77,18 @@ typedef struct {
   int32_t sweep_pos;
   int32_t sweep_step;
   int8_t sweep_dir;
+  uint32_t refresh_interval_ms; // how often THIS gauge's needle/value actually updates, once real data is flowing
+  uint32_t last_update_ms;
 } GaugePage;
+
+// Maps a requested font size to the nearest ACTUALLY ENABLED one
+// (14/28/36 in lv_conf.h) - avoids ever referencing an unenabled font
+// object regardless of what gets typed into the web config page.
+static const lv_font_t *get_font_for_size(int32_t size) {
+  if (size <= 14) return &lv_font_montserrat_14;
+  if (size <= 28) return &lv_font_montserrat_28;
+  return &lv_font_montserrat_36;
+}
 
 static GaugePage pages[MAX_PAGES];
 static int s_num_active_pages = 0;
@@ -128,11 +139,21 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   lv_label_set_text(capLabel, cfg->caption);
   lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70);
 
+  lv_obj_t *valueLabel = NULL;
+  if (cfg->show_value) {
+    valueLabel = lv_label_create(page);
+    lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
+    lv_obj_set_style_text_font(valueLabel, get_font_for_size(cfg->value_font_size), 0);
+    lv_label_set_text(valueLabel, "--");
+    lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -8); // "above the gauge name" per request
+  }
+
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
 
   pages[index].page = page;
   pages[index].meter = meter;
   pages[index].needle = needle;
+  pages[index].valueLabel = valueLabel;
   pages[index].signal = cfg->signal;
   pages[index].min_val = cfg->min_val;
   pages[index].max_val = cfg->max_val;
@@ -147,6 +168,10 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   pages[index].sweep_dir = 1;
   int32_t step = (cfg->max_val - cfg->min_val) / 25;
   pages[index].sweep_step = step < 1 ? 1 : step;
+
+  int32_t hz = cfg->refresh_hz < 1 ? 1 : cfg->refresh_hz;
+  pages[index].refresh_interval_ms = 1000 / hz;
+  pages[index].last_update_ms = 0;
 }
 
 static lv_obj_t *make_grid_cell(lv_obj_t *parent, int16_t x, int16_t y, const char *caption) {
@@ -245,7 +270,7 @@ static void update_warning_flash(GaugePage *p, float value, bool has_data) {
   }
 
   if (triggered) {
-    bool flash_on = (s_flash_counter / 6) % 2 == 0;
+    bool flash_on = (s_flash_counter / 24) % 2 == 0; // 24 ticks at the 20ms master rate = ~480ms per phase, same real-world blink speed as before the rate change
     lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_hex(p->bg_color);
     lv_obj_set_style_bg_color(p->page, target, 0);
     p->warning_active = true;
@@ -257,20 +282,37 @@ static void update_warning_flash(GaugePage *p, float value, bool has_data) {
 
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   s_flash_counter++;
-  gmeter_update(); // harmless even when its page isn't currently visible
 
   if (g_requested_page >= 0 && g_requested_page < s_num_active_pages) {
     switch_to_page(g_requested_page);
     g_requested_page = -1;
   }
 
+  uint32_t now = lv_tick_get();
   for (int i = 0; i < s_num_active_pages; i++) {
     GaugePage *p = &pages[i];
     if (p->meter == NULL) continue; // numbers grid page has no meter
     float value = gauge_config_signal_value(p->signal) / p->value_divisor;
     bool has_data = gauge_config_signal_has_data(p->signal);
-    lv_meter_set_indicator_value(p->meter, p->needle, clamped_or_sweep(p, value, has_data));
+
+    // While waiting for real data, always update (keeps the sweep
+    // animation smooth regardless of the configured refresh rate).
+    // Once real data is flowing, respect each gauge's own configured
+    // refresh_hz - fast-changing signals (RPM, boost) can update often,
+    // slow ones (temps) don't need to.
+    bool shouldUpdate = !has_data || (now - p->last_update_ms >= p->refresh_interval_ms);
+    if (!shouldUpdate) continue;
+    if (has_data) p->last_update_ms = now;
+
+    int32_t displayValue = clamped_or_sweep(p, value, has_data);
+    lv_meter_set_indicator_value(p->meter, p->needle, displayValue);
     update_warning_flash(p, value, has_data);
+
+    if (p->valueLabel) {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%.1f", value);
+      lv_label_set_text(p->valueLabel, buf);
+    }
   }
 
   char buf[16];
@@ -297,14 +339,9 @@ void build_gauge_app(void) {
   build_numbers_page(pageIdx, slots, MAX_GAUGE_SLOTS);
   pageIdx++;
 
-  pages[pageIdx].page = build_gmeter_page(gesture_event_cb);
-  pages[pageIdx].meter = NULL; // not a meter-based page, handled specially in the update timer
-  pages[pageIdx].has_warning = false;
-  pageIdx++;
-
   s_num_active_pages = pageIdx;
   s_current_page = 0;
   lv_disp_load_scr(pages[0].page);
 
-  lv_timer_create(gauge_update_timer_cb, 80, NULL);
+  lv_timer_create(gauge_update_timer_cb, 20, NULL); // 20ms = 50Hz, the fastest per-gauge refresh rate requested (RPM/boost/pressure) - slower gauges throttle themselves via refresh_interval_ms
 }

@@ -42,6 +42,9 @@ typedef struct {
   float value_divisor;   // live signal value is divided by this before display - e.g. 1000 for RPM shown as "RPM x1000" with clean 1-9 ticks. 1.0 for no scaling.
   int32_t tick_count;    // total ticks across the sweep (minor+major combined) - lets a gauge like RPM (range 1-9, wants exactly 9 evenly labeled ticks) differ from the standard density used elsewhere
   int32_t major_nth;     // every Nth tick is a labeled major tick
+  int32_t refresh_hz;    // how often THIS gauge's needle/value actually updates - fast-changing signals (RPM, boost) can refresh often, slow ones (temps) don't need to
+  bool show_value;        // show a precise numeric readout above the caption, in addition to the needle
+  int32_t value_font_size; // 14, 28, or 36 - must match a font size actually enabled in lv_conf.h
   bool has_warning;
   float warning_threshold;
   bool warning_above;
@@ -64,6 +67,11 @@ void gauge_config_save(void);
 // which page a gauge appears on, since build_gauge_app() builds pages
 // in array order.
 void gauge_config_swap_slots(int a, int b);
+
+// Applies the same needle/tick/background color to every slot - saves
+// configuring each gauge individually when you just want a uniform
+// look across the whole cluster.
+void gauge_config_apply_colors_to_all(uint32_t needle_color, uint32_t tick_color, uint32_t bg_color);
 
 // Human-readable signal name, for the web UI's dropdown and captions.
 const char *gauge_config_signal_name(SignalId sig);

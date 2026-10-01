@@ -160,6 +160,15 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
 <body>
   <h1>Gauge Configuration</h1>
   <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div class="slot">
+    <strong>Apply colors to ALL gauges</strong>
+    <div class="row2">
+      <div><label>Needle <input type="color" id="bulkNeedle" value="#ffffff"></label></div>
+      <div><label>Tick/Dial <input type="color" id="bulkTick" value="#ffffff"></label></div>
+      <div><label>Background <input type="color" id="bulkBg" value="#000000"></label></div>
+    </div>
+    <button type="button" onclick="applyColorsToAll()">Apply to All (saves immediately, reboot to see it)</button>
+  </div>
   <div id="slots"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
   <div id="status"></div>
@@ -202,6 +211,17 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
             <div><label>Tick Count <input type="number" value="${s.tick_count}" onchange="slots[${i}].tick_count=parseInt(this.value)"></label></div>
             <div><label>Major Every Nth <input type="number" value="${s.major_nth}" onchange="slots[${i}].major_nth=parseInt(this.value)"></label></div>
           </div>
+          <div class="row2">
+            <div><label>Refresh Rate (Hz) <input type="number" value="${s.refresh_hz}" onchange="slots[${i}].refresh_hz=parseInt(this.value)"></label></div>
+            <div><label><input type="checkbox" ${s.show_value?"checked":""} onchange="slots[${i}].show_value=this.checked"> Show value above name</label></div>
+            <div><label>Value Text Size
+              <select onchange="slots[${i}].value_font_size=parseInt(this.value)">
+                <option value="14" ${s.value_font_size===14?"selected":""}>Small (14px)</option>
+                <option value="28" ${s.value_font_size===28?"selected":""}>Medium (28px)</option>
+                <option value="36" ${s.value_font_size===36?"selected":""}>Large (36px)</option>
+              </select>
+            </label></div>
+          </div>
           <label>Needle Color <input type="color" value="#${s.color.toString(16).padStart(6,'0')}" onchange="slots[${i}].color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${s.tick_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].tick_color=parseInt(this.value.substring(1),16)"></label>
           <label>Face/Background Color <input type="color" value="#${s.bg_color.toString(16).padStart(6,'0')}" onchange="slots[${i}].bg_color=parseInt(this.value.substring(1),16)"></label>
@@ -229,6 +249,20 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
       document.getElementById("status").textContent = "Saving...";
       await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(slots) });
       document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+    }
+
+    async function applyColorsToAll() {
+      const needle = document.getElementById("bulkNeedle").value.substring(1);
+      const tick = document.getElementById("bulkTick").value.substring(1);
+      const bg = document.getElementById("bulkBg").value.substring(1);
+      document.getElementById("status").textContent = "Applying colors to all gauges...";
+      const formData = new URLSearchParams();
+      formData.append("needle", needle);
+      formData.append("tick", tick);
+      formData.append("bg", bg);
+      await fetch("/gauges/apply-colors", { method: "POST", body: formData });
+      document.getElementById("status").textContent = "Applied and saved. Reboot the board to apply changes.";
+      load(); // refresh the displayed per-slot colors to reflect the bulk change
     }
 
     load();
@@ -422,6 +456,9 @@ void web_monitor_init(void) {
       o["value_divisor"] = slots[i].value_divisor;
       o["tick_count"] = slots[i].tick_count;
       o["major_nth"] = slots[i].major_nth;
+      o["refresh_hz"] = slots[i].refresh_hz;
+      o["show_value"] = slots[i].show_value;
+      o["value_font_size"] = slots[i].value_font_size;
       o["has_warning"] = slots[i].has_warning;
       o["warning_threshold"] = slots[i].warning_threshold;
       o["warning_above"] = slots[i].warning_above;
@@ -433,6 +470,15 @@ void web_monitor_init(void) {
 
   // POST body arrives in chunks - accumulate into a static buffer, parse
   // once the full body has been received (index + len == total).
+  server.on("/gauges/apply-colors", HTTP_POST, [](AsyncWebServerRequest *request) {
+    uint32_t needleColor = request->hasParam("needle", true) ? strtoul(request->getParam("needle", true)->value().c_str(), NULL, 16) : 0xFFFFFF;
+    uint32_t tickColor = request->hasParam("tick", true) ? strtoul(request->getParam("tick", true)->value().c_str(), NULL, 16) : 0xFFFFFF;
+    uint32_t bgColor = request->hasParam("bg", true) ? strtoul(request->getParam("bg", true)->value().c_str(), NULL, 16) : 0x000000;
+    gauge_config_apply_colors_to_all(needleColor, tickColor, bgColor);
+    gauge_config_save();
+    request->send(200, "text/plain", "OK");
+  });
+
   server.on("/gauges", HTTP_POST,
     [](AsyncWebServerRequest *request) {
       request->send(200, "text/plain", "OK - reboot to apply");
@@ -465,6 +511,9 @@ void web_monitor_init(void) {
             slots[i].value_divisor = o["value_divisor"] | 1.0f;
             slots[i].tick_count = o["tick_count"] | 26;
             slots[i].major_nth = o["major_nth"] | 5;
+            slots[i].refresh_hz = o["refresh_hz"] | 10;
+            slots[i].show_value = o["show_value"] | false;
+            slots[i].value_font_size = o["value_font_size"] | 28;
             slots[i].has_warning = o["has_warning"];
             slots[i].warning_threshold = o["warning_threshold"];
             slots[i].warning_above = o["warning_above"];

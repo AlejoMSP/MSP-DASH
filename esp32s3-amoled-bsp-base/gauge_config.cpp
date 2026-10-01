@@ -22,15 +22,15 @@ static Preferences prefs;
 static GaugeSlotConfig s_slots[MAX_GAUGE_SLOTS];
 
 static void applyDefaults(void) {
-  // { signal, enabled, min, max, rest, caption, needle_color, tick_color, bg_color, value_divisor, tick_count, major_nth, has_warning, warning_threshold, warning_above }
-  s_slots[0] = { SIG_CLT,   true,  65, 250, 65,  "CLT",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, true,  220, true  };
-  s_slots[1] = { SIG_MAP,   true,  0,  250, 100, "MAP",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, false, 0,   false };
-  s_slots[2] = { SIG_AFR,   true,  10, 20,  10,  "AFR",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, true,  15,  true  };
-  s_slots[3] = { SIG_OILP,  true,  0,  100, 0,   "OIL PRESS",    0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, true,  40,  false };
-  s_slots[4] = { SIG_OILT,  true,  65, 250, 65,  "OIL TEMP",     0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, true,  220, true  };
-  s_slots[5] = { SIG_FUELP, true,  0,  100, 0,   "FUEL PRESS",   0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, true,  40,  false };
-  s_slots[6] = { SIG_FLEX,  true,  0,  100, 0,   "ETH %",        0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, false, 0,   false };
-  s_slots[7] = { SIG_RPM,   false, 1,  9,   1,   "RPM x1000",    0xFFFFFF, 0xFFFFFF, 0x000000, 1000.0f, 9,  1, false, 0,   false };
+  // { signal, enabled, min, max, rest, caption, needle_color, tick_color, bg_color, value_divisor, tick_count, major_nth, refresh_hz, show_value, value_font_size, has_warning, warning_threshold, warning_above }
+  s_slots[0] = { SIG_CLT,   true,  65, 250, 65,  "CLT",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 1,  false, 28, true,  220, true  };
+  s_slots[1] = { SIG_MAP,   true,  0,  250, 100, "MAP",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, false, 0,   false };
+  s_slots[2] = { SIG_AFR,   true,  10, 20,  10,  "AFR",          0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  15,  true  };
+  s_slots[3] = { SIG_OILP,  true,  0,  100, 0,   "OIL PRESS",    0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  40,  false };
+  s_slots[4] = { SIG_OILT,  true,  65, 250, 65,  "OIL TEMP",     0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 1,  false, 28, true,  220, true  };
+  s_slots[5] = { SIG_FUELP, true,  0,  100, 0,   "FUEL PRESS",   0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 50, false, 28, true,  40,  false };
+  s_slots[6] = { SIG_FLEX,  true,  0,  100, 0,   "ETH %",        0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f,    26, 5, 5,  false, 28, false, 0,   false };
+  s_slots[7] = { SIG_RPM,   false, 1,  9,   1,   "RPM x1000",    0xFFFFFF, 0xFFFFFF, 0x000000, 1000.0f, 9,  1, 50, false, 28, false, 0,   false };
 }
 
 void gauge_config_init(void) {
@@ -65,6 +65,9 @@ void gauge_config_init(void) {
     s_slots[i].value_divisor = o["value_divisor"] | 1.0f;
     s_slots[i].tick_count = o["tick_count"] | 26;
     s_slots[i].major_nth = o["major_nth"] | 5;
+    s_slots[i].refresh_hz = o["refresh_hz"] | 10;
+    s_slots[i].show_value = o["show_value"] | false;
+    s_slots[i].value_font_size = o["value_font_size"] | 28;
     s_slots[i].has_warning = o["has_warning"];
     s_slots[i].warning_threshold = o["warning_threshold"];
     s_slots[i].warning_above = o["warning_above"];
@@ -81,6 +84,14 @@ void gauge_config_swap_slots(int a, int b) {
   GaugeSlotConfig tmp = s_slots[a];
   s_slots[a] = s_slots[b];
   s_slots[b] = tmp;
+}
+
+void gauge_config_apply_colors_to_all(uint32_t needle_color, uint32_t tick_color, uint32_t bg_color) {
+  for (int i = 0; i < MAX_GAUGE_SLOTS; i++) {
+    s_slots[i].needle_color = needle_color;
+    s_slots[i].tick_color = tick_color;
+    s_slots[i].bg_color = bg_color;
+  }
 }
 
 void gauge_config_save(void) {
@@ -100,6 +111,9 @@ void gauge_config_save(void) {
     o["value_divisor"] = s_slots[i].value_divisor;
     o["tick_count"] = s_slots[i].tick_count;
     o["major_nth"] = s_slots[i].major_nth;
+    o["refresh_hz"] = s_slots[i].refresh_hz;
+    o["show_value"] = s_slots[i].show_value;
+    o["value_font_size"] = s_slots[i].value_font_size;
     o["has_warning"] = s_slots[i].has_warning;
     o["warning_threshold"] = s_slots[i].warning_threshold;
     o["warning_above"] = s_slots[i].warning_above;

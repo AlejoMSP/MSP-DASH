@@ -1026,3 +1026,47 @@ have broken the G-meter too. Disabling at the gesture-callback level
 (a single early-return, rather than touching the 3 call sites that
 attach it) avoids that risk entirely while fully satisfying "swipe does
 nothing now" - easily reversible by flipping the define back to 1.
+
+## G-meter removed, per-gauge refresh rate, value display, bulk color apply (2026-09-30)
+
+**G-meter removed entirely** (gmeter_widget.h/.c, imu_reader.h/.cpp,
+qmi8658c.h/.cpp, i2c_bsp.h, and all wiring) - didn't work for a
+vertically-mounted display per testing. Touch_Init() itself is left
+untouched (still part of Waveshare's confirmed init sequence; was
+already not doing anything functionally important for us beyond that
+since swipe nav was already disabled).
+
+**Per-gauge refresh rate**: new refresh_hz field per slot. Master LVGL
+timer changed from 80ms to 20ms (50Hz) to support the fastest
+requested tier (RPM/boost/pressure signals at 50Hz); slower gauges
+(temps at 1Hz) self-throttle via a per-page last_update_ms/
+refresh_interval_ms check. Only throttles once real data is flowing -
+the sweep animation (while waiting for first CAN frame) always runs at
+the full 20ms tick regardless of configured rate, so "waiting for
+data" still looks smooth. Warning-flash blink-phase divisor adjusted
+(6->24 ticks) to preserve the same real-world ~480ms blink speed after
+the master rate change.
+
+Default refresh rates applied: CLT/OilTemp=1Hz, MAP/AFR/OilPress/
+FuelPress/RPM=50Hz, Ethanol%=5Hz - per request's examples (temps slow,
+pressure/RPM/boost fast).
+
+**Value display toggle + size**: new show_value (bool) and
+value_font_size (14/28/36) fields per slot. When enabled, a precise
+numeric label renders directly above the caption (which stays at the
+bottom). Added get_font_for_size() helper that maps any requested size
+to the nearest of the 3 actually-enabled fonts (14/28/36) - avoids ever
+referencing an unenabled font object regardless of what gets typed into
+the web config page.
+
+**Bulk color apply**: new gauge_config_apply_colors_to_all() + POST
+/gauges/apply-colors endpoint + a "apply to all" section at the top of
+the /gauges web page (3 color pickers, one button) - saves configuring
+every gauge's colors individually.
+
+"Testing page" request interpreted as per-slot refresh_hz added to the
+existing /gauges config UI (consistent with how every other per-gauge
+setting already works) rather than a separate dedicated page - flagged
+in case a genuinely separate page was wanted instead.
+
+NOT yet bench-tested as of this writing.
