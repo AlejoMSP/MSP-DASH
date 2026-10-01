@@ -43,81 +43,132 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Monitor</title>
+  <title>MSP-DASH</title>
   <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:20px; }
-    .cell { background:#111; border-radius:8px; padding:16px; text-align:center; }
-    .label { font-size:0.9em; color:#4dd0e1; }
-    .value { font-size:2em; font-weight:bold; margin-top:6px; }
-    .warn { color:#ff4444; }
-    .navbar { display:flex; align-items:center; justify-content:space-between; }
-    .hamburger { background:none; border:1px solid #444; font-size:1.4em; padding:4px 12px; }
-    .navmenu { display:none; flex-direction:column; background:#111; border-radius:8px; padding:10px; margin-top:10px; }
+    * { box-sizing: border-box; }
+    body { background:#222; color:#fff; font-family: sans-serif; margin:0; padding:0; display:flex; justify-content:center; }
+
+    .phone-outer { width:100%; max-width:430px; min-height:100vh; background:#000; position:relative; }
+
+    /* Phone-frame mockup - only applied on screens wide enough that
+       we're clearly not actually viewing this on a phone. iPhone 15 Pro
+       Max's CSS viewport (430x932) is the sizing target throughout. */
+    @media (min-width: 500px) {
+      body { padding:40px 0; align-items:flex-start; }
+      .phone-outer {
+        min-height:932px;
+        border-radius:48px;
+        border:10px solid #111;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        overflow:hidden;
+      }
+      .phone-outer::before {
+        content:"";
+        position:absolute;
+        top:14px; left:50%; transform:translateX(-50%);
+        width:120px; height:28px;
+        background:#111;
+        border-radius:16px;
+        z-index:10;
+      }
+    }
+
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:16px; }
+    .topbar h1 { font-size:1.1em; margin:0; }
+    .hamburger { background:none; border:1px solid #444; color:#fff; font-size:1.3em; padding:2px 10px; border-radius:6px; }
+    .navmenu { display:none; flex-direction:column; background:#111; border-radius:8px; padding:10px; margin:0 16px 10px; }
     .navmenu.open { display:flex; }
     .navmenu a { color:#4dd0e1; padding:8px; text-decoration:none; }
+
+    .dash-nav { display:flex; justify-content:space-between; padding:0 16px; margin-bottom:10px; }
+    .dash-nav button { background:#4dd0e1; color:#000; border:none; border-radius:6px; padding:8px 14px; }
+
+    .cellgrid { display:grid; gap:3px; padding:0 3px 3px; min-height:600px; }
+    .layout-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .layout-2up { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .layout-3up { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    .layout-3up .c0 { grid-column: 1 / 3; }
+    .layout-2x2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+    .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+    .dcell .cap { font-size:0.85em; color:#4dd0e1; }
+    .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; }
+    .dcell .warn { color:#ff4444; }
+    .empty-msg { padding:20px; text-align:center; color:#888; }
   </style>
 </head>
 <body>
-  <div class="navbar">
-    <h1 style="margin:0">MSP-DASH</h1>
-    <button class="hamburger" onclick="document.getElementById('navmenu').classList.toggle('open')">&#9776;</button>
+  <div class="phone-outer">
+    <div class="topbar">
+      <h1>MSP-DASH</h1>
+      <button class="hamburger" onclick="document.getElementById('navmenu').classList.toggle('open')">&#9776;</button>
+    </div>
+    <div class="navmenu" id="navmenu">
+      <a href="/can">Raw CAN Monitor &rarr;</a>
+      <a href="/update">Firmware Update &rarr;</a>
+      <a href="/gauges">Display Gauge Config &rarr;</a>
+      <a href="/web-config">Web Dashboard Config &rarr;</a>
+      <a href="/sd">SD Card &rarr;</a>
+    </div>
+    <div class="dash-nav">
+      <button onclick="changeWebPage(-1)">&larr; Prev</button>
+      <button onclick="changeWebPage(1)">Next &rarr;</button>
+    </div>
+    <div class="cellgrid" id="cellgrid"></div>
   </div>
-  <div class="navmenu" id="navmenu">
-    <a href="/can">Raw CAN Monitor &rarr;</a>
-    <a href="/update">Firmware Update &rarr;</a>
-    <a href="/gauges">Gauge Config &rarr;</a>
-    <a href="/sd">SD Card &rarr;</a>
-  </div>
-  <p style="text-align:center; margin-top:10px;">
-    <button onclick="pageNav(-1)">&larr; Prev Page</button>
-    <button onclick="pageNav(1)">Next Page &rarr;</button>
-  </p>
+
   <script>
-    function pageNav(delta) {
-      fetch("/page-nav", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded"}, body: "delta=" + delta });
+    // NOTE: cells currently render as plain text (caption + live
+    // number) regardless of configured gauge_type (needle/half-moon/
+    // number) - true graphical needle rendering for the web view is
+    // part of the separate HTML5 live-preview feature, not yet built.
+    const LAYOUT_CLASSES = ["layout-1", "layout-2up", "layout-3up", "layout-2x2"];
+    let webPages = [];
+    let currentWebPage = 0;
+    let signalValues = {};
+
+    function render() {
+      const grid = document.getElementById("cellgrid");
+      if (webPages.length === 0) {
+        grid.className = "cellgrid";
+        grid.innerHTML = "<p class='empty-msg'>No web dashboard pages configured.<br>Visit Web Dashboard Config in the menu.</p>";
+        return;
+      }
+      const page = webPages[currentWebPage];
+      grid.className = "cellgrid " + LAYOUT_CLASSES[page.layout];
+      grid.innerHTML = page.cells.map((c, i) => {
+        if (!c.enabled) return `<div class="dcell c${i}"></div>`;
+        const raw = signalValues[c.signal];
+        const value = (raw === undefined) ? "--" : (raw / c.value_divisor).toFixed(1);
+        const displayVal = raw === undefined ? value : parseFloat(value);
+        const isWarn = c.has_warning && raw !== undefined && (c.warning_above ? displayVal > c.warning_threshold : displayVal < c.warning_threshold);
+        return `<div class="dcell c${i}"><div class="cap">${c.caption}</div><div class="val ${isWarn?'warn':''}">${value}</div></div>`;
+      }).join("");
     }
-  </script>
-  <div style="text-align:center; margin-top:10px;">
-    <label>ECU: <select id="ecuSelect">
-      <option value="0">rusEFI</option>
-      <option value="1">MegaSquirt</option>
-      <option value="2">LinkECU</option>
-    </select></label>
-    <button onclick="saveEcu()">Save</button>
-  </div>
-  <div class="grid">
-    <div class="cell"><div class="label">CLT (F)</div><div class="value" id="clt">--</div></div>
-    <div class="cell"><div class="label">MAP (kPa)</div><div class="value" id="map">--</div></div>
-    <div class="cell"><div class="label">AFR</div><div class="value" id="afr">--</div></div>
-    <div class="cell"><div class="label">OIL PRESS (kPa)</div><div class="value" id="oilp">--</div></div>
-    <div class="cell"><div class="label">OIL TEMP (F)</div><div class="value" id="oilt">--</div></div>
-    <div class="cell"><div class="label">FUEL PRESS (kPa)</div><div class="value" id="fuelp">--</div></div>
-    <div class="cell"><div class="label">ETH %</div><div class="value" id="flex">--</div></div>
-  </div>
-  <script>
-    fetch("/ecu").then(r => r.json()).then(d => { document.getElementById("ecuSelect").value = d.ecu; });
-    function saveEcu() {
-      const val = document.getElementById("ecuSelect").value;
-      fetch("/ecu", { method: "POST", headers: {"Content-Type":"application/x-www-form-urlencoded"}, body: "ecu=" + val });
+
+    function changeWebPage(delta) {
+      if (webPages.length === 0) return;
+      currentWebPage = (currentWebPage + delta + webPages.length) % webPages.length;
+      render();
     }
+
+    async function loadPages() {
+      const res = await fetch("/web-pages.json");
+      webPages = await res.json();
+      render();
+    }
+
     const ws = new WebSocket("ws://" + location.host + "/ws");
     ws.onmessage = (event) => {
-      const d = JSON.parse(event.data);
-      document.getElementById("clt").textContent = d.clt.toFixed(0);
-      document.getElementById("map").textContent = d.map.toFixed(0);
-      document.getElementById("afr").textContent = d.afr.toFixed(1);
-      document.getElementById("oilp").textContent = d.oilp.toFixed(0);
-      document.getElementById("oilt").textContent = d.oilt.toFixed(0);
-      document.getElementById("fuelp").textContent = d.fuelp.toFixed(0);
-      document.getElementById("flex").textContent = d.flex.toFixed(0);
+      signalValues = JSON.parse(event.data);
+      render();
     };
+
+    loadPages();
   </script>
 </body>
 </html>
 )rawliteral";
-
 static const char CAN_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -337,6 +388,210 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     async function save() {
       document.getElementById("status").textContent = "Saving...";
       await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
+      document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+    }
+
+    async function applyColorsToAll() {
+      const needle = document.getElementById("bulkNeedle").value.substring(1);
+      const tick = document.getElementById("bulkTick").value.substring(1);
+      const bg = document.getElementById("bulkBg").value.substring(1);
+      for (const p of pages) {
+        for (const c of p.cells) {
+          c.needle_color = parseInt(needle, 16);
+          c.tick_color = parseInt(tick, 16);
+          c.bg_color = parseInt(bg, 16);
+        }
+      }
+      renderPages();
+      document.getElementById("status").textContent = "Applied locally - click Save to persist.";
+    }
+
+    load();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Web Dashboard Config</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
+    h1 { font-size: 1.2em; text-align:center; }
+    h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
+    .page-card { background:#0a0a0a; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .page-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+    .cell { background:#111; border-radius:8px; padding:10px; margin-top:10px; }
+    .cell label { display:block; font-size:0.78em; color:#4dd0e1; margin-top:5px; }
+    .cell input, .cell select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
+    .row2 { display:flex; gap:8px; }
+    .row2 > div { flex:1; }
+    button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
+    button.danger { background:#F44336; color:#fff; }
+    .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
+    #status { text-align:center; margin-top:10px; color:#4dd0e1; position:sticky; bottom:0; background:#000; padding:8px; }
+  </style>
+</head>
+<body>
+  <h1>Web Dashboard Configuration</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+
+  <div class="bulk">
+    <strong>Apply colors to ALL cells on ALL pages</strong>
+    <div class="row2">
+      <div><label>Needle <input type="color" id="bulkNeedle" value="#ffffff"></label></div>
+      <div><label>Tick/Dial <input type="color" id="bulkTick" value="#ffffff"></label></div>
+      <div><label>Background <input type="color" id="bulkBg" value="#000000"></label></div>
+    </div>
+    <button type="button" onclick="applyColorsToAll()">Apply to All</button>
+  </div>
+
+  <button type="button" onclick="addPage()">+ Add Page</button>
+  <div id="pages"></div>
+  <button onclick="save()">Save (reboot required to apply)</button>
+  <div id="status"></div>
+
+  <script>
+    const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
+    const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
+    const CELLS_PER_LAYOUT = [1, 2, 3, 4];
+    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    let pages = [];
+    let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
+
+    function emptyCell() {
+      return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
+        needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
+        has_warning:false, warning_threshold:0, warning_above:false };
+    }
+
+    function signalOptionsHtml(selected) {
+      // Sorted by activity (lowest age_ms first = most live), "never seen" last, name as secondary sort.
+      const sorted = signalActivity.slice().sort((a, b) => {
+        if (a.age_ms !== b.age_ms) return a.age_ms - b.age_ms;
+        return a.name.localeCompare(b.name);
+      });
+      let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
+      for (const s of sorted) {
+        if (s.id === 0) continue;
+        const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
+        html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
+      }
+      return html;
+    }
+
+    function renderCell(pIdx, cIdx, c) {
+      return `
+        <div class="cell">
+          <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
+          ${!c.enabled ? "" : `
+          <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
+          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value)">
+            ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
+          </select></label>
+          <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
+            <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>
+            <div><label>Rest <input type="number" value="${c.rest}" onchange="pages[${pIdx}].cells[${cIdx}].rest=parseInt(this.value)"></label></div>
+          </div>
+          <div class="row2">
+            <div><label>Value Divisor <input type="number" step="any" value="${c.value_divisor}" onchange="pages[${pIdx}].cells[${cIdx}].value_divisor=parseFloat(this.value)"></label></div>
+            <div><label>Tick Count <input type="number" value="${c.tick_count}" onchange="pages[${pIdx}].cells[${cIdx}].tick_count=parseInt(this.value)"></label></div>
+            <div><label>Major Every Nth <input type="number" value="${c.major_nth}" onchange="pages[${pIdx}].cells[${cIdx}].major_nth=parseInt(this.value)"></label></div>
+          </div>
+          <div class="row2">
+            <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
+            <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
+            <div><label>Value Text Size
+              <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
+                <option value="14" ${c.value_font_size===14?"selected":""}>Small</option>
+                <option value="28" ${c.value_font_size===28?"selected":""}>Medium</option>
+                <option value="36" ${c.value_font_size===36?"selected":""}>Large</option>
+              </select>
+            </label></div>
+          </div>
+          <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
+          <label><input type="checkbox" ${c.has_warning?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].has_warning=this.checked"> Warning enabled</label>
+          <div class="row2">
+            <div><label>Threshold <input type="number" value="${c.warning_threshold}" onchange="pages[${pIdx}].cells[${cIdx}].warning_threshold=parseFloat(this.value)"></label></div>
+            <div><label>Direction
+              <select onchange="pages[${pIdx}].cells[${cIdx}].warning_above=(this.value==='1')">
+                <option value="1" ${c.warning_above?"selected":""}>Above</option>
+                <option value="0" ${!c.warning_above?"selected":""}>Below</option>
+              </select>
+            </label></div>
+          </div>
+          `}
+        </div>
+      `;
+    }
+
+    function changeLayout(pIdx, newLayout) {
+      pages[pIdx].layout = newLayout;
+      const needed = CELLS_PER_LAYOUT[newLayout];
+      while (pages[pIdx].cells.length < needed) pages[pIdx].cells.push(emptyCell());
+      renderPages();
+    }
+
+    function pageAction(pIdx, action) {
+      if (action === "delete") {
+        pages.splice(pIdx, 1);
+      } else if (action === "empty") {
+        pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
+      } else if (action === "copy") {
+        const copy = JSON.parse(JSON.stringify(pages[pIdx]));
+        pages.push(copy);
+      }
+      renderPages();
+    }
+
+    function addPage() {
+      pages.push({ enabled:true, layout:0, cells:[emptyCell()] });
+      renderPages();
+    }
+
+    function renderPages() {
+      const container = document.getElementById("pages");
+      container.innerHTML = pages.map((p, pIdx) => {
+        const needed = CELLS_PER_LAYOUT[p.layout];
+        while (p.cells.length < needed) p.cells.push(emptyCell());
+        let cellsHtml = "";
+        for (let c = 0; c < needed; c++) cellsHtml += renderCell(pIdx, c, p.cells[c]);
+        return `
+          <div class="page-card">
+            <div class="page-header">
+              <strong>Page ${pIdx + 1}</strong>
+              <select onchange="changeLayout(${pIdx}, parseInt(this.value))">
+                ${LAYOUTS.map((l,v)=>`<option value="${v}" ${p.layout===v?"selected":""}>${l}</option>`).join("")}
+              </select>
+              <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
+              <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
+              <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>
+            </div>
+            ${cellsHtml}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function load() {
+      const [pagesRes, signalsRes] = await Promise.all([fetch("/web-pages.json"), fetch("/signals.json")]);
+      pages = await pagesRes.json();
+      signalActivity = await signalsRes.json();
+      renderPages();
+    }
+
+    async function save() {
+      document.getElementById("status").textContent = "Saving...";
+      await fetch("/web-pages", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
       document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
     }
 
@@ -597,6 +852,117 @@ void web_monitor_init(void) {
   server.on("/gauges", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", GAUGES_HTML);
   });
+
+  server.on("/web-config", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", WEBCFG_HTML);
+  });
+
+  server.on("/web-pages.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    PageConfig *pageConfigs = gauge_config_get_web_pages();
+    JsonDocument doc;
+    JsonArray pagesArr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_PAGES; i++) {
+      if (!pageConfigs[i].enabled) continue;
+      JsonObject pageObj = pagesArr.add<JsonObject>();
+      pageObj["enabled"] = pageConfigs[i].enabled;
+      pageObj["layout"] = (int)pageConfigs[i].layout;
+      JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
+      int numCells = gauge_config_cells_for_layout(pageConfigs[i].layout);
+      for (int c = 0; c < numCells; c++) {
+        CellConfig *cell = &pageConfigs[i].cells[c];
+        JsonObject o = cellsArr.add<JsonObject>();
+        o["enabled"] = cell->enabled;
+        o["signal"] = (int)cell->signal;
+        o["gauge_type"] = (int)cell->gauge_type;
+        o["min"] = cell->min_val;
+        o["max"] = cell->max_val;
+        o["rest"] = cell->rest_val;
+        o["caption"] = cell->caption;
+        o["needle_color"] = cell->needle_color;
+        o["tick_color"] = cell->tick_color;
+        o["bg_color"] = cell->bg_color;
+        o["value_divisor"] = cell->value_divisor;
+        o["tick_count"] = cell->tick_count;
+        o["major_nth"] = cell->major_nth;
+        o["refresh_hz"] = cell->refresh_hz;
+        o["show_value"] = cell->show_value;
+        o["value_font_size"] = cell->value_font_size;
+        o["has_warning"] = cell->has_warning;
+        o["warning_threshold"] = cell->warning_threshold;
+        o["warning_above"] = cell->warning_above;
+      }
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/web-pages", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      request->send(200, "text/plain", "OK");
+    },
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      static char webBodyBuf[24576]; // separate buffer from the display-config POST handler
+      if (index == 0) memset(webBodyBuf, 0, sizeof(webBodyBuf));
+      if (index + len < sizeof(webBodyBuf)) {
+        memcpy(webBodyBuf + index, data, len);
+      }
+      if (index + len == total) {
+        Serial.printf("Web dashboard config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)sizeof(webBodyBuf));
+        if (total >= sizeof(webBodyBuf)) {
+          Serial.println("WARNING: POST body may have been truncated - buffer too small!");
+        }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, webBodyBuf);
+        if (err) {
+          Serial.printf("Web dashboard config JSON parse FAILED: %s\n", err.c_str());
+        }
+        if (!err) {
+          PageConfig *pageConfigs = gauge_config_get_web_pages();
+          JsonArray pagesArr = doc.as<JsonArray>();
+          int i = 0;
+          for (JsonObject pageObj : pagesArr) {
+            if (i >= MAX_PAGES) break;
+            pageConfigs[i].enabled = pageObj["enabled"] | false;
+            pageConfigs[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
+            JsonArray cellsArr = pageObj["cells"];
+            int c = 0;
+            for (JsonObject o : cellsArr) {
+              if (c >= MAX_CELLS_PER_PAGE) break;
+              CellConfig *cell = &pageConfigs[i].cells[c];
+              cell->enabled = o["enabled"] | false;
+              cell->signal = (SignalId)(int)(o["signal"] | 0);
+              cell->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
+              cell->min_val = o["min"] | 0;
+              cell->max_val = o["max"] | 100;
+              cell->rest_val = o["rest"] | 0;
+              strlcpy(cell->caption, (o["caption"] | ""), GAUGE_CAPTION_MAXLEN);
+              cell->needle_color = (uint32_t)(long)(o["needle_color"] | 0xFFFFFF);
+              cell->tick_color = (uint32_t)(long)(o["tick_color"] | 0xFFFFFF);
+              cell->bg_color = (uint32_t)(long)(o["bg_color"] | 0x000000);
+              cell->value_divisor = o["value_divisor"] | 1.0f;
+              cell->tick_count = o["tick_count"] | 26;
+              cell->major_nth = o["major_nth"] | 5;
+              cell->refresh_hz = o["refresh_hz"] | 10;
+              cell->show_value = o["show_value"] | false;
+              cell->value_font_size = o["value_font_size"] | 28;
+              cell->has_warning = o["has_warning"] | false;
+              cell->warning_threshold = o["warning_threshold"] | 0.0f;
+              cell->warning_above = o["warning_above"] | false;
+              c++;
+            }
+            i++;
+          }
+          for (; i < MAX_PAGES; i++) {
+            pageConfigs[i].enabled = false;
+          }
+          gauge_config_web_save();
+        }
+      }
+    }
+  );
+
 
   server.on("/signals.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     JsonDocument doc;
@@ -884,10 +1250,18 @@ void web_monitor_loop(void) {
   ws.cleanupClients();
   if (ws.count() == 0) return; // no connected clients - skip building/sending JSON
 
-  char json[256];
-  snprintf(json, sizeof(json),
-    "{\"clt\":%.1f,\"map\":%.1f,\"afr\":%.2f,\"oilp\":%.1f,\"oilt\":%.1f,\"fuelp\":%.1f,\"flex\":%.1f}",
-    (double)g_clt_f, (double)g_boost_kpa, (double)g_afr, (double)g_oilp_kpa,
-    (double)g_oilt_f, (double)g_fuelp_kpa, (double)g_flex_pct);
+  // Generic broadcast - every signal's current value, keyed by its
+  // SignalId number. Replaces the old fixed set of named fields
+  // (clt/map/afr/etc), since the web dashboard's cells can now be
+  // configured to show ANY signal in ANY arrangement, independent of
+  // the physical display's own configuration.
+  JsonDocument doc;
+  for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE (0)
+    char key[4];
+    snprintf(key, sizeof(key), "%d", sig);
+    doc[key] = gauge_config_signal_value((SignalId)sig);
+  }
+  String json;
+  serializeJson(doc, json);
   ws.textAll(json);
 }

@@ -20,7 +20,9 @@
 #include <Arduino.h>
 
 static Preferences prefs;
+static Preferences webPrefs;
 static PageConfig s_pages[MAX_PAGES];
+static PageConfig s_webPages[MAX_PAGES];
 static uint32_t s_signalLastSeenMs[SIG_COUNT];
 
 int gauge_config_cells_for_layout(LayoutType layout) {
@@ -89,6 +91,19 @@ static void applyDefaults(void) {
                                     defs[i].cap, 0xFFFFFF, 0xFFFFFF, 0x000000, divisor, tickCount, majorNth,
                                     refreshHz, defs[i].warn, defs[i].thresh, defs[i].above);
   }
+}
+
+static void applyWebDefaults(void) {
+  memset(s_webPages, 0, sizeof(s_webPages));
+  // A simple glanceable default for a phone - one page, 2x2 grid of
+  // plain numbers (RPM, MAP/Boost, CLT, AFR) - independent of whatever
+  // the physical display's pages show.
+  s_webPages[0].enabled = true;
+  s_webPages[0].layout = LAYOUT_2X2;
+  s_webPages[0].cells[0] = makeCell(true, SIG_RPM, GAUGE_TYPE_NUMBER, 0, 9000, 0, "RPM", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, false, 0, false);
+  s_webPages[0].cells[1] = makeCell(true, SIG_MAP, GAUGE_TYPE_NUMBER, 0, 250, 100, "MAP", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, false, 0, false);
+  s_webPages[0].cells[2] = makeCell(true, SIG_CLT, GAUGE_TYPE_NUMBER, 65, 250, 65, "CLT", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 220, true);
+  s_webPages[0].cells[3] = makeCell(true, SIG_AFR, GAUGE_TYPE_NUMBER, 10, 20, 10, "AFR", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 15, true);
 }
 
 static void serializeCell(JsonObject o, CellConfig *c) {
@@ -226,6 +241,100 @@ int gauge_config_copy_page(int srcIndex) {
   memcpy(srcCells, s_pages[srcIndex].cells, sizeof(srcCells));
   s_pages[dest].layout = srcLayout;
   memcpy(s_pages[dest].cells, srcCells, sizeof(srcCells));
+  return dest;
+}
+
+void gauge_config_web_init(void) {
+  webPrefs.begin("webcfg2", false);
+  String json = webPrefs.getString("pages", "");
+
+  if (json.length() == 0) {
+    applyWebDefaults();
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) {
+    applyWebDefaults();
+    return;
+  }
+
+  JsonArray pagesArr = doc.as<JsonArray>();
+  int i = 0;
+  for (JsonObject pageObj : pagesArr) {
+    if (i >= MAX_PAGES) break;
+    s_webPages[i].enabled = pageObj["enabled"] | false;
+    s_webPages[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
+    JsonArray cellsArr = pageObj["cells"];
+    int j = 0;
+    for (JsonObject cellObj : cellsArr) {
+      if (j >= MAX_CELLS_PER_PAGE) break;
+      deserializeCell(cellObj, &s_webPages[i].cells[j]);
+      j++;
+    }
+    i++;
+  }
+}
+
+PageConfig *gauge_config_get_web_pages(void) {
+  return s_webPages;
+}
+
+void gauge_config_web_save(void) {
+  JsonDocument doc;
+  JsonArray pagesArr = doc.to<JsonArray>();
+  for (int i = 0; i < MAX_PAGES; i++) {
+    JsonObject pageObj = pagesArr.add<JsonObject>();
+    pageObj["enabled"] = s_webPages[i].enabled;
+    pageObj["layout"] = (int)s_webPages[i].layout;
+    JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
+    for (int j = 0; j < MAX_CELLS_PER_PAGE; j++) {
+      JsonObject cellObj = cellsArr.add<JsonObject>();
+      serializeCell(cellObj, &s_webPages[i].cells[j]);
+    }
+  }
+  String out;
+  serializeJson(doc, out);
+  webPrefs.putString("pages", out);
+}
+
+int gauge_config_web_add_page(void) {
+  for (int i = 0; i < MAX_PAGES; i++) {
+    if (!s_webPages[i].enabled) {
+      memset(&s_webPages[i], 0, sizeof(PageConfig));
+      s_webPages[i].enabled = true;
+      s_webPages[i].layout = LAYOUT_1CELL;
+      return i;
+    }
+  }
+  return -1;
+}
+
+void gauge_config_web_delete_page(int index) {
+  if (index < 0 || index >= MAX_PAGES) return;
+  for (int i = index; i < MAX_PAGES - 1; i++) {
+    s_webPages[i] = s_webPages[i + 1];
+  }
+  memset(&s_webPages[MAX_PAGES - 1], 0, sizeof(PageConfig));
+}
+
+void gauge_config_web_empty_page(int index) {
+  if (index < 0 || index >= MAX_PAGES) return;
+  LayoutType keepLayout = s_webPages[index].layout;
+  memset(&s_webPages[index].cells, 0, sizeof(s_webPages[index].cells));
+  s_webPages[index].layout = keepLayout;
+}
+
+int gauge_config_web_copy_page(int srcIndex) {
+  if (srcIndex < 0 || srcIndex >= MAX_PAGES) return -1;
+  int dest = gauge_config_web_add_page();
+  if (dest < 0) return -1;
+  LayoutType srcLayout = s_webPages[srcIndex].layout;
+  CellConfig srcCells[MAX_CELLS_PER_PAGE];
+  memcpy(srcCells, s_webPages[srcIndex].cells, sizeof(srcCells));
+  s_webPages[dest].layout = srcLayout;
+  memcpy(s_webPages[dest].cells, srcCells, sizeof(srcCells));
   return dest;
 }
 

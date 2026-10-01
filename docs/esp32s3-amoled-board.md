@@ -1263,3 +1263,58 @@ worst-case estimate). Also added explicit Serial logging - total body
 size, a warning if size reaches the buffer limit, and the specific
 parse error message on failure - so any future issue like this is
 visible immediately instead of silently dropped.
+
+## Independent web-dashboard config + phone-styled main page (2026-09-30)
+
+Built a fully SEPARATE page/cell configuration for the web browser
+dashboard, independent of the physical display's pages - same
+CellConfig/PageConfig/LayoutType/GaugeType types (the data model was
+already generic, not display-specific), just a parallel in-memory
+array, NVS key ("webcfg2"), and set of load/save/page-management
+functions (gauge_config_web_init/get_web_pages/web_save/
+web_add_page/web_delete_page/web_empty_page/web_copy_page).
+
+Default web dashboard: one page, 2x2 grid, plain-number cells showing
+RPM/MAP/CLT/AFR - a simple glanceable phone view, independent of
+whatever the physical display's 7 default gauges show.
+
+**New /web-config page**: a direct adaptation of the /gauges editor
+(same per-cell fields, same layout picker, same page actions) pointed
+at new /web-pages.json (GET) and /web-pages (POST) endpoints instead
+of the display ones - kept as a genuinely separate editor/template
+rather than parameterizing one shared template, to avoid any risk of
+cross-contaminating the already-working display editor.
+
+**Main page (/) completely rewritten**:
+- Phone-frame styling: content constrained to iPhone 15 Pro Max's CSS
+  viewport (430x932 points - the relevant number for layout, not the
+  raw pixel resolution). On screens >=500px wide (clearly not an
+  actual phone), wraps the content in a phone-mockup frame (rounded
+  corners, border, shadow, simple dynamic-island-style notch via a
+  ::before pseudo-element) - on an actual phone's narrow viewport, no
+  extra framing, content fills naturally.
+- Single-page-at-a-time rendering (matches the reference app's own
+  paradigm, and fits a phone's limited height better than stacking all
+  pages), with Prev/Next buttons cycling through the web-dashboard's
+  own configured pages (fully client-side, independent of the physical
+  display's current page/BOOT button state).
+- Dynamic grid rendering via CSS Grid, one class per layout
+  (layout-1/2up/3up/2x2), matching the same 4 fixed layouts used
+  throughout.
+- Hamburger menu, now includes both config editors (Display Gauge
+  Config -> /gauges, Web Dashboard Config -> /web-config).
+
+**Generalized WebSocket broadcast**: replaced the old fixed
+{"clt":...,"map":...,...} shape (7 hardcoded named fields) with a
+generic {"<signal_id>": value, ...} object covering all 10 signals -
+necessary since the web dashboard's cells can now be configured to show
+ANY signal in ANY arrangement, not a fixed predetermined set.
+
+SCOPE NOTE: cells currently render as plain text (caption + live
+number) on the web dashboard regardless of configured gauge_type
+(needle/half-moon/number) - true graphical needle/half-moon rendering
+for the browser is part of the separate HTML5 live-preview feature
+(requested, not yet built) - flagged clearly rather than attempting
+both in one pass.
+
+NOT yet bench-tested as of this writing.
