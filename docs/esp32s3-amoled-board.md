@@ -1070,3 +1070,12 @@ setting already works) rather than a separate dedicated page - flagged
 in case a genuinely separate page was wanted instead.
 
 NOT yet bench-tested as of this writing.
+
+## Caption positioning: 3/4 down, centered (2026-09-30)
+
+Changed caption positioning from LV_ALIGN_BOTTOM_MID with a fixed -70px
+offset to LV_ALIGN_TOP_MID with a +350px offset (350 = 75% of the
+466px page height) - matches the circular gauge shape better per
+request ("3/4 below top, center from left to right"). The value label
+(when shown) is positioned relative to the caption, so it automatically
+follows this change without needing a separate edit.

@@ -137,7 +137,7 @@ static void build_full_gauge_page(int index, GaugeSlotConfig *cfg) {
   lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
   lv_obj_set_style_text_font(capLabel, &lv_font_montserrat_28, 0); // caption stays at 28 - 36 was reserved for the tick numbers specifically, per request
   lv_label_set_text(capLabel, cfg->caption);
-  lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -70);
+  lv_obj_align(capLabel, LV_ALIGN_TOP_MID, 0, 350); // 3/4 of the way down the 466px page, centered horizontally - matches the circular gauge's shape better than a fixed bottom-anchored offset
 
   lv_obj_t *valueLabel = NULL;
   if (cfg->show_value) {
