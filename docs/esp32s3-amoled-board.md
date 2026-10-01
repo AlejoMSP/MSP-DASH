@@ -1010,3 +1010,19 @@ physically mounted and the car is moving):
 
 NOT yet bench-tested as of this writing - this is a substantial new
 subsystem (IMU + custom widget), expect some iteration once tested.
+
+## Touch swipe navigation disabled (2026-09-30)
+
+Added ENABLE_TOUCH_SWIPE_NAV (0/1) as a single master toggle in
+gauge_app.c - set to 0 per request, since this gauge cluster doesn't
+need a touchscreen. BOOT button is now the only page-navigation
+method.
+
+Chose "disable" over "remove entirely": Touch_Init() is intentionally
+still called in setup() - it shares the same physical I2C bus the IMU
+depends on for the G-meter page (confirmed dependency from the earlier
+IMU integration work), so removing touch initialization outright would
+have broken the G-meter too. Disabling at the gesture-callback level
+(a single early-return, rather than touching the 3 call sites that
+attach it) avoids that risk entirely while fully satisfying "swipe does
+nothing now" - easily reversible by flipping the define back to 1.

@@ -188,9 +188,22 @@ static void build_numbers_page(int index, GaugeSlotConfig *slots, int slotCount)
   pages[index].has_warning = false;
 }
 
+// Swipe navigation disabled per request - this gauge cluster doesn't
+// need a touchscreen, BOOT button is the only navigation method now.
+// Touch_Init() itself is intentionally left running elsewhere (it
+// shares the same physical I2C bus the IMU depends on for the G-meter
+// page - disabling navigation here, rather than removing touch
+// entirely, avoids any risk to that shared dependency). Flip to 1 to
+// re-enable swipe without needing to touch the 3 call sites that
+// attach this callback.
+#define ENABLE_TOUCH_SWIPE_NAV 0
+
 // Fires from within LVGL's own task context - safe to call
 // lv_disp_load_scr() directly here.
 static void gesture_event_cb(lv_event_t *e) {
+#if !ENABLE_TOUCH_SWIPE_NAV
+  return;
+#endif
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
   if (dir == LV_DIR_LEFT) {
     switch_to_page((s_current_page + 1) % s_num_active_pages);
