@@ -1245,3 +1245,21 @@ This completes the 3-stage page/cell redesign. NOT yet bench-tested as
 of this writing - this was the largest architectural change in the
 project's history, spanning 3 stages across the data model, rendering,
 and web UI.
+
+## Fixed silent save failure: undersized POST body buffer (2026-09-30)
+
+Root cause of "deleting pages doesn't persist after reboot": the
+/gauges POST handler buffered the incoming JSON body into a fixed
+bodyBuf[8192] before parsing. With the page/cell model, a fully
+populated payload (up to 8 pages x 4 cells x ~18 fields/cell) can
+genuinely exceed 8KB once multi-cell layouts (2x2 etc) are in use. On
+overflow, the buffer silently truncated, deserializeJson() failed on
+the malformed result, and the handler returned without saving anything
+at all - looked exactly like "my delete did nothing" because nothing
+from that save attempt took effect, not just the delete specifically.
+
+Fixed: increased buffer to 24576 bytes (comfortable margin above the
+worst-case estimate). Also added explicit Serial logging - total body
+size, a warning if size reaches the buffer limit, and the specific
+parse error message on failure - so any future issue like this is
+visible immediately instead of silently dropped.

@@ -662,14 +662,27 @@ void web_monitor_init(void) {
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static char bodyBuf[8192];
+      // Sized generously: 8 pages x 4 cells x ~18 fields/cell can
+      // genuinely exceed 8KB once multi-cell layouts (2x2 etc) are in
+      // use - the old 8192 buffer silently truncated larger payloads,
+      // causing deserializeJson() to fail and the whole save to be
+      // silently dropped (looked like "nothing happened", including
+      // deletes never actually persisting).
+      static char bodyBuf[24576];
       if (index == 0) memset(bodyBuf, 0, sizeof(bodyBuf));
       if (index + len < sizeof(bodyBuf)) {
         memcpy(bodyBuf + index, data, len);
       }
       if (index + len == total) {
+        Serial.printf("Gauge config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)sizeof(bodyBuf));
+        if (total >= sizeof(bodyBuf)) {
+          Serial.println("WARNING: POST body may have been truncated - buffer too small!");
+        }
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, bodyBuf);
+        if (err) {
+          Serial.printf("Gauge config JSON parse FAILED: %s\n", err.c_str());
+        }
         if (!err) {
           PageConfig *pageConfigs = gauge_config_get_pages();
           JsonArray pagesArr = doc.as<JsonArray>();
