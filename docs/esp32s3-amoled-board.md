@@ -1095,3 +1095,31 @@ option to the requested "3/4 down, centered" - centered horizontally,
 though anchored at the very bottom edge rather than exactly 75% down).
 A fully custom-built FPS counter would be needed for exact positioning,
 not pursued for now.
+
+## OTA firmware updates enabled (2026-09-30)
+
+Confirmed first: our current partition scheme (app3M_fat9M_16MB)
+genuinely has dual OTA-capable app slots (app0/ota_0, app1/ota_1, each
+3MB, plus the otadata tracking partition) - verified directly from the
+actual partition CSV, not assumed from the scheme's name alone.
+
+New /update web page + POST /update endpoint, using Arduino's built-in
+Update library (no third-party OTA library needed) - same chunked
+upload pattern already used successfully for SD file uploads
+(ESPAsyncWebServer's upload callback), just targeting the OTA partition
+via Update.begin()/write()/end() instead of a file. Uses
+UPDATE_SIZE_UNKNOWN since the upload callback doesn't expose total
+content-length directly - Update.h sizes itself from actual bytes
+written. Automatically reboots (ESP.restart()) on successful update.
+
+Upload page shows a progress bar (via XMLHttpRequest's upload.onprogress,
+since fetch() doesn't expose upload progress) and warns not to close
+the page or power off during upload.
+
+To get the .bin file to upload: arduino-cli's compile output includes
+the compiled binary - check the sketch's build cache directory (printed
+near the end of a verbose compile, or findable via
+"arduino-cli compile --fqbn ... --build-path <dir>" to force an
+accessible output location) for a file ending in .ino.bin.
+
+NOT yet bench-tested as of this writing.

@@ -29,6 +29,7 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <Update.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 
 #define SD_MOUNT_POINT "/sd_card"
@@ -57,6 +58,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <h1>MSP-DASH Live Monitor</h1>
   <p style="text-align:center">
     <a href="/can" style="color:#4dd0e1">Raw CAN Monitor &rarr;</a> &nbsp;|&nbsp;
+    <a href="/update" style="color:#4dd0e1">Firmware Update &rarr;</a> &nbsp;|&nbsp;
     <a href="/gauges" style="color:#4dd0e1">Gauge Config &rarr;</a> &nbsp;|&nbsp;
     <a href="/sd" style="color:#4dd0e1">SD Card &rarr;</a>
   </p>
@@ -322,6 +324,69 @@ static const char SD_HTML[] PROGMEM = R"rawliteral(
       refresh();
     });
     refresh();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+static const char OTA_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Firmware Update</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
+    h1 { font-size: 1.2em; text-align:center; }
+    #updateForm { margin-top:20px; background:#111; padding:16px; border-radius:8px; }
+    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
+    #bar { width:100%; background:#222; border-radius:6px; margin-top:10px; height:20px; overflow:hidden; }
+    #barFill { height:100%; width:0%; background:#4dd0e1; }
+    .warn { color:#ff8800; }
+  </style>
+</head>
+<body>
+  <h1>Firmware Update (OTA)</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <p class="warn">Upload the .ino.bin file from your build output. The board reboots automatically on success - do not close this page or power off the board during upload.</p>
+  <form id="updateForm">
+    <input type="file" id="fileInput" accept=".bin">
+    <button type="submit">Upload and Flash</button>
+    <div id="bar"><div id="barFill"></div></div>
+    <div id="status"></div>
+  </form>
+  <script>
+    document.getElementById("updateForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const file = document.getElementById("fileInput").files[0];
+      if (!file) return;
+      const status = document.getElementById("status");
+      const barFill = document.getElementById("barFill");
+      status.textContent = "Uploading...";
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/update");
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const pct = Math.round((evt.loaded / evt.total) * 100);
+          barFill.style.width = pct + "%";
+          status.textContent = "Uploading... " + pct + "%";
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          status.textContent = "Update successful - rebooting...";
+        } else {
+          status.textContent = "Update FAILED: " + xhr.responseText;
+        }
+      };
+      xhr.onerror = () => { status.textContent = "Upload error - connection lost (board may have already rebooted)."; };
+
+      const formData = new FormData();
+      formData.append("file", file);
+      xhr.send(formData);
+    });
   </script>
 </body>
 </html>
@@ -615,6 +680,44 @@ void web_monitor_init(void) {
       if (final && s_uploadFile) {
         fclose(s_uploadFile);
         s_uploadFile = NULL;
+      }
+    }
+  );
+
+  server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", OTA_HTML);
+  });
+
+  server.on("/update", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *response = request->beginResponse(ok ? 200 : 500, "text/plain", ok ? "OK" : "Update failed");
+      response->addHeader("Connection", "close");
+      request->send(response);
+      if (ok) {
+        delay(500); // let the response actually reach the browser before rebooting
+        ESP.restart();
+      }
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (index == 0) {
+        Serial.printf("OTA update starting: %s\n", filename.c_str());
+        // UPDATE_SIZE_UNKNOWN since AsyncWebServer doesn't give us the
+        // total content-length at this callback point - Update.h
+        // handles this fine, sizing itself from the actual data written.
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+          Update.printError(Serial);
+        }
+      }
+      if (Update.write(data, len) != len) {
+        Update.printError(Serial);
+      }
+      if (final) {
+        if (Update.end(true)) {
+          Serial.printf("OTA update complete: %u bytes\n", (unsigned)(index + len));
+        } else {
+          Update.printError(Serial);
+        }
       }
     }
   );
