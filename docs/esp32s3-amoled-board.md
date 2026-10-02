@@ -1405,3 +1405,21 @@ auxiliary hardware is the identical Waveshare ESP32-S3 1.43" AMOLED
 board.
 
 NOT yet bench-tested as of this writing.
+
+## Fixed /gauges and /web-config "hanging" with no page cards (2026-10-01)
+
+Root cause: the page's load() function fired /gauges.json (or
+/web-pages.json) and /signals.json SIMULTANEOUSLY via Promise.all, with
+no error handling at all. This board juggles CAN polling, LVGL
+rendering, and the web server concurrently - under that load, one of
+the two simultaneous requests occasionally stalled or failed, and the
+whole load() silently threw, leaving renderPages() never called - the
+page just sat there with the bulk-color section visible but nothing
+below it, no error shown, looking like a hang.
+
+Fixed in /gauges, /web-config, and /log-channels (same pattern existed
+in all three): fetches are now sequential instead of concurrent
+(reduces simultaneous connection pressure on the board's web server),
+and load() is wrapped in try/catch - any failure now shows a visible
+"Failed to load" message with a Retry button instead of failing
+silently.

@@ -380,10 +380,22 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     }
 
     async function load() {
-      const [pagesRes, signalsRes] = await Promise.all([fetch("/gauges.json"), fetch("/signals.json")]);
-      pages = await pagesRes.json();
-      signalActivity = await signalsRes.json();
-      renderPages();
+      document.getElementById("status").textContent = "Loading...";
+      try {
+        // Sequential, not Promise.all - this board juggles CAN
+        // polling, LVGL rendering and the web server all at once, and
+        // firing two requests at the exact same instant occasionally
+        // stalls one of them with no error shown (looked like the page
+        // just hanging with nothing below the bulk-color section).
+        const pagesRes = await fetch("/gauges.json");
+        pages = await pagesRes.json();
+        const signalsRes = await fetch("/signals.json");
+        signalActivity = await signalsRes.json();
+        renderPages();
+        document.getElementById("status").textContent = "";
+      } catch (e) {
+        document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
+      }
     }
 
     async function save() {
@@ -584,10 +596,17 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
     }
 
     async function load() {
-      const [pagesRes, signalsRes] = await Promise.all([fetch("/web-pages.json"), fetch("/signals.json")]);
-      pages = await pagesRes.json();
-      signalActivity = await signalsRes.json();
-      renderPages();
+      document.getElementById("status").textContent = "Loading...";
+      try {
+        const pagesRes = await fetch("/web-pages.json");
+        pages = await pagesRes.json();
+        const signalsRes = await fetch("/signals.json");
+        signalActivity = await signalsRes.json();
+        renderPages();
+        document.getElementById("status").textContent = "";
+      } catch (e) {
+        document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
+      }
     }
 
     async function save() {
@@ -702,9 +721,15 @@ static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
       `).join("");
     }
     async function load() {
-      const res = await fetch("/log-channels.json");
-      channels = await res.json();
-      render();
+      document.getElementById("status").textContent = "Loading...";
+      try {
+        const res = await fetch("/log-channels.json");
+        channels = await res.json();
+        render();
+        document.getElementById("status").textContent = "";
+      } catch (e) {
+        document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
+      }
     }
     async function save() {
       document.getElementById("status").textContent = "Saving...";
