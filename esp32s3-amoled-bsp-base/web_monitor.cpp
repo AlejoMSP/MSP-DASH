@@ -108,6 +108,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <a href="/update">Firmware Update &rarr;</a>
       <a href="/gauges">Display Gauge Config &rarr;</a>
       <a href="/web-config">Web Dashboard Config &rarr;</a>
+      <a href="/log-channels">Log Channels &rarr;</a>
       <a href="/sd">SD Card &rarr;</a>
     </div>
     <div class="dash-nav">
@@ -671,6 +672,51 @@ static const char SD_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Log Channels</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
+    h1 { font-size: 1.2em; text-align:center; }
+    label { display:flex; align-items:center; gap:10px; padding:10px; background:#111; border-radius:6px; margin-bottom:6px; }
+    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin-top:10px; }
+    #status { text-align:center; margin-top:10px; color:#4dd0e1; }
+  </style>
+</head>
+<body>
+  <h1>Log Channels</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <p style="text-align:center; color:#888; font-size:0.9em;">Choose which signals get written to the SD card log - independent of what's shown on any display. Logging only writes rows once RPM exceeds 800.</p>
+  <div id="channels"></div>
+  <button onclick="save()">Save</button>
+  <div id="status"></div>
+  <script>
+    let channels = [];
+    function render() {
+      document.getElementById("channels").innerHTML = channels.map(c => `
+        <label><input type="checkbox" ${c.enabled?"checked":""} onchange="channels[${c.id}].enabled=this.checked"> ${c.name}</label>
+      `).join("");
+    }
+    async function load() {
+      const res = await fetch("/log-channels.json");
+      channels = await res.json();
+      render();
+    }
+    async function save() {
+      document.getElementById("status").textContent = "Saving...";
+      await fetch("/log-channels", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(channels) });
+      document.getElementById("status").textContent = "Saved.";
+    }
+    load();
+  </script>
+</body>
+</html>
+)rawliteral";
+
 static const char OTA_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -1186,6 +1232,51 @@ void web_monitor_init(void) {
       if (final && s_uploadFile) {
         fclose(s_uploadFile);
         s_uploadFile = NULL;
+      }
+    }
+  );
+
+  server.on("/log-channels", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", LOGCHANS_HTML);
+  });
+
+  server.on("/log-channels.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE
+      JsonObject o = arr.add<JsonObject>();
+      o["id"] = sig;
+      o["name"] = gauge_config_signal_name((SignalId)sig);
+      o["enabled"] = gauge_config_is_log_enabled((SignalId)sig);
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/log-channels", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      request->send(200, "text/plain", "OK");
+    },
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      static char logChanBuf[2048]; // small payload - 10 signals worth of {id,name,enabled}
+      if (index == 0) memset(logChanBuf, 0, sizeof(logChanBuf));
+      if (index + len < sizeof(logChanBuf)) {
+        memcpy(logChanBuf + index, data, len);
+      }
+      if (index + len == total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, logChanBuf);
+        if (!err) {
+          JsonArray arr = doc.as<JsonArray>();
+          for (JsonObject o : arr) {
+            int id = o["id"] | 0;
+            bool enabled = o["enabled"] | false;
+            gauge_config_set_log_enabled((SignalId)id, enabled);
+          }
+          gauge_config_log_save();
+        }
       }
     }
   );

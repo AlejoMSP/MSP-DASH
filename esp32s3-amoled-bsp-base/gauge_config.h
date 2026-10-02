@@ -40,6 +40,7 @@ typedef enum {
   GAUGE_TYPE_NEEDLE = 0,   // full needle meter (what every gauge was before this redesign)
   GAUGE_TYPE_NUMBER,       // plain big digital readout, no needle
   GAUGE_TYPE_HALFMOON,     // 180-degree meter (previously only available full-page)
+  GAUGE_TYPE_HISTOGRAM,    // scrolling strip-chart/trend line (oscilloscope-style) of recent values
   GAUGE_TYPE_COUNT
 } GaugeType;
 
@@ -128,6 +129,15 @@ void gauge_config_mark_signal_active(SignalId sig);
 // Milliseconds since this signal was last updated (very large if never
 // seen) - lower means "more active/live" for sorting purposes.
 uint32_t gauge_config_signal_age_ms(SignalId sig);
+
+// ---- Which signals get logged to SD - independent of what's actually
+// displayed on any page/cell, since you may want to log more (or
+// fewer) channels than you're looking at. A separate persisted
+// bool-per-signal list, with its own small web config page. ----
+void gauge_config_log_init(void);
+bool gauge_config_is_log_enabled(SignalId sig);
+void gauge_config_set_log_enabled(SignalId sig, bool enabled);
+void gauge_config_log_save(void);
 
 #ifdef __cplusplus
 }

@@ -6,12 +6,15 @@
   Arduino's SD.h/File class, matching this board's ESP-IDF-native VFS
   mount approach (sd_storage.cpp).
 
-  Always-on from boot to power-off - no start/stop trigger, per project
-  decision.
+  Channel selection: logs whichever signals are enabled via the
+  separate Log Channels config (gauge_config_is_log_enabled) -
+  independent of what's actually displayed on any page/cell.
 
-  Updated for the page/cell config redesign - iterates every enabled
-  cell across every enabled page (instead of the old flat gauge-slot
-  array) to build the CSV header and each logged row.
+  RPM-gated: only writes rows once RPM exceeds 800 (engine running),
+  rather than logging continuously from power-on. The file itself opens
+  once per boot as before; rows are just skipped while RPM is at or
+  below the threshold, rather than opening/closing many small files
+  each time RPM crosses it.
 */
 
 #include "sd_logging.h"
@@ -22,12 +25,14 @@
 #include <stdio.h>
 
 #define SD_MOUNT_POINT "/sd_card"
+#define LOGGING_RPM_THRESHOLD 800.0f
 
 static Preferences s_prefs;
 static char s_logPath[300];
 static bool s_loggingReady = false;
 static unsigned long s_lastLogMs = 0;
 static const unsigned long LOG_INTERVAL_MS = 500;
+static volatile bool s_isLoggingActive = false; // true only while rows are actually being written (RPM above threshold) - drives the on-screen blinking indicator
 
 void sd_logging_init(void) {
   if (!sd_storage_is_mounted()) {
@@ -46,27 +51,29 @@ void sd_logging_init(void) {
     return;
   }
 
-  // Header row: millis + caption of every enabled cell on every
-  // enabled page.
-  PageConfig *pages = gauge_config_get_pages();
   fprintf(f, "millis");
-  for (int p = 0; p < MAX_PAGES; p++) {
-    if (!pages[p].enabled) continue;
-    int numCells = gauge_config_cells_for_layout(pages[p].layout);
-    for (int c = 0; c < numCells; c++) {
-      if (!pages[p].cells[c].enabled) continue;
-      fprintf(f, ",%s", pages[p].cells[c].caption);
-    }
+  for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE
+    if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
+    fprintf(f, ",%s", gauge_config_signal_name((SignalId)sig));
   }
   fprintf(f, "\n");
   fclose(f);
 
   s_loggingReady = true;
-  Serial.printf("SD logging ready: %s\n", s_logPath);
+  Serial.printf("SD logging ready: %s (writes rows only once RPM > %.0f)\n", s_logPath, LOGGING_RPM_THRESHOLD);
+}
+
+bool sd_logging_is_active(void) {
+  return s_isLoggingActive;
 }
 
 void sd_logging_loop(void) {
   if (!s_loggingReady) return;
+
+  bool engineRunning = gauge_config_signal_has_data(SIG_RPM) && gauge_config_signal_value(SIG_RPM) > LOGGING_RPM_THRESHOLD;
+  s_isLoggingActive = engineRunning;
+  if (!engineRunning) return;
+
   unsigned long now = millis();
   if (now - s_lastLogMs < LOG_INTERVAL_MS) return;
   s_lastLogMs = now;
@@ -74,16 +81,10 @@ void sd_logging_loop(void) {
   FILE *f = fopen(s_logPath, "a");
   if (!f) return;
 
-  PageConfig *pages = gauge_config_get_pages();
   fprintf(f, "%lu", now);
-  for (int p = 0; p < MAX_PAGES; p++) {
-    if (!pages[p].enabled) continue;
-    int numCells = gauge_config_cells_for_layout(pages[p].layout);
-    for (int c = 0; c < numCells; c++) {
-      if (!pages[p].cells[c].enabled) continue;
-      float value = gauge_config_signal_value(pages[p].cells[c].signal);
-      fprintf(f, ",%.3f", value);
-    }
+  for (int sig = 1; sig < SIG_COUNT; sig++) {
+    if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
+    fprintf(f, ",%.3f", gauge_config_signal_value((SignalId)sig));
   }
   fprintf(f, "\n");
   fclose(f);

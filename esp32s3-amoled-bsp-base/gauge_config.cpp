@@ -21,9 +21,11 @@
 
 static Preferences prefs;
 static Preferences webPrefs;
+static Preferences logPrefs;
 static PageConfig s_pages[MAX_PAGES];
 static PageConfig s_webPages[MAX_PAGES];
 static uint32_t s_signalLastSeenMs[SIG_COUNT];
+static bool s_logEnabled[SIG_COUNT];
 
 int gauge_config_cells_for_layout(LayoutType layout) {
   switch (layout) {
@@ -317,4 +319,34 @@ uint32_t gauge_config_signal_age_ms(SignalId sig) {
   if (sig < 0 || sig >= SIG_COUNT) return UINT32_MAX;
   if (s_signalLastSeenMs[sig] == 0) return UINT32_MAX; // never seen
   return millis() - s_signalLastSeenMs[sig];
+}
+
+void gauge_config_log_init(void) {
+  logPrefs.begin("logchans", false);
+  for (int i = 0; i < SIG_COUNT; i++) {
+    // Default: log everything - user can narrow down via the Log
+    // Channels web page. Stored as one bit per signal in a single
+    // 32-bit value for simplicity (SIG_COUNT is 11, comfortably fits).
+    char key[8];
+    snprintf(key, sizeof(key), "s%d", i);
+    s_logEnabled[i] = logPrefs.getBool(key, true);
+  }
+}
+
+bool gauge_config_is_log_enabled(SignalId sig) {
+  if (sig < 0 || sig >= SIG_COUNT) return false;
+  return s_logEnabled[sig];
+}
+
+void gauge_config_set_log_enabled(SignalId sig, bool enabled) {
+  if (sig < 0 || sig >= SIG_COUNT) return;
+  s_logEnabled[sig] = enabled;
+}
+
+void gauge_config_log_save(void) {
+  for (int i = 0; i < SIG_COUNT; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "s%d", i);
+    logPrefs.putBool(key, s_logEnabled[i]);
+  }
 }

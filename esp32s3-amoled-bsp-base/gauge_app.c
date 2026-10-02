@@ -24,6 +24,7 @@
 
 #include "gauge_app.h"
 #include "gauge_config.h"
+#include "sd_logging.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -90,6 +91,8 @@ typedef struct {
   lv_obj_t *meter;         // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
   lv_obj_t *numberLabel;   // used by GAUGE_TYPE_NUMBER; also doubles as the "show_value" readout for other types
+  lv_obj_t *chart;         // used by GAUGE_TYPE_HISTOGRAM only
+  lv_chart_series_t *chartSeries;
   bool enabled;
   GaugeType gauge_type;
   SignalId signal;
@@ -115,6 +118,7 @@ static GaugePageRuntime pages[MAX_PAGES];
 static int s_num_active_pages = 0;
 static int s_current_page = 0;
 static uint32_t s_flash_counter = 0;
+static lv_obj_t *s_logIndicator = NULL; // small dot on lv_layer_sys() - persists across every page without needing to be added to each one individually, same mechanism LVGL's own built-in perf monitor uses
 
 static const lv_font_t *get_font_for_size(int32_t size) {
   if (size <= 14) return &lv_font_montserrat_14;
@@ -148,6 +152,8 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->meter = NULL;
   rt->needle = NULL;
   rt->numberLabel = NULL;
+  rt->chart = NULL;
+  rt->chartSeries = NULL;
 
   lv_obj_t *container = lv_obj_create(page);
   lv_obj_set_pos(container, rect.x, rect.y);
@@ -178,6 +184,24 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
     lv_label_set_text(capLabel, cfg->caption);
     lv_obj_align_to(capLabel, numLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+  } else if (cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) {
+    lv_obj_t *chart = lv_chart_create(container);
+    lv_obj_set_size(chart, rect.w - 10, rect.h - 30);
+    lv_obj_align(chart, LV_ALIGN_TOP_MID, 0, 4);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(chart, 50); // rolling window - oldest points scroll off as new ones arrive
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, cfg->min_val, cfg->max_val);
+    lv_obj_set_style_bg_color(chart, lv_color_hex(cfg->bg_color), 0);
+    lv_obj_set_style_border_width(chart, 1, 0);
+    lv_obj_set_style_border_color(chart, tickColor, 0);
+    lv_chart_series_t *series = lv_chart_add_series(chart, needleColor, LV_CHART_AXIS_PRIMARY_Y);
+    rt->chart = chart;
+    rt->chartSeries = series;
+
+    lv_obj_t *capLabel = lv_label_create(container);
+    lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
+    lv_label_set_text(capLabel, cfg->caption);
+    lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
   } else {
     // NEEDLE or HALFMOON
     int32_t angleRange = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 270;
@@ -291,6 +315,16 @@ static void update_warning_flash(CellRuntime *c, float value, bool has_data) {
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   s_flash_counter++;
 
+  if (s_logIndicator) {
+    if (sd_logging_is_active()) {
+      bool blinkOn = (s_flash_counter / 24) % 2 == 0; // ~480ms per phase, same blink rate as the warning flash
+      if (blinkOn) lv_obj_clear_flag(s_logIndicator, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(s_logIndicator, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(s_logIndicator, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
   if (g_requested_page >= 0 && g_requested_page < s_num_active_pages) {
     switch_to_page(g_requested_page);
     g_requested_page = -1;
@@ -322,6 +356,10 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
           char buf[16];
           snprintf(buf, sizeof(buf), "%.1f", value);
           lv_label_set_text(c->numberLabel, buf);
+        }
+      } else if (c->gauge_type == GAUGE_TYPE_HISTOGRAM) {
+        if (c->chart && c->chartSeries) {
+          lv_chart_set_next_value(c->chart, c->chartSeries, displayValue);
         }
       } else {
         if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
@@ -355,6 +393,17 @@ void build_gauge_app(void) {
     s_current_page = 0;
     lv_disp_load_scr(pages[0].page);
   }
+
+  // Logging indicator - a small circle on the system layer, so it
+  // shows on top of whichever page is currently active without being
+  // added to each page individually.
+  s_logIndicator = lv_obj_create(lv_layer_sys());
+  lv_obj_set_size(s_logIndicator, 14, 14);
+  lv_obj_set_style_radius(s_logIndicator, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(s_logIndicator, 0, 0);
+  lv_obj_set_style_bg_color(s_logIndicator, lv_color_hex(0x00C800), 0);
+  lv_obj_align(s_logIndicator, LV_ALIGN_TOP_RIGHT, -10, 10);
+  lv_obj_add_flag(s_logIndicator, LV_OBJ_FLAG_HIDDEN); // hidden until logging actually starts
 
   lv_timer_create(gauge_update_timer_cb, 20, NULL); // 20ms = 50Hz, fastest per-cell refresh rate supported
 }

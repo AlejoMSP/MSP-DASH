@@ -61,6 +61,7 @@ void setup()
   ecu_config_init();
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
   gauge_config_web_init(); // the separate, independent web-dashboard config
+  gauge_config_log_init(); // which signals get logged to SD - independent of what's displayed
 
   Touch_Init();
   lcd_lvgl_Init();

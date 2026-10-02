@@ -12,9 +12,15 @@ extern "C" {
 void sd_logging_init(void);
 
 // Call every loop() iteration - appends a row every 500ms with the
-// current value of every enabled gauge signal. No-op if the card isn't
-// mounted or logging never successfully initialized.
+// current value of every signal enabled in the Log Channels config.
+// Only writes rows once RPM exceeds 800 (engine running) - no-op
+// otherwise, or if the card isn't mounted / logging never initialized.
 void sd_logging_loop(void);
+
+// True only while rows are actually being written (RPM above the
+// logging threshold) - drives the on-screen blinking logging
+// indicator in gauge_app.c.
+bool sd_logging_is_active(void);
 
 #ifdef __cplusplus
 }

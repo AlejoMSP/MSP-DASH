@@ -1360,3 +1360,48 @@ driver files:
 The .ino itself is now just: includes, the board's CAN pin/bitrate
 config (kept here since it's wiring-specific to this physical board,
 not protocol-parsing logic), and setup()/loop() orchestration.
+
+## Stage 1 of ESP-NOW plan: histogram gauge, RPM-gated logging, log channels, logging indicator (2026-10-01)
+
+First stage of the multi-board/ESP-NOW plan - everything that doesn't
+depend on ESP-NOW or the new auxiliary boards existing yet.
+
+**GAUGE_TYPE_HISTOGRAM**: new gauge type - a scrolling strip-chart/
+trend line (oscilloscope-style), assignable to any signal like the
+other gauge types. Uses LVGL's lv_chart widget (confirmed LV_USE_CHART
+is enabled in lv_conf.h before using it): LV_CHART_TYPE_LINE, a 50-point
+rolling window, range set from the cell's configured min/max, one
+series in the cell's needle_color. Updated via lv_chart_set_next_value()
+on the same per-cell refresh-rate cadence as every other gauge type.
+
+**RPM-gated logging**: sd_logging.cpp rewritten - the log file still
+opens once per boot as before, but rows are only written once RPM
+exceeds 800 (engine running), rather than logging continuously from
+power-on. Added sd_logging_is_active() so other code (the logging
+indicator) can tell whether rows are actually being written right now.
+
+**Log Channels**: a new, fully independent "which signals get logged"
+list (gauge_config_log_init/is_log_enabled/set_log_enabled/log_save),
+separate from what's displayed on any page/cell - you may want to log
+more or fewer channels than you're looking at. Defaults to logging
+everything. New /log-channels web page (simple checkbox list per
+signal) + /log-channels.json GET + /log-channels POST, added to the
+hamburger menu. sd_logging.cpp's header/row writing now iterates
+signals directly (checking gauge_config_is_log_enabled) instead of
+iterating display cells as before.
+
+**Blinking logging indicator**: a small green circle created once as a
+child of lv_layer_sys() (the same persistent overlay layer LVGL's own
+built-in FPS/perf monitor uses, confirmed from source) - shows on top
+of whichever page is active without needing to be added to each page
+individually. Hidden by default; blinks (same ~480ms phase as the
+warning flash) only while sd_logging_is_active() is true.
+
+Still ahead: ESP-NOW sender/protocol on this board (Stage 2), the
+web UI for pairing/configuring the 3 auxiliary boards, and the
+auxiliary boards' own firmware (Stage 3) - which can reuse this
+board's confirmed display/touch BSP files unchanged, since the
+auxiliary hardware is the identical Waveshare ESP32-S3 1.43" AMOLED
+board.
+
+NOT yet bench-tested as of this writing.
