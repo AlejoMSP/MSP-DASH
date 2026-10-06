@@ -14,11 +14,12 @@
   build_gauge_app() call - see gauge_app.c for the actual gauge cluster.
 
   CAN reading (rusEFI + MegaSquirt/LinkECU, bench-confirmed elsewhere in
-  this project) happens entirely in Arduino's loop(), which their BSP
-  leaves empty (LVGL runs on its own dedicated FreeRTOS task). This
-  keeps CAN parsing completely independent of LVGL's task - we only
-  ever touch simple global values here, never call any LVGL function
-  directly from this context. gauge_app.c's own periodic timer (running
+  this project) happens on its own dedicated FreeRTOS task (started by
+  can_start_task(), priority above both loop() and LVGL's task), so SD
+  writes and web server work in loop() can never cause dropped frames.
+  This also keeps CAN parsing completely independent of LVGL's task - we
+  only ever touch simple global values from there, never call any LVGL
+  function directly. gauge_app.c's own periodic timer (running
   inside LVGL's task, registered via lv_timer_create) reads those values
   and performs all actual LVGL API calls safely. The actual frame
   decoding lives in can_parsing.h (extracted here to keep this file as
@@ -68,6 +69,7 @@ void setup()
 
   // --- CAN init ---
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+  g_config.rx_queue_len = 64; // default is 5 - this bus runs several hundred frames/sec, so give the driver room to buffer
   twai_timing_config_t t_config = CAN_BITRATE;
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
   if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) {
@@ -76,6 +78,7 @@ void setup()
   if (twai_start() != ESP_OK) {
     Serial.println("TWAI start FAILED");
   }
+  can_start_task(); // frames are received and decoded on their own task from here on, see can_parsing.h
   Serial.println("CAN running - waiting for rusEFI/MegaSquirt/LinkECU frames...");
 
   sd_storage_init();
@@ -85,13 +88,11 @@ void setup()
 
 void loop()
 {
-  twai_message_t message;
-  if (twai_receive(&message, pdMS_TO_TICKS(20)) == ESP_OK) {
-    web_monitor_track_can_frame(message.identifier, message.data, message.data_length_code);
-    handleRusefiFrame(message.identifier, message.data);
-    handleSecondaryEcuFrame(message.identifier, message.data);
-  }
+  // CAN no longer lives here - see can_parsing.h. This loop only does
+  // slow, non-time-critical work, so it can safely block on SD writes
+  // without ever delaying a CAN frame.
   checkPageButton();
   web_monitor_loop();
   sd_logging_loop();
+  vTaskDelay(pdMS_TO_TICKS(5)); // previously paced by twai_receive()'s timeout - keeps this from spinning flat out
 }

@@ -1423,3 +1423,38 @@ in all three): fetches are now sequential instead of concurrent
 and load() is wrapped in try/catch - any failure now shows a visible
 "Failed to load" message with a Retry button instead of failing
 silently.
+
+## CAN moved to its own FreeRTOS task (2026-10-06)
+
+Prompted by reviewing rusEFI's uaDASH firmware, which receives CAN on a
+dedicated task. Our loop() was doing CAN receive AND SD writes
+(fopen/fprintf/fclose every 500ms) AND web server work. An SD write can
+block for tens of ms, and the TWAI driver's default RX queue is only 5
+frames - on a bus carrying several hundred frames/sec (0x190/0x191 at
+~99Hz plus the rusEFI base frames) that is enough to drop frames.
+
+Changes:
+- can_parsing.h: new canReceiveTask() + can_start_task(). Priority 3
+  (above loop() at 1 and the LVGL task at 2, confirmed from
+  lcd_config.h), pinned to core 1 (where setup() runs and the TWAI
+  interrupt is installed; WiFi lives on core 0), 4KB stack. Same rule
+  as before: it only writes plain global values, never calls LVGL.
+- twai config: rx_queue_len raised from 5 to 64.
+- Diagnostics: every 2s the task checks twai_get_status_info() and
+  prints a Serial warning if rx_missed_count increased. Should stay
+  silent now.
+- Bus-off recovery (not previously handled): if the controller enters
+  TWAI_STATE_BUS_OFF the task calls twai_initiate_recovery(); if it is
+  STOPPED it calls twai_start(). Without this a wiring glitch or power
+  dip froze the gauges until reboot.
+- loop(): CAN removed, now just checkPageButton/web_monitor_loop/
+  sd_logging_loop plus a 5ms vTaskDelay (the old 20ms twai_receive
+  timeout was what paced it).
+- web_monitor.cpp: the /can frame table is now written from the CAN
+  task, read by the web server task, and has its Hz recomputed from
+  loop(), so access is behind a portMUX spinlock. buildCanJson() copies
+  the table under the lock and builds the JSON from the copy. Without
+  the lock the once-a-second Hz reset could race a frame increment and
+  show a doubled rate on /can. Also clamps dlc to 8.
+
+NOT yet bench-tested as of this writing.

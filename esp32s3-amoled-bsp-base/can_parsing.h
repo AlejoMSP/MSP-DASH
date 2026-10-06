@@ -17,10 +17,22 @@
   Both ID ranges are disjoint, so both parsers stay active
   simultaneously regardless of the ECU selection in ecu_config.h/.cpp
   (which is purely a display label, not a parsing gate).
+
+  Frames are received by a dedicated FreeRTOS task (can_start_task),
+  not from loop(). loop() also does SD writes (open/write/close) and
+  web server work, which can block for tens of milliseconds - long
+  enough, at this bus's frame rate, to overflow the driver's receive
+  queue and drop frames. The task runs at a higher priority than both
+  loop() and the LVGL task, so nothing else can starve it. It only
+  writes plain global values (same rule as before: never call LVGL
+  from here).
 */
 
+#include <Arduino.h>
+#include "driver/twai.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
+#include "web_monitor.h"
 
 // ---- rusEFI CAN IDs ----
 #define RUSEFI_BASE1 0x201
@@ -170,6 +182,57 @@ static void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
       break;
     }
   }
+}
+
+// ---- Dedicated CAN receive task ----
+#define CAN_TASK_STACK_BYTES 4096
+#define CAN_TASK_PRIORITY    3   // above loop() (1) and the LVGL task (2)
+#define CAN_TASK_CORE        1   // same core setup() runs on, where the TWAI interrupt was installed (WiFi lives on core 0)
+#define CAN_STATUS_CHECK_MS  2000
+
+static void canReceiveTask(void *arg) {
+  uint32_t lastMissed = 0;
+  unsigned long lastStatusCheck = 0;
+
+  for (;;) {
+    twai_message_t message;
+    if (twai_receive(&message, pdMS_TO_TICKS(100)) == ESP_OK) {
+      web_monitor_track_can_frame(message.identifier, message.data, message.data_length_code);
+      handleRusefiFrame(message.identifier, message.data);
+      handleSecondaryEcuFrame(message.identifier, message.data);
+    }
+
+    unsigned long now = millis();
+    if (now - lastStatusCheck >= CAN_STATUS_CHECK_MS) {
+      lastStatusCheck = now;
+      twai_status_info_t st;
+      if (twai_get_status_info(&st) == ESP_OK) {
+        // Frames the driver had to drop because its queue was full.
+        // Should stay at 0 now - if this ever prints, the queue or
+        // task priority needs another look.
+        if (st.rx_missed_count != lastMissed) {
+          Serial.printf("CAN: %u frames missed (queue full), %u overrun\n",
+                        (unsigned)(st.rx_missed_count - lastMissed), (unsigned)st.rx_overrun_count);
+          lastMissed = st.rx_missed_count;
+        }
+        // Standard TWAI recovery - a wiring glitch or power dip can put
+        // the controller in bus-off, where it stays dead until told to
+        // recover. Without this, gauges would freeze until a reboot.
+        if (st.state == TWAI_STATE_BUS_OFF) {
+          Serial.println("CAN: bus-off, starting recovery");
+          twai_initiate_recovery();
+        } else if (st.state == TWAI_STATE_STOPPED) {
+          Serial.println("CAN: stopped, restarting");
+          twai_start();
+        }
+      }
+    }
+  }
+}
+
+// Call once from setup(), right after twai_start() succeeds.
+static void can_start_task() {
+  xTaskCreatePinnedToCore(canReceiveTask, "CAN", CAN_TASK_STACK_BYTES, NULL, CAN_TASK_PRIORITY, NULL, CAN_TASK_CORE);
 }
 
 #endif

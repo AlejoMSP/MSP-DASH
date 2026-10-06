@@ -822,13 +822,24 @@ static unsigned long s_lastHzCalc = 0;
 static unsigned long s_lastBroadcast = 0;
 static const unsigned long BROADCAST_INTERVAL_MS = 500;
 
+// The CAN frame table is written by the dedicated CAN receive task
+// (can_parsing.h), read by the web server task, and has its Hz values
+// recomputed from loop() - so every access goes through this short
+// spinlock. Without it, the once-a-second Hz reset could race with a
+// frame increment and briefly show a doubled rate on the /can page.
+static portMUX_TYPE s_canTableMux = portMUX_INITIALIZER_UNLOCKED;
+
 void web_monitor_track_can_frame(uint32_t id, uint8_t *data, uint8_t dlc) {
+  if (dlc > 8) dlc = 8;
+  unsigned long now = millis();
+  portENTER_CRITICAL(&s_canTableMux);
   for (int i = 0; i < s_canTableCount; i++) {
     if (s_canTable[i].id == id) {
       memcpy(s_canTable[i].data, data, dlc);
       s_canTable[i].dlc = dlc;
-      s_canTable[i].lastSeen = millis();
+      s_canTable[i].lastSeen = now;
       s_canTable[i].countSinceLastCalc++;
+      portEXIT_CRITICAL(&s_canTableMux);
       return;
     }
   }
@@ -837,22 +848,41 @@ void web_monitor_track_can_frame(uint32_t id, uint8_t *data, uint8_t dlc) {
     e->id = id;
     memcpy(e->data, data, dlc);
     e->dlc = dlc;
-    e->lastSeen = millis();
+    e->lastSeen = now;
     e->countSinceLastCalc = 1;
     e->hz = 0;
     s_canTableCount++;
   }
+  portEXIT_CRITICAL(&s_canTableMux);
   // If the table is full, new/unseen IDs are silently dropped - 32 is
   // generous headroom for a typical ECU broadcast set, and this is a
   // diagnostic tool, not a requirement for correctness elsewhere.
 }
 
+static void recomputeCanHz() {
+  portENTER_CRITICAL(&s_canTableMux);
+  for (int i = 0; i < s_canTableCount; i++) {
+    s_canTable[i].hz = s_canTable[i].countSinceLastCalc;
+    s_canTable[i].countSinceLastCalc = 0;
+  }
+  portEXIT_CRITICAL(&s_canTableMux);
+}
+
 static String buildCanJson() {
+  // Copy the table under the lock, then build the JSON from the copy -
+  // string building is too slow to do while holding a spinlock.
+  CanMonitorEntry snapshot[MAX_CAN_IDS];
+  int count;
+  portENTER_CRITICAL(&s_canTableMux);
+  count = s_canTableCount;
+  memcpy(snapshot, s_canTable, sizeof(CanMonitorEntry) * count);
+  portEXIT_CRITICAL(&s_canTableMux);
+
   unsigned long now = millis();
   String json = "[";
-  for (int i = 0; i < s_canTableCount; i++) {
+  for (int i = 0; i < count; i++) {
     if (i > 0) json += ",";
-    CanMonitorEntry *e = &s_canTable[i];
+    CanMonitorEntry *e = &snapshot[i];
     char dataHex[25] = {0};
     for (int b = 0; b < e->dlc; b++) {
       char byteStr[4];
@@ -1354,10 +1384,7 @@ void web_monitor_loop(void) {
   // Recompute Hz for each tracked CAN ID once per second.
   if (now - s_lastHzCalc >= 1000) {
     s_lastHzCalc = now;
-    for (int i = 0; i < s_canTableCount; i++) {
-      s_canTable[i].hz = s_canTable[i].countSinceLastCalc;
-      s_canTable[i].countSinceLastCalc = 0;
-    }
+    recomputeCanHz();
   }
 
   if (now - s_lastBroadcast < BROADCAST_INTERVAL_MS) return;
