@@ -71,6 +71,7 @@ typedef struct {
   bool has_warning;
   float warning_threshold;
   bool warning_above;
+  bool alert_fullscreen;   // when this cell's warning triggers (and the engine is running), take over the whole screen on ANY page. BOOT button or a tap dismisses it for 30s. Needs has_warning.
 } CellConfig;
 
 // A page: a chosen layout template plus however many cells that
@@ -116,8 +117,18 @@ void gauge_config_save(void);
 // Human-readable signal name, for the web UI's sensor picker.
 const char *gauge_config_signal_name(SignalId sig);
 
-// Reads the live current value and has_data flag for a given signal.
+// A signal counts as "lost" after this long without a new frame. Covers
+// key-off, an unplugged CAN cable, or an ECU that stopped broadcasting -
+// every ECU frame we decode arrives many times a second, so 2s is far
+// beyond normal gaps.
+#define GAUGE_SIGNAL_STALE_MS 2000
+
+// Reads the live current value for a given signal.
 float gauge_config_signal_value(SignalId sig);
+
+// True only while the signal has been seen within GAUGE_SIGNAL_STALE_MS.
+// False before the first frame AND again if frames stop - so gauges,
+// warnings and logging never act on a frozen last value.
 bool gauge_config_signal_has_data(SignalId sig);
 
 // ---- Signal activity tracking (for the sensor picker's "how live is

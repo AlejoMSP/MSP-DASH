@@ -84,7 +84,10 @@ void sd_logging_loop(void) {
   fprintf(f, "%lu", now);
   for (int sig = 1; sig < SIG_COUNT; sig++) {
     if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
-    fprintf(f, ",%.3f", gauge_config_signal_value((SignalId)sig));
+    // Leave the field empty if this signal has no live data - a 0.000
+    // (or a frozen last value) in the log looks like a real reading.
+    if (gauge_config_signal_has_data((SignalId)sig)) fprintf(f, ",%.3f", gauge_config_signal_value((SignalId)sig));
+    else fprintf(f, ",");
   }
   fprintf(f, "\n");
   fclose(f);

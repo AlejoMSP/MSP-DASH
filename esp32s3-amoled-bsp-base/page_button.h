@@ -6,13 +6,20 @@
   BOOT button page-cycling - extracted from the main .ino, same
   reorganization/safety rationale as can_parsing.h (included only by
   the .ino, so full function bodies here are safe, no linker conflict).
+
+  The button asks for "next page" (g_page_nav_delta) rather than a
+  specific page number. It used to keep its own page counter, which
+  drifted out of sync with the display whenever the page was changed any
+  other way (the web Prev/Next arrows) - the next press then jumped to
+  the wrong page. gauge_app.c's timer advances from whatever page is
+  actually showing, and also uses the same request to dismiss a
+  full-screen alert.
 */
 
 #include "gauge_app.h"
 
 #define BOOT_BTN_PIN 0
 
-static int currentPage = 0;
 static bool lastBtnState = HIGH;
 static unsigned long lastBtnChange = 0;
 static const unsigned long DEBOUNCE_MS = 200;
@@ -22,9 +29,8 @@ static void checkPageButton() {
   unsigned long now = millis();
   if (btnState == LOW && lastBtnState == HIGH && (now - lastBtnChange) > DEBOUNCE_MS) {
     lastBtnChange = now;
-    currentPage = (currentPage + 1) % gauge_app_get_num_pages();
-    g_requested_page = currentPage; // gauge_app.c's timer picks this up safely inside LVGL's task
-    Serial.printf("Requested page %d\n", currentPage + 1);
+    g_page_nav_delta = 1;
+    Serial.println("BOOT pressed: next page / dismiss alert");
   }
   lastBtnState = btnState;
 }

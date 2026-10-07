@@ -1501,3 +1501,55 @@ Changes:
 
 Next step is to flash and watch the Heap line on the Serial monitor
 while reloading /gauges repeatedly.
+
+## Lost-signal handling + full-screen alerts (2026-10-06)
+
+Prompted by reviewing an older Teensy MegaSquirt gauge sketch. Two real
+gaps in our code, plus two small bugs found on the way.
+
+**1. Lost signals (bug fix).** The g_*_has_data flags were set on the
+first frame and never cleared, so if CAN went quiet (key off, unplugged)
+every gauge froze on its last value, and logging keyed to RPM > 800 (plus
+the blinking dot) could keep running on a frozen RPM.
+- gauge_config_signal_has_data() now also requires a frame within
+  GAUGE_SIGNAL_STALE_MS (2000ms, uses the existing signal-age tracking).
+  It is the only place has_data is read, so gauges, warnings and logging
+  all pick it up.
+- Number readouts and show_value labels show "--" with no data (they
+  used to show 0.0). Needles use the existing "waiting" sweep. The trend
+  graph holds its trace instead of plotting the sweep.
+- Logging writes an empty CSV field for a signal with no live data
+  (previously 0.000 or a frozen value).
+- The web dashboard's WebSocket broadcast omits signals with no data, so
+  the page shows "--".
+
+**2. Full-screen alert (new, per-cell opt-in).** A cell's flashing
+warning only showed on its own page. New CellConfig.alert_fullscreen
+(default off, saved, checkbox on /gauges only): when that cell's warning
+triggers, a red overlay on lv_layer_sys() shows the caption (+ HIGH/LOW),
+the value, and "+N more" if several are active, over WHATEVER page is up.
+- Only fires with the engine running (RPM has data and > 400): oil
+  pressure reads ~0 at key-on and would otherwise take over the screen on
+  every start.
+- Stays up at least 2s so a value hovering on its threshold can't flicker.
+- BOOT or a tap dismisses it and snoozes alerts for 30s, so a faulty
+  sensor can never lock the screen.
+- A lost signal is not an alarm.
+- Optional: enable LV_FONT_MONTSERRAT_48 in lv_conf.h for a bigger value;
+  falls back to 36 if it is off.
+
+**3. BOOT button desync (bug fix).** page_button.h kept its own page
+counter, so after using the web Prev/Next arrows the next BOOT press
+jumped to the wrong page. It now just requests "next page"
+(g_page_nav_delta) and gauge_app.c advances from the page actually
+showing. That same request dismisses an alert.
+
+**Testing (new: tests/host/).** The real gauge_app.c and gauge_config.cpp
+were compiled unmodified on a PC (LVGL 8.4.0, real ArduinoJson, fake clock
+and flash) and driven by scripted scenarios under AddressSanitizer/UBSan:
+43 checks on the display side (alert gating, hold, dismiss/snooze, lost
+signals, page wrap, trend graph, 5-minute random soak) and 17 on the
+config side (timeout, millis wrap, save/reload of the new field, old
+configs without the field). Deliberately breaking the code 6 ways was
+caught by the tests each time (one weak test was found and fixed that
+way). NOT yet run on the board.

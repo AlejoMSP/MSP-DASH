@@ -61,6 +61,7 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.has_warning = hasWarning;
   c.warning_threshold = warnThresh;
   c.warning_above = warnAbove;
+  c.alert_fullscreen = false;
   return c;
 }
 
@@ -128,6 +129,7 @@ static void serializeCell(JsonObject o, CellConfig *c) {
   o["has_warning"] = c->has_warning;
   o["warning_threshold"] = c->warning_threshold;
   o["warning_above"] = c->warning_above;
+  o["alert_fullscreen"] = c->alert_fullscreen;
 }
 
 static void deserializeCell(JsonObject o, CellConfig *c) {
@@ -150,6 +152,7 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->has_warning = o["has_warning"] | false;
   c->warning_threshold = o["warning_threshold"] | 0.0f;
   c->warning_above = o["warning_above"] | false;
+  c->alert_fullscreen = o["alert_fullscreen"] | false;
 }
 
 void gauge_config_init(void) {
@@ -295,19 +298,25 @@ float gauge_config_signal_value(SignalId sig) {
 }
 
 bool gauge_config_signal_has_data(SignalId sig) {
+  bool seen;
   switch (sig) {
-    case SIG_RPM: return g_rpm_has_data;
-    case SIG_CLT: return g_clt_has_data;
-    case SIG_MAP: return g_boost_has_data;
-    case SIG_AFR: return g_afr_has_data;
-    case SIG_OILP: return g_oilp_has_data;
-    case SIG_OILT: return g_oilt_has_data;
-    case SIG_FUELP: return g_fuelp_has_data;
-    case SIG_FLEX: return g_flex_has_data;
-    case SIG_TPS: return g_tps_has_data;
-    case SIG_BATTV: return g_battv_has_data;
-    default: return false;
+    case SIG_RPM: seen = g_rpm_has_data; break;
+    case SIG_CLT: seen = g_clt_has_data; break;
+    case SIG_MAP: seen = g_boost_has_data; break;
+    case SIG_AFR: seen = g_afr_has_data; break;
+    case SIG_OILP: seen = g_oilp_has_data; break;
+    case SIG_OILT: seen = g_oilt_has_data; break;
+    case SIG_FUELP: seen = g_fuelp_has_data; break;
+    case SIG_FLEX: seen = g_flex_has_data; break;
+    case SIG_TPS: seen = g_tps_has_data; break;
+    case SIG_BATTV: seen = g_battv_has_data; break;
+    default: seen = false; break;
   }
+  if (!seen) return false;
+  // The g_*_has_data flags are set on the first frame and never cleared,
+  // so also require a recent frame - otherwise a dead bus leaves every
+  // gauge frozen on its last value and logging keyed to RPM keeps going.
+  return gauge_config_signal_age_ms(sig) < GAUGE_SIGNAL_STALE_MS;
 }
 
 void gauge_config_mark_signal_active(SignalId sig) {

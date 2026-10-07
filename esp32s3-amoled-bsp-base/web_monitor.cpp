@@ -281,7 +281,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
-        has_warning:false, warning_threshold:0, warning_above:false };
+        has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false };
     }
 
     function signalOptionsHtml(selected) {
@@ -343,6 +343,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
               </select>
             </label></div>
           </div>
+          <label><input type="checkbox" ${c.alert_fullscreen?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].alert_fullscreen=this.checked"> Full-screen alert on ANY page (needs Warning enabled; engine running only; BOOT or tap dismisses for 30s)</label>
           `}
         </div>
       `;
@@ -1035,6 +1036,7 @@ void web_monitor_init(void) {
         o["has_warning"] = cell->has_warning;
         o["warning_threshold"] = cell->warning_threshold;
         o["warning_above"] = cell->warning_above;
+        o["alert_fullscreen"] = cell->alert_fullscreen;
       }
     }
     String out;
@@ -1098,6 +1100,7 @@ void web_monitor_init(void) {
               cell->has_warning = o["has_warning"] | false;
               cell->warning_threshold = o["warning_threshold"] | 0.0f;
               cell->warning_above = o["warning_above"] | false;
+              cell->alert_fullscreen = o["alert_fullscreen"] | false;
               c++;
             }
             i++;
@@ -1159,6 +1162,7 @@ void web_monitor_init(void) {
         o["has_warning"] = cell->has_warning;
         o["warning_threshold"] = cell->warning_threshold;
         o["warning_above"] = cell->warning_above;
+        o["alert_fullscreen"] = cell->alert_fullscreen;
       }
     }
     String out;
@@ -1232,6 +1236,7 @@ void web_monitor_init(void) {
               cell->has_warning = o["has_warning"] | false;
               cell->warning_threshold = o["warning_threshold"] | 0.0f;
               cell->warning_above = o["warning_above"] | false;
+              cell->alert_fullscreen = o["alert_fullscreen"] | false;
               c++;
             }
             i++;
@@ -1466,6 +1471,9 @@ void web_monitor_loop(void) {
   // the physical display's own configuration.
   JsonDocument doc;
   for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE (0)
+    // No live data (never seen, or the bus went quiet): omit it, and the
+    // page shows "--" instead of 0.0 or a frozen last reading.
+    if (!gauge_config_signal_has_data((SignalId)sig)) continue;
     char key[4];
     snprintf(key, sizeof(key), "%d", sig);
     doc[key] = gauge_config_signal_value((SignalId)sig);

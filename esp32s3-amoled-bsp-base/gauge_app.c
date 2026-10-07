@@ -28,6 +28,7 @@
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 volatile float g_afr = 0;
 volatile float g_clt_f = 0;
@@ -103,6 +104,8 @@ typedef struct {
   float warning_threshold;
   bool warning_above;
   bool warning_active;
+  bool alert_fullscreen;
+  char caption[GAUGE_CAPTION_MAXLEN];
   int32_t sweep_pos, sweep_step;
   int8_t sweep_dir;
   uint32_t refresh_interval_ms, last_update_ms;
@@ -119,6 +122,55 @@ static int s_num_active_pages = 0;
 static int s_current_page = 0;
 static uint32_t s_flash_counter = 0;
 static lv_obj_t *s_logIndicator = NULL; // small dot on lv_layer_sys() - persists across every page without needing to be added to each one individually, same mechanism LVGL's own built-in perf monitor uses
+
+// ---- Full-screen alert (per-cell opt-in via CellConfig.alert_fullscreen) ----
+// A cell's flashing warning only shows on its own page. This overlay sits
+// on lv_layer_sys(), so a critical condition is visible whichever page is
+// up - the same idea as the Teensy gauge's full-screen warning takeover.
+#define ALERT_MIN_RPM      400.0f // only alert with the engine actually running - oil pressure reads ~0 at key-on and would otherwise take over the screen on every start
+#define ALERT_MIN_SHOW_MS  2000   // once shown, stay up at least this long so a value hovering on its threshold can't flicker the whole screen
+#define ALERT_SNOOZE_MS    30000  // BOOT press (or a tap) hides the alert this long, so a faulty sensor can never lock the screen
+#if LV_FONT_MONTSERRAT_48
+#define ALERT_VALUE_FONT (&lv_font_montserrat_48)
+#else
+#define ALERT_VALUE_FONT (&lv_font_montserrat_36)
+#endif
+
+static lv_obj_t *s_alertOverlay = NULL;
+static lv_obj_t *s_alertTitle = NULL;
+static lv_obj_t *s_alertValue = NULL;
+static lv_obj_t *s_alertMore = NULL;
+static bool s_alertShown = false;
+static bool s_alertSnoozed = false;
+static uint32_t s_alertHoldUntil = 0;
+static uint32_t s_alertSnoozeUntil = 0;
+
+static bool time_reached(uint32_t now, uint32_t t) {
+  return (int32_t)(now - t) >= 0; // safe across the 32-bit tick wrap
+}
+
+// lv_label_set_text() always invalidates the label even when the text is
+// identical - skip it so a held alert doesn't redraw the whole round
+// screen ten times a second for nothing.
+static void set_label_if_changed(lv_obj_t *label, const char *text) {
+  if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
+static void alert_hide(void) {
+  if (s_alertOverlay) lv_obj_add_flag(s_alertOverlay, LV_OBJ_FLAG_HIDDEN);
+  s_alertShown = false;
+}
+
+static void alert_dismiss(uint32_t now) {
+  s_alertSnoozed = true;
+  s_alertSnoozeUntil = now + ALERT_SNOOZE_MS;
+  alert_hide();
+}
+
+static void alert_click_cb(lv_event_t *e) {
+  (void)e;
+  alert_dismiss(lv_tick_get());
+}
 
 static const lv_font_t *get_font_for_size(int32_t size) {
   if (size <= 14) return &lv_font_montserrat_14;
@@ -149,6 +201,9 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->warning_threshold = cfg->warning_threshold;
   rt->warning_above = cfg->warning_above;
   rt->warning_active = false;
+  rt->alert_fullscreen = cfg->alert_fullscreen;
+  strncpy(rt->caption, cfg->caption, sizeof(rt->caption) - 1);
+  rt->caption[sizeof(rt->caption) - 1] = '\0';
   rt->meter = NULL;
   rt->needle = NULL;
   rt->numberLabel = NULL;
@@ -312,8 +367,60 @@ static void update_warning_flash(CellRuntime *c, float value, bool has_data) {
   }
 }
 
+// Runs every ~100ms from the timer. Looks at every alert-enabled cell on
+// EVERY page (not just the one on screen), independent of each cell's own
+// refresh throttle.
+static void update_alert_overlay(uint32_t now) {
+  if (!s_alertOverlay) return;
+
+  if (s_alertSnoozed && time_reached(now, s_alertSnoozeUntil)) s_alertSnoozed = false;
+
+  int count = 0;
+  const CellRuntime *first = NULL;
+  float firstValue = 0;
+
+  bool engineRunning = gauge_config_signal_has_data(SIG_RPM) &&
+                       gauge_config_signal_value(SIG_RPM) > ALERT_MIN_RPM;
+  if (engineRunning) {
+    for (int p = 0; p < s_num_active_pages; p++) {
+      for (int i = 0; i < pages[p].numCells; i++) {
+        const CellRuntime *c = &pages[p].cells[i];
+        if (!c->enabled || !c->has_warning || !c->alert_fullscreen) continue;
+        if (!gauge_config_signal_has_data(c->signal)) continue; // a lost signal is not an alarm value
+        float v = gauge_config_signal_value(c->signal) / c->value_divisor;
+        bool bad = c->warning_above ? (v > c->warning_threshold) : (v < c->warning_threshold);
+        if (!bad) continue;
+        count++;
+        if (!first) { first = c; firstValue = v; }
+      }
+    }
+  }
+
+  if (s_alertSnoozed) { alert_hide(); return; }
+
+  if (count > 0) {
+    s_alertHoldUntil = now + ALERT_MIN_SHOW_MS;
+    char buf[48];
+    const char *name = first->caption[0] ? first->caption : gauge_config_signal_name(first->signal);
+    snprintf(buf, sizeof(buf), "%s %s", name, first->warning_above ? "HIGH" : "LOW");
+    set_label_if_changed(s_alertTitle, buf);
+    snprintf(buf, sizeof(buf), "%.1f", firstValue);
+    set_label_if_changed(s_alertValue, buf);
+    if (count > 1) snprintf(buf, sizeof(buf), "+%d more", count - 1);
+    else buf[0] = '\0';
+    set_label_if_changed(s_alertMore, buf);
+    lv_obj_clear_flag(s_alertOverlay, LV_OBJ_FLAG_HIDDEN);
+    s_alertShown = true;
+  } else if (s_alertShown && !time_reached(now, s_alertHoldUntil)) {
+    // condition just cleared - keep the alert up for the minimum time
+  } else {
+    alert_hide();
+  }
+}
+
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   s_flash_counter++;
+  uint32_t now = lv_tick_get();
 
   if (s_logIndicator) {
     if (sd_logging_is_active()) {
@@ -331,12 +438,17 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   }
 
   if (g_page_nav_delta != 0 && s_num_active_pages > 0) {
-    int next = (s_current_page + g_page_nav_delta + s_num_active_pages) % s_num_active_pages;
-    switch_to_page(next);
+    if (s_alertShown) {
+      alert_dismiss(now); // BOOT (or the web arrows) while an alert is up just dismisses it
+    } else {
+      int next = (s_current_page + g_page_nav_delta + s_num_active_pages) % s_num_active_pages;
+      switch_to_page(next);
+    }
     g_page_nav_delta = 0;
   }
 
-  uint32_t now = lv_tick_get();
+  if (s_flash_counter % 5 == 0) update_alert_overlay(now); // every ~100ms
+
   for (int p = 0; p < s_num_active_pages; p++) {
     for (int i = 0; i < pages[p].numCells; i++) {
       CellRuntime *c = &pages[p].cells[i];
@@ -351,24 +463,23 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
       int32_t displayValue = clamped_or_sweep(c, value, has_data);
 
+      // No data (before the first frame, or the bus went quiet): show
+      // dashes rather than 0.0 or a frozen last reading.
+      char buf[16];
+      if (has_data) snprintf(buf, sizeof(buf), "%.1f", value);
+      else snprintf(buf, sizeof(buf), "--");
+
       if (c->gauge_type == GAUGE_TYPE_NUMBER) {
-        if (c->numberLabel) {
-          char buf[16];
-          snprintf(buf, sizeof(buf), "%.1f", value);
-          lv_label_set_text(c->numberLabel, buf);
-        }
+        if (c->numberLabel) set_label_if_changed(c->numberLabel, buf);
       } else if (c->gauge_type == GAUGE_TYPE_HISTOGRAM) {
-        if (c->chart && c->chartSeries) {
+        // Hold the trace while there's no data - don't plot the "waiting" sweep.
+        if (has_data && c->chart && c->chartSeries) {
           lv_chart_set_next_value(c->chart, c->chartSeries, displayValue);
         }
       } else {
         if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
         update_warning_flash(c, value, has_data);
-        if (c->numberLabel) { // the optional "show_value" readout for NEEDLE/HALFMOON
-          char buf[16];
-          snprintf(buf, sizeof(buf), "%.1f", value);
-          lv_label_set_text(c->numberLabel, buf);
-        }
+        if (c->numberLabel) set_label_if_changed(c->numberLabel, buf); // the optional "show_value" readout for NEEDLE/HALFMOON
       }
     }
   }
@@ -376,6 +487,52 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
 int gauge_app_get_num_pages(void) {
   return s_num_active_pages;
+}
+
+static void build_alert_overlay(void) {
+  lv_coord_t w = lv_disp_get_hor_res(NULL);
+  lv_coord_t h = lv_disp_get_ver_res(NULL);
+
+  s_alertOverlay = lv_obj_create(lv_layer_sys());
+  lv_obj_set_size(s_alertOverlay, w, h);
+  lv_obj_set_pos(s_alertOverlay, 0, 0);
+  lv_obj_set_style_radius(s_alertOverlay, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(s_alertOverlay, lv_color_hex(0x500000), 0);
+  lv_obj_set_style_bg_opa(s_alertOverlay, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(s_alertOverlay, 10, 0);
+  lv_obj_set_style_border_color(s_alertOverlay, lv_color_hex(0xFF2020), 0);
+  lv_obj_set_style_pad_all(s_alertOverlay, 0, 0);
+  lv_obj_clear_flag(s_alertOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_event_cb(s_alertOverlay, alert_click_cb, LV_EVENT_CLICKED, NULL);
+
+  s_alertTitle = lv_label_create(s_alertOverlay);
+  lv_obj_set_width(s_alertTitle, 330);
+  lv_label_set_long_mode(s_alertTitle, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(s_alertTitle, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(s_alertTitle, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_alertTitle, &lv_font_montserrat_36, 0);
+  lv_label_set_text(s_alertTitle, "");
+  lv_obj_align(s_alertTitle, LV_ALIGN_CENTER, 0, -90);
+
+  s_alertValue = lv_label_create(s_alertOverlay);
+  lv_obj_set_style_text_color(s_alertValue, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_alertValue, ALERT_VALUE_FONT, 0);
+  lv_label_set_text(s_alertValue, "");
+  lv_obj_align(s_alertValue, LV_ALIGN_CENTER, 0, 0);
+
+  s_alertMore = lv_label_create(s_alertOverlay);
+  lv_obj_set_style_text_color(s_alertMore, lv_color_hex(0xFFB0B0), 0);
+  lv_obj_set_style_text_font(s_alertMore, &lv_font_montserrat_28, 0);
+  lv_label_set_text(s_alertMore, "");
+  lv_obj_align(s_alertMore, LV_ALIGN_CENTER, 0, 75);
+
+  lv_obj_t *hint = lv_label_create(s_alertOverlay);
+  lv_obj_set_style_text_color(hint, lv_color_hex(0xFFB0B0), 0);
+  lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
+  lv_label_set_text(hint, "BOOT or tap to dismiss");
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 130);
+
+  lv_obj_add_flag(s_alertOverlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 void build_gauge_app(void) {
@@ -393,6 +550,8 @@ void build_gauge_app(void) {
     s_current_page = 0;
     lv_disp_load_scr(pages[0].page);
   }
+
+  build_alert_overlay(); // created before the logging dot so the dot stays on top of it
 
   // Logging indicator - a small circle on the system layer, so it
   // shows on top of whichever page is currently active without being
