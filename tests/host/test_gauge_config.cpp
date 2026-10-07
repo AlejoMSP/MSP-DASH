@@ -62,6 +62,32 @@ int main() {
   CHECK(p[0].cells[0].has_warning == true && p[0].cells[0].warning_above == true, "old fields still load");
   CHECK(strcmp(p[0].cells[0].caption, "CLT") == 0, "caption loads");
 
+
+  printf("S4 trend graph settings persist, and old configs get sane defaults\n");
+  gauge_config_init();                                // fresh defaults (flash was loaded from the old-format JSON above, so reset it)
+  Preferences::put_raw("gaugecfg2/pages", "");        // empty -> defaults
+  gauge_config_init();
+  p = gauge_config_get_pages();
+  CHECK(p[0].cells[0].history_sec == 30, "default history is 30s");
+  CHECK(p[0].cells[0].ref_enabled == false && p[0].cells[0].ref_value == 0.0f, "reference line defaults to off");
+  p[2].cells[0].history_sec = 120;
+  p[2].cells[0].ref_enabled = true;
+  p[2].cells[0].ref_value = 14.7f;
+  gauge_config_save();
+  p[2].cells[0].history_sec = 1; p[2].cells[0].ref_enabled = false; p[2].cells[0].ref_value = 0;   // wipe RAM
+  gauge_config_init();
+  p = gauge_config_get_pages();
+  CHECK(p[2].cells[0].history_sec == 120, "history_sec survives save + reload");
+  CHECK(p[2].cells[0].ref_enabled == true, "ref_enabled survives");
+  CHECK(p[2].cells[0].ref_value > 14.69f && p[2].cells[0].ref_value < 14.71f, "ref_value survives");
+  Preferences::put_raw("gaugecfg2/pages",
+    "[{\"enabled\":true,\"layout\":0,\"cells\":[{\"enabled\":true,\"signal\":3,\"gauge_type\":3,\"min\":0,\"max\":250,\"rest\":0,\"caption\":\"MAP\"}]}]");
+  gauge_config_init();
+  p = gauge_config_get_pages();
+  CHECK(p[0].cells[0].gauge_type == GAUGE_TYPE_HISTOGRAM, "trend graph type loads");
+  CHECK(p[0].cells[0].history_sec == 30, "a config saved before this feature gets 30s");
+  CHECK(p[0].cells[0].ref_enabled == false, "and no reference line");
+
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

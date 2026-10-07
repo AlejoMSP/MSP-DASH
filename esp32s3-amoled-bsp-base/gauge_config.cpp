@@ -62,6 +62,9 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.warning_threshold = warnThresh;
   c.warning_above = warnAbove;
   c.alert_fullscreen = false;
+  c.history_sec = 30;
+  c.ref_enabled = false;
+  c.ref_value = 0.0f;
   return c;
 }
 
@@ -130,6 +133,9 @@ static void serializeCell(JsonObject o, CellConfig *c) {
   o["warning_threshold"] = c->warning_threshold;
   o["warning_above"] = c->warning_above;
   o["alert_fullscreen"] = c->alert_fullscreen;
+  o["history_sec"] = c->history_sec;
+  o["ref_enabled"] = c->ref_enabled;
+  o["ref_value"] = c->ref_value;
 }
 
 static void deserializeCell(JsonObject o, CellConfig *c) {
@@ -153,6 +159,9 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->warning_threshold = o["warning_threshold"] | 0.0f;
   c->warning_above = o["warning_above"] | false;
   c->alert_fullscreen = o["alert_fullscreen"] | false;
+  c->history_sec = o["history_sec"] | 30;
+  c->ref_enabled = o["ref_enabled"] | false;
+  c->ref_value = o["ref_value"] | 0.0f;
 }
 
 void gauge_config_init(void) {

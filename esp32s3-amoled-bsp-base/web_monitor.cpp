@@ -272,7 +272,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
-    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon", "Trend Graph"];
     let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
@@ -281,7 +281,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
-        has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false };
+        has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
     function signalOptionsHtml(selected) {
@@ -305,7 +305,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
           ${!c.enabled ? "" : `
           <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
-          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value)">
+          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value); renderPages();">
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
           <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
@@ -330,6 +330,14 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
               </select>
             </label></div>
           </div>
+          ${c.gauge_type===3 ? `
+          <div class="row2">
+            <div><label>History (seconds, 2-600) <input type="number" min="2" max="600" value="${c.history_sec}" onchange="pages[${pIdx}].cells[${cIdx}].history_sec=parseInt(this.value)"></label></div>
+            <div><label><input type="checkbox" ${c.ref_enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].ref_enabled=this.checked"> Reference line</label></div>
+            <div><label>Reference value <input type="number" step="any" value="${c.ref_value}" onchange="pages[${pIdx}].cells[${cIdx}].ref_value=parseFloat(this.value)"></label></div>
+          </div>
+          <p style="font-size:0.75em;color:#888;margin:2px 0">Trend graphs take 100 samples across the history window and ignore Refresh Rate. Min and Max set the vertical range.</p>
+          ` : ""}
           <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
           <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
@@ -500,7 +508,7 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
-    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon", "Trend Graph"];
     let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
@@ -1037,6 +1045,9 @@ void web_monitor_init(void) {
         o["warning_threshold"] = cell->warning_threshold;
         o["warning_above"] = cell->warning_above;
         o["alert_fullscreen"] = cell->alert_fullscreen;
+        o["history_sec"] = cell->history_sec;
+        o["ref_enabled"] = cell->ref_enabled;
+        o["ref_value"] = cell->ref_value;
       }
     }
     String out;
@@ -1101,6 +1112,9 @@ void web_monitor_init(void) {
               cell->warning_threshold = o["warning_threshold"] | 0.0f;
               cell->warning_above = o["warning_above"] | false;
               cell->alert_fullscreen = o["alert_fullscreen"] | false;
+              cell->history_sec = o["history_sec"] | 30;
+              cell->ref_enabled = o["ref_enabled"] | false;
+              cell->ref_value = o["ref_value"] | 0.0f;
               c++;
             }
             i++;
@@ -1163,6 +1177,9 @@ void web_monitor_init(void) {
         o["warning_threshold"] = cell->warning_threshold;
         o["warning_above"] = cell->warning_above;
         o["alert_fullscreen"] = cell->alert_fullscreen;
+        o["history_sec"] = cell->history_sec;
+        o["ref_enabled"] = cell->ref_enabled;
+        o["ref_value"] = cell->ref_value;
       }
     }
     String out;
@@ -1237,6 +1254,9 @@ void web_monitor_init(void) {
               cell->warning_threshold = o["warning_threshold"] | 0.0f;
               cell->warning_above = o["warning_above"] | false;
               cell->alert_fullscreen = o["alert_fullscreen"] | false;
+              cell->history_sec = o["history_sec"] | 30;
+              cell->ref_enabled = o["ref_enabled"] | false;
+              cell->ref_value = o["ref_value"] | 0.0f;
               c++;
             }
             i++;

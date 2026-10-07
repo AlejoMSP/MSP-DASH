@@ -92,6 +92,7 @@ static void cell(CellConfig *c, SignalId sig, GaugeType t, const char *cap, int 
   c->needle_color = 0xFFFFFF; c->tick_color = 0xFFFFFF; c->bg_color = 0x000000;
   c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28;
   c->has_warning = warn; c->warning_threshold = thr; c->warning_above = above; c->alert_fullscreen = alert;
+  c->history_sec = 30;
 }
 
 static void nodata(void) { memset(s_has, 0, sizeof(s_has)); memset(s_val, 0, sizeof(s_val)); }
@@ -117,11 +118,31 @@ int main(void) {
   cell(&s_cfg[1].cells[1], SIG_AFR, GAUGE_TYPE_NUMBER, "AFR", 10, 20, true, 15, true, false);
   s_cfg[2].enabled = true; s_cfg[2].layout = LAYOUT_1CELL;
   cell(&s_cfg[2].cells[0], SIG_MAP, GAUGE_TYPE_HISTOGRAM, "MAP", 0, 250, false, 0, false, false);
+  s_cfg[2].cells[0].history_sec = 10; s_cfg[2].cells[0].refresh_hz = 1;
   s_cfg[3].enabled = true; s_cfg[3].layout = LAYOUT_2X2;
   cell(&s_cfg[3].cells[0], SIG_FUELP, GAUGE_TYPE_HALFMOON, "FUEL", 0, 100, true, 40, false, false); /* warns, but NOT alert-enabled */
   cell(&s_cfg[3].cells[1], SIG_FLEX, GAUGE_TYPE_NEEDLE, "ETH", 0, 100, false, 0, false, false);
   cell(&s_cfg[3].cells[2], SIG_TPS, GAUGE_TYPE_NUMBER, "TPS", 0, 100, false, 0, false, false);
   cell(&s_cfg[3].cells[3], SIG_BATTV, GAUGE_TYPE_NEEDLE, "BATT", 0, 20, false, 5, false, true);    /* alert on, warning OFF, threshold 5 and value 0 would trip it IF the warning flag were ignored */
+
+  /* pages 4-7: trend graphs in every layout (geometry, history limits, reference line, sample rate) */
+  s_cfg[4].enabled = true; s_cfg[4].layout = LAYOUT_1CELL;
+  cell(&s_cfg[4].cells[0], SIG_TPS, GAUGE_TYPE_HISTOGRAM, "TPS", 0, 100, false, 0, false, false);
+  s_cfg[4].cells[0].history_sec = 2;                       /* 100 points x 20ms */
+  s_cfg[5].enabled = true; s_cfg[5].layout = LAYOUT_2UP;
+  cell(&s_cfg[5].cells[0], SIG_OILT, GAUGE_TYPE_HISTOGRAM, "OILT", 10, 20, false, 0, false, false);
+  s_cfg[5].cells[0].history_sec = 20; s_cfg[5].cells[0].ref_enabled = true; s_cfg[5].cells[0].ref_value = 14.7f;
+  cell(&s_cfg[5].cells[1], SIG_FLEX, GAUGE_TYPE_HISTOGRAM, "FLEX", 0, 100, false, 0, false, false);
+  s_cfg[5].cells[1].history_sec = 600; s_cfg[5].cells[1].refresh_hz = 50;   /* 6s per sample no matter the refresh rate */
+  s_cfg[6].enabled = true; s_cfg[6].layout = LAYOUT_3UP;
+  cell(&s_cfg[6].cells[0], SIG_BATTV, GAUGE_TYPE_HISTOGRAM, "A", 0, 20, false, 0, false, false); s_cfg[6].cells[0].history_sec = 0;      /* out of range: clamps to 2 */
+  cell(&s_cfg[6].cells[1], SIG_BATTV, GAUGE_TYPE_HISTOGRAM, "B", 0, 20, false, 0, false, false); s_cfg[6].cells[1].history_sec = 5000;   /* out of range: clamps to 600 */
+  cell(&s_cfg[6].cells[2], SIG_BATTV, GAUGE_TYPE_HISTOGRAM, "C", 0, 20, false, 0, false, false); s_cfg[6].cells[2].history_sec = 90;
+  s_cfg[7].enabled = true; s_cfg[7].layout = LAYOUT_2X2;
+  cell(&s_cfg[7].cells[0], SIG_RPM,   GAUGE_TYPE_HISTOGRAM, "RPM", 0, 9000, false, 0, false, false);
+  cell(&s_cfg[7].cells[1], SIG_FUELP, GAUGE_TYPE_HISTOGRAM, "FP",  0, 100, false, 0, false, false);
+  cell(&s_cfg[7].cells[2], SIG_CLT,   GAUGE_TYPE_HISTOGRAM, "CLT", 65, 250, false, 0, false, false);
+  cell(&s_cfg[7].cells[3], SIG_FLEX,  GAUGE_TYPE_HISTOGRAM, "ETH", 0, 100, false, 0, false, false);
 
   nodata();
   build_gauge_app();
@@ -129,7 +150,7 @@ int main(void) {
   run_ms(100);
 
   printf("T1 boot with no data\n");
-  CHECK(s_nPage == 4, "found exactly our 4 page screens");
+  CHECK(s_nPage == 8, "found exactly our 8 page screens");
   CHECK(lv_scr_act() == screen(0), "page 0 is the active screen at boot");
   CHECK(find_overlay() != NULL, "alert overlay exists on the system layer");
   CHECK(!overlay_visible(), "overlay hidden at boot");
@@ -192,7 +213,7 @@ int main(void) {
   lv_disp_load_scr(screen(0)); run_ms(50);
   g_page_nav_delta = 1; run_ms(100);  CHECK(lv_scr_act() == screen(1), "0 -> 1");
   g_page_nav_delta = -1; run_ms(100); CHECK(lv_scr_act() == screen(0), "1 -> 0");
-  g_page_nav_delta = -1; run_ms(100); CHECK(lv_scr_act() == screen(3), "0 -> last page (wraps)");
+  g_page_nav_delta = -1; run_ms(100); CHECK(lv_scr_act() == screen(s_nPage - 1), "0 -> last page (wraps)");
   g_page_nav_delta = 1; run_ms(100);  CHECK(lv_scr_act() == screen(0), "last -> 0 (wraps)");
 
   printf("T9 two alerts: first in page order is shown, '+1 more' for the other\n");
@@ -225,7 +246,7 @@ int main(void) {
   if (!chart) { printf("\n%d passed, %d failed\n", g_pass, g_fail); return 1; }
   lv_chart_series_t *ser = lv_chart_get_series_next(chart, NULL);
   uint32_t n = lv_chart_get_point_count(chart);
-  lv_coord_t snapA[64], snapB[64];
+  lv_coord_t snapA[128], snapB[128];
   s_has[SIG_MAP] = true; s_val[SIG_MAP] = 100; run_ms(200);
   memcpy(snapA, lv_chart_get_y_array(chart, ser), sizeof(lv_coord_t) * n);
   s_val[SIG_MAP] = 200; run_ms(200);
@@ -236,6 +257,106 @@ int main(void) {
   run_ms(400);
   memcpy(snapB, lv_chart_get_y_array(chart, ser), sizeof(lv_coord_t) * n);
   CHECK(memcmp(snapA, snapB, sizeof(lv_coord_t) * n) == 0, "chart holds still with no data (no fake sweep trace)");
+
+
+  printf("T15 trend graph: its own sample rate (100 samples across the history window), not the refresh rate\n");
+  {
+    lv_obj_t *ch = find_class(screen(4), &lv_chart_class);                 /* TPS, 2s window => 20ms per sample */
+    lv_chart_series_t *sr = lv_chart_get_series_next(ch, NULL);
+    s_has[SIG_TPS] = true; s_val[SIG_TPS] = 50; run_ms(1000);
+    int filled = 0; lv_coord_t *y = lv_chart_get_y_array(ch, sr);
+    for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) filled++;
+    CHECK(filled >= 47 && filled <= 53, "1s of data at 20ms/sample puts ~50 points on the graph");
+    run_ms(1500);
+    filled = 0; for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) filled++;
+    CHECK(filled == 100, "window completely full after 2.5s of a 2s window");
+
+    lv_obj_t *slow = lv_obj_get_child(lv_obj_get_child(screen(5), 1), 0);  /* FLEX, 600s window, refresh_hz=50 */
+    (void)slow;
+    lv_obj_t *charts5[4]; int n5 = 0;
+    for (uint32_t k = 0; k < lv_obj_get_child_cnt(screen(5)); k++) { lv_obj_t *c2 = find_class(lv_obj_get_child(screen(5), k), &lv_chart_class); if (c2) charts5[n5++] = c2; }
+    CHECK(n5 == 2, "found both trend graphs on the 2-up page");
+    lv_obj_t *flexch = charts5[1];
+    lv_chart_series_t *fs = lv_chart_get_series_next(flexch, NULL);
+    s_has[SIG_FLEX] = true; s_val[SIG_FLEX] = 40; run_ms(12500);
+    int fp = 0; lv_coord_t *fy = lv_chart_get_y_array(flexch, fs);
+    for (int i = 0; i < 100; i++) if (fy[i] != LV_CHART_POINT_NONE) fp++;
+    CHECK(fp >= 2 && fp <= 4, "600s window samples every 6s even with refresh_hz=50 (about 3 points in 12.5s, not hundreds)");
+  }
+
+  printf("T16 trend graph resolution: small moves stay visible\n");
+  {
+    lv_obj_t *ch = NULL;
+    for (uint32_t k = 0; k < lv_obj_get_child_cnt(screen(5)); k++) { lv_obj_t *c2 = find_class(lv_obj_get_child(screen(5), k), &lv_chart_class); if (c2) { ch = c2; break; } }
+    /* LVGL lists the most recently added series first, and draws the list back to front: the
+       data series (added second) is first in the list and is painted on top of the reference line. */
+    lv_chart_series_t *data = lv_chart_get_series_next(ch, NULL);
+    lv_chart_series_t *ref = lv_chart_get_series_next(ch, data);
+    CHECK(ref != NULL && data != NULL, "graph has a reference series AND a data series");
+    s_has[SIG_OILT] = true; s_val[SIG_OILT] = 14.2f; run_ms(1000);
+    s_val[SIG_OILT] = 14.7f; run_ms(1000);
+    lv_coord_t *y = lv_chart_get_y_array(ch, data);
+    int has4200 = 0, has4700 = 0, other = 0;
+    for (int i = 0; i < 100; i++) { if (y[i] == LV_CHART_POINT_NONE) continue; if (y[i] == 4200) has4200++; else if (y[i] == 4700) has4700++; else other++; }
+    CHECK(has4200 > 0 && has4700 > 0, "14.2 and 14.7 land on different points (4200 and 4700 on a 10-20 range)");
+    CHECK(other == 0, "no stray values: exactly the two levels that were fed in");
+    lv_coord_t *ry = lv_chart_get_y_array(ch, ref);
+    int refOk = 1; for (int i = 0; i < 100; i++) if (ry[i] != 4700) refOk = 0;
+    CHECK(refOk, "reference line at 14.7 sits at 4700 across all 100 points");
+  }
+
+  printf("T17 trend graph captions state the time span, and out-of-range history is clamped\n");
+  CHECK(find_label_text(screen(4), "TPS  2s") != NULL, "2s history");
+  CHECK(find_label_text(screen(5), "OILT  20s") != NULL, "20s history");
+  CHECK(find_label_text(screen(5), "FLEX  10 min") != NULL, "600s shown as minutes");
+  CHECK(find_label_text(screen(6), "A  2s") != NULL, "history 0 clamps up to 2s");
+  CHECK(find_label_text(screen(6), "B  10 min") != NULL, "history 5000 clamps down to 600s");
+  CHECK(find_label_text(screen(6), "C  90s") != NULL, "90s history");
+
+  printf("T18 every trend graph, in every layout, fits inside the round panel and its own cell\n");
+  {
+    const int S = 466, H = 233;
+    struct { int page; int cells; } layouts[] = { {4, 1}, {5, 2}, {6, 3}, {7, 4} };
+    int ok = 1, count = 0;
+    for (int li = 0; li < 4; li++) {
+      lv_obj_t *scr = screen(layouts[li].page);
+      lv_obj_update_layout(scr);
+      int idx = 0;
+      for (uint32_t k = 0; k < lv_obj_get_child_cnt(scr); k++) {
+        lv_obj_t *cont = lv_obj_get_child(scr, k);
+        lv_obj_t *c2 = find_class(cont, &lv_chart_class);
+        if (!c2) continue;
+        lv_area_t a; lv_obj_get_coords(c2, &a);
+        /* the cell this chart belongs to, per the layout definitions */
+        int cx0, cy0, cw, chh;
+        if (layouts[li].page == 4)      { cx0 = 0; cy0 = 0; cw = S; chh = S; }
+        else if (layouts[li].page == 5) { cx0 = 0; cy0 = idx ? H : 0; cw = S; chh = H; }
+        else if (layouts[li].page == 6) { if (idx == 0) { cx0 = 0; cy0 = 0; cw = S; chh = H; } else { cx0 = (idx == 1) ? 0 : H; cy0 = H; cw = H; chh = H; } }
+        else                            { cx0 = (idx % 2) ? H : 0; cy0 = (idx / 2) ? H : 0; cw = H; chh = H; }
+        int w = a.x2 - a.x1 + 1, h = a.y2 - a.y1 + 1;
+        int corners[4][2] = { {a.x1, a.y1}, {a.x2, a.y1}, {a.x1, a.y2}, {a.x2, a.y2} };
+        for (int q = 0; q < 4; q++) {
+          double dx = corners[q][0] - 233.0, dy = corners[q][1] - 233.0;
+          if (dx * dx + dy * dy > 233.0 * 233.0) { ok = 0; printf("  corner outside the circle: page %d chart %d corner %d (%d,%d)\n", layouts[li].page, idx, q, corners[q][0], corners[q][1]); }
+        }
+        if (a.x1 < cx0 || a.y1 < cy0 || a.x2 >= cx0 + cw || a.y2 >= cy0 + chh) { ok = 0; printf("  chart leaves its cell: page %d chart %d\n", layouts[li].page, idx); }
+        if (w < 60 || h < 40) { ok = 0; printf("  chart too small: page %d chart %d is %dx%d\n", layouts[li].page, idx, w, h); }
+        /* the caption (the container's other child) must also sit fully on the glass */
+        lv_obj_t *cap = lv_obj_get_child(cont, 1);
+        if (cap && lv_obj_check_type(cap, &lv_label_class)) {
+          lv_obj_update_layout(cont);
+          lv_area_t ca; lv_obj_get_coords(cap, &ca);
+          int cc[4][2] = { {ca.x1, ca.y1}, {ca.x2, ca.y1}, {ca.x1, ca.y2}, {ca.x2, ca.y2} };
+          for (int q = 0; q < 4; q++) { double dx = cc[q][0] - 233.0, dy = cc[q][1] - 233.0;
+            if (dx * dx + dy * dy > 233.0 * 233.0) { ok = 0; printf("  CAPTION corner outside the circle: page %d chart %d corner (%d,%d) text '%s'\n", layouts[li].page, idx, cc[q][0], cc[q][1], lv_label_get_text(cap)); } }
+          if (ca.y1 < a.y2) { ok = 0; printf("  caption overlaps its chart: page %d chart %d\n", layouts[li].page, idx); }
+        } else { ok = 0; printf("  no caption label found for page %d chart %d\n", layouts[li].page, idx); }
+        count++; idx++;
+      }
+    }
+    CHECK(count == 10, "found all 10 trend graphs (1+2+3+4)");
+    CHECK(ok, "every graph AND its caption fully inside the circle; graph inside its cell, at least 60x40, caption below it");
+  }
 
   printf("T14 soak: 5 simulated minutes of random values, signal drops, button presses and taps\n");
   srand(12345);

@@ -1553,3 +1553,53 @@ config side (timeout, millis wrap, save/reload of the new field, old
 configs without the field). Deliberately breaking the code 6 ways was
 caught by the tests each time (one weak test was found and fixed that
 way). NOT yet run on the board.
+
+## Trend graph rework: real history, resolution, fits the round panel (2026-10-06)
+
+Found by rendering the real gauge_app.c on a PC and looking at it (see
+tests/host/screenshot.c), after the Teensy sketch comparison.
+
+Problems with the Stage 1 trend graph (GAUGE_TYPE_HISTOGRAM):
+- **Window was ~1 second.** 50 points, one pushed per cell update, and
+  MAP/AFR/pressures default to 50Hz. A 60s MAP sweep looked like a flat line.
+- **Integer values.** A plain cast meant AFR 14.2 and 14.7 plotted on the
+  same point (and a 10-20 range had only ~10 levels).
+- **Square chart on a round panel.** Corners and trace ends fell off the glass.
+- **Not selectable.** The /gauges and /web-config type dropdowns only listed
+  Needle/Number/Half-Moon, so the type could not be chosen from the UI at all.
+
+Changes:
+- New per-cell settings: `history_sec` (2-600, default 30), `ref_enabled`,
+  `ref_value` (saved, in the web JSON, old configs load as 30s / no line).
+- The graph samples HIST_POINTS (100) times across history_sec, independent of
+  refresh_hz (interval = history_sec*1000/100 ms; 2s -> 20ms, 600s -> 6s).
+- Values are plotted as (value - min) * scale, scale = 10000/span (1..1000),
+  with the chart range 0..span*scale: sub-unit moves stay visible and
+  everything stays inside int16 whatever min/max are.
+- fit_chart_rect(): finds the largest rectangle inside the cell whose four
+  corners stay inside the circle (radius 225), leaving a caption band, with a
+  preference for wide shapes (time axis). Runs once at build time. The chart's
+  position is converted from absolute screen coords to the container's content
+  area (padding + border).
+- Optional flat reference line (e.g. 14.7 for AFR) as a second chart series,
+  added first so the trace draws over it. (LVGL lists the NEWEST series first
+  and draws the list back to front.)
+- Dim grid, no per-sample dots, 3px trace. Caption shows the span ("MAP  30s",
+  "FLEX  10 min") and sits directly under its own graph (it used to sit on the
+  cell's bottom edge, where the round panel is narrowest and clipped it).
+- Editor: "Trend Graph" added to both type dropdowns (index 3 = firmware enum);
+  choosing it re-renders and shows History seconds / Reference line / value on
+  /gauges. /web-config only lists the type (the web page still draws plain
+  numbers for every type) and passes the new fields through unchanged.
+
+Testing: 59 display checks (16 new: sample rate vs refresh rate, window fills,
+resolution, reference line, caption span + clamping, all 10 graphs across the
+four layouts and their captions fully inside the circle) and 25 config checks,
+under AddressSanitizer/UBSan. Six deliberate breakages (sample at refresh rate,
+no scaling, no circle fit, no reference line, no history clamp, old caption
+position) were each caught. NOT yet run on the board.
+
+Seen while rendering, not fixed: in small cells (2-up, quadrants) needle-gauge
+tick labels at the default 28px size overlap each other and the needle. The
+tick font shares the "Value Text Size" setting - choosing Small (14px) fixes
+it per cell.

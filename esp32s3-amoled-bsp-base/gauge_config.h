@@ -72,6 +72,10 @@ typedef struct {
   float warning_threshold;
   bool warning_above;
   bool alert_fullscreen;   // when this cell's warning triggers (and the engine is running), take over the whole screen on ANY page. BOOT button or a tap dismisses it for 30s. Needs has_warning.
+  // ---- GAUGE_TYPE_HISTOGRAM (trend graph) only ----
+  int32_t history_sec;     // seconds of history the graph shows (2-600). The graph takes 100 samples across this window, independent of refresh_hz.
+  bool ref_enabled;        // draw a flat reference line, e.g. 14.7 on an AFR graph
+  float ref_value;         // where that line sits, in the same units as min/max
 } CellConfig;
 
 // A page: a chosen layout template plus however many cells that

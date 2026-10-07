@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 volatile float g_afr = 0;
 volatile float g_clt_f = 0;
@@ -106,6 +107,9 @@ typedef struct {
   bool warning_active;
   bool alert_fullscreen;
   char caption[GAUGE_CAPTION_MAXLEN];
+  int32_t hist_min;        // trend graph: the value that sits at the bottom of the chart
+  int32_t hist_scale;      // trend graph: chart units per real unit (so AFR 14.2 vs 14.7 stays distinguishable)
+  int32_t hist_top;        // trend graph: highest chart value (the top of the range)
   int32_t sweep_pos, sweep_step;
   int8_t sweep_dir;
   uint32_t refresh_interval_ms, last_update_ms;
@@ -185,6 +189,50 @@ static void switch_to_page(int index) {
   lv_disp_load_scr(pages[index].page);
 }
 
+// ---- Trend graph (GAUGE_TYPE_HISTOGRAM) ----
+#define HIST_POINTS   100    // samples across the history window
+#define HIST_MIN_SEC  2
+#define HIST_MAX_SEC  600
+#define HIST_RANGE    10000  // target size of the chart's value range - comfortably inside lv_coord_t (int16) and fine enough to resolve small moves
+
+// The panel is a circle, so a square chart's corners (and the ends of its
+// trace) fall off the glass. Finds the largest rectangle inside the given
+// cell (absolute screen coords) whose four corners all stay inside the
+// circle, leaving a band at the bottom for the caption. Prefers wide
+// shapes, since the horizontal axis is time. Runs once at build time.
+static void fit_chart_rect(CellRect cell, int16_t *ox, int16_t *oy, int16_t *ow, int16_t *oh) {
+  const float S = 466.0f;
+  const float cx = S / 2.0f, cy = S / 2.0f;
+  const float R = S / 2.0f - 8.0f;
+  const int pad = 6, capBand = 34, step = 4, minW = 60, minH = 40;
+
+  int topLimit = cell.y + pad;
+  int botLimit = cell.y + cell.h - capBand;
+  float bestScore = 0, bx = 0, bw = 0;
+  int by0 = 0, by1 = 0;
+
+  for (int y0 = topLimit; y0 + minH <= botLimit; y0 += step) {
+    for (int y1 = y0 + minH; y1 <= botLimit; y1 += step) {
+      float dy = fmaxf(fabsf((float)y0 - cy), fabsf((float)y1 - cy));
+      if (dy >= R) continue;
+      float half = sqrtf(R * R - dy * dy);
+      float xl = fmaxf((float)(cell.x + pad), cx - half);
+      float xr = fminf((float)(cell.x + cell.w - pad), cx + half);
+      float w = xr - xl, h = (float)(y1 - y0);
+      if (w < minW) continue;
+      float aspect = w / h;
+      float score = w * h * (aspect >= 1.4f ? 1.0f : aspect / 1.4f);
+      if (score > bestScore) { bestScore = score; bx = xl; bw = w; by0 = y0; by1 = y1; }
+    }
+  }
+
+  if (bestScore <= 0) { // degenerate cell - fall back to a plain inset rectangle
+    *ox = cell.x + pad; *oy = cell.y + pad; *ow = cell.w - 2 * pad; *oh = cell.h - capBand - pad;
+    return;
+  }
+  *ox = (int16_t)bx; *oy = (int16_t)by0; *ow = (int16_t)bw; *oh = (int16_t)(by1 - by0);
+}
+
 // Builds one cell's content (meter+needle, or plain number) inside its
 // own container, sized/positioned to the given rect. Content is built
 // using relative positioning (center/align) within the container, so
@@ -240,23 +288,68 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_label_set_text(capLabel, cfg->caption);
     lv_obj_align_to(capLabel, numLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
   } else if (cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) {
+    int32_t sec = cfg->history_sec;
+    if (sec < HIST_MIN_SEC) sec = HIST_MIN_SEC;
+    if (sec > HIST_MAX_SEC) sec = HIST_MAX_SEC;
+
+    // Chart values are small integers, so scale real values up: a plain
+    // cast would turn AFR 14.2 and 14.7 into the same point. Plot
+    // (value - min) * scale, which also keeps everything well inside the
+    // int16 range whatever the gauge's min/max are.
+    float span = (float)(cfg->max_val - cfg->min_val);
+    if (span < 1.0f) span = 1.0f;
+    int32_t scale = (int32_t)(HIST_RANGE / span);
+    if (scale < 1) scale = 1;
+    if (scale > 1000) scale = 1000;
+    int32_t top = (int32_t)(span * (float)scale);
+    if (top > 30000) top = 30000;
+    rt->hist_min = cfg->min_val;
+    rt->hist_scale = scale;
+    rt->hist_top = top;
+
+    int16_t fx, fy, fw, fh;
+    fit_chart_rect(rect, &fx, &fy, &fw, &fh);
+    // set_pos is relative to the container's CONTENT area (inside its padding and border)
+    lv_coord_t padL = lv_obj_get_style_pad_left(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+    lv_coord_t padT = lv_obj_get_style_pad_top(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+
     lv_obj_t *chart = lv_chart_create(container);
-    lv_obj_set_size(chart, rect.w - 10, rect.h - 30);
-    lv_obj_align(chart, LV_ALIGN_TOP_MID, 0, 4);
+    lv_obj_set_size(chart, fw, fh);
+    lv_obj_set_pos(chart, fx - rect.x - padL, fy - rect.y - padT);
     lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(chart, 50); // rolling window - oldest points scroll off as new ones arrive
-    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, cfg->min_val, cfg->max_val);
+    lv_chart_set_point_count(chart, HIST_POINTS); // rolling window - oldest points scroll off the left as new ones arrive on the right
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, top);
     lv_obj_set_style_bg_color(chart, lv_color_hex(cfg->bg_color), 0);
     lv_obj_set_style_border_width(chart, 1, 0);
     lv_obj_set_style_border_color(chart, tickColor, 0);
+    lv_obj_set_style_line_color(chart, lv_color_hex(0x2A2A2A), LV_PART_MAIN); // grid lines: dim, so the trace stands out
+    lv_obj_set_style_size(chart, 0, LV_PART_INDICATOR);                       // no dot on every sample - at 100 points they smear into a thick band
+    lv_obj_set_style_line_width(chart, 3, LV_PART_ITEMS);
+
+    // Optional flat reference line (e.g. 14.7 on an AFR graph). Added
+    // BEFORE the data series so the trace is drawn on top of it.
+    if (cfg->ref_enabled) {
+      lv_chart_series_t *ref = lv_chart_add_series(chart, lv_color_hex(0x909090), LV_CHART_AXIS_PRIMARY_Y);
+      float r = (cfg->ref_value - (float)cfg->min_val) * (float)scale;
+      if (r < 0) r = 0;
+      if (r > (float)top) r = (float)top;
+      lv_chart_set_all_value(chart, ref, (lv_coord_t)(r + 0.5f));
+    }
     lv_chart_series_t *series = lv_chart_add_series(chart, needleColor, LV_CHART_AXIS_PRIMARY_Y);
     rt->chart = chart;
     rt->chartSeries = series;
 
+    // Caption with the time span, so the graph's horizontal scale is never a guess
+    char cap[GAUGE_CAPTION_MAXLEN + 12];
+    if (sec >= 120) snprintf(cap, sizeof(cap), "%s  %d min", cfg->caption, (int)(sec / 60));
+    else snprintf(cap, sizeof(cap), "%s  %ds", cfg->caption, (int)sec);
     lv_obj_t *capLabel = lv_label_create(container);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
-    lv_label_set_text(capLabel, cfg->caption);
-    lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_label_set_text(capLabel, cap);
+    // Directly under its own graph, not pinned to the cell's bottom edge - in the
+    // bottom cells that edge is where the round panel is narrowest, and the caption's ends
+    // would be cut off by the bezel.
+    lv_obj_align_to(capLabel, chart, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
   } else {
     // NEEDLE or HALFMOON
     int32_t angleRange = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 270;
@@ -305,6 +398,15 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
   int32_t hz = cfg->refresh_hz < 1 ? 1 : cfg->refresh_hz;
   rt->refresh_interval_ms = 1000 / hz;
+  if (cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) {
+    // A trend graph samples HIST_POINTS times across its history window,
+    // whatever the cell's refresh rate says. (At the old behavior of one
+    // point per refresh, a 50Hz signal showed only 1 second of history.)
+    int32_t sec = cfg->history_sec;
+    if (sec < HIST_MIN_SEC) sec = HIST_MIN_SEC;
+    if (sec > HIST_MAX_SEC) sec = HIST_MAX_SEC;
+    rt->refresh_interval_ms = (uint32_t)(sec * 1000) / HIST_POINTS;
+  }
   rt->last_update_ms = 0;
 }
 
@@ -474,7 +576,10 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
       } else if (c->gauge_type == GAUGE_TYPE_HISTOGRAM) {
         // Hold the trace while there's no data - don't plot the "waiting" sweep.
         if (has_data && c->chart && c->chartSeries) {
-          lv_chart_set_next_value(c->chart, c->chartSeries, displayValue);
+          float y = (value - (float)c->hist_min) * (float)c->hist_scale;
+          if (y < 0) y = 0;
+          if (y > (float)c->hist_top) y = (float)c->hist_top;
+          lv_chart_set_next_value(c->chart, c->chartSeries, (lv_coord_t)(y + 0.5f));
         }
       } else {
         if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
