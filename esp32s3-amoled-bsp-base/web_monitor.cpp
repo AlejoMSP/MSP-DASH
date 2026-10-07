@@ -313,7 +313,14 @@ R"rawliteral(<style>
     .row2 > div { flex:1; }
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
-    .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .bulk { background:#111; border-radius:8px; padding:14px; margin-bottom:14px; }
+    .bulk-title { font-weight:bold; }
+    .bulk-sub { font-size:0.78em; color:#888; margin:2px 0 12px; }
+    .bulk-colors { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+    .bulk-colors label { display:flex; flex-direction:column; gap:5px; font-size:0.78em; color:#4dd0e1; }
+    .bulk-colors input[type=color] { width:100%; height:38px; padding:2px; border:1px solid #333; border-radius:6px; background:#000; }
+    .bulk-apply { width:100%; margin:0; }
+    .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
   </style>)rawliteral" PH_OPEN
@@ -323,16 +330,17 @@ R"rawliteral(<div class="pad">
   <div id="boot">Page script has not started yet...</div>
 
   <div class="bulk">
-    <strong>Apply colors to ALL cells on ALL pages</strong>
-    <div class="row2">
-      <div><label>Needle <input type="color" id="bulkNeedle" value="#ffffff"></label></div>
-      <div><label>Tick/Dial <input type="color" id="bulkTick" value="#ffffff"></label></div>
-      <div><label>Background <input type="color" id="bulkBg" value="#000000"></label></div>
+    <div class="bulk-title">Apply colors to ALL cells</div>
+    <div class="bulk-sub">Sets every cell on every page. Click Save afterward to keep it.</div>
+    <div class="bulk-colors">
+      <label>Needle<input type="color" id="bulkNeedle" value="#ffffff"></label>
+      <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
+      <label>Background<input type="color" id="bulkBg" value="#000000"></label>
     </div>
-    <button type="button" onclick="applyColorsToAll()">Apply to All</button>
+    <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply to All</button>
   </div>
 
-  <button type="button" onclick="addPage()">+ Add Page</button>
+  <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
 
@@ -544,7 +552,14 @@ R"rawliteral(<style>
     .row2 > div { flex:1; }
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
-    .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .bulk { background:#111; border-radius:8px; padding:14px; margin-bottom:14px; }
+    .bulk-title { font-weight:bold; }
+    .bulk-sub { font-size:0.78em; color:#888; margin:2px 0 12px; }
+    .bulk-colors { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+    .bulk-colors label { display:flex; flex-direction:column; gap:5px; font-size:0.78em; color:#4dd0e1; }
+    .bulk-colors input[type=color] { width:100%; height:38px; padding:2px; border:1px solid #333; border-radius:6px; background:#000; }
+    .bulk-apply { width:100%; margin:0; }
+    .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
   </style>)rawliteral" PH_OPEN
@@ -554,16 +569,17 @@ R"rawliteral(<div class="pad">
   <div id="boot">Page script has not started yet...</div>
 
   <div class="bulk">
-    <strong>Apply colors to ALL cells on ALL pages</strong>
-    <div class="row2">
-      <div><label>Needle <input type="color" id="bulkNeedle" value="#ffffff"></label></div>
-      <div><label>Tick/Dial <input type="color" id="bulkTick" value="#ffffff"></label></div>
-      <div><label>Background <input type="color" id="bulkBg" value="#000000"></label></div>
+    <div class="bulk-title">Apply colors to ALL cells</div>
+    <div class="bulk-sub">Sets every cell on every page. Click Save afterward to keep it.</div>
+    <div class="bulk-colors">
+      <label>Needle<input type="color" id="bulkNeedle" value="#ffffff"></label>
+      <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
+      <label>Background<input type="color" id="bulkBg" value="#000000"></label>
     </div>
-    <button type="button" onclick="applyColorsToAll()">Apply to All</button>
+    <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply to All</button>
   </div>
 
-  <button type="button" onclick="addPage()">+ Add Page</button>
+  <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
 

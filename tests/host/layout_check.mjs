@@ -42,7 +42,11 @@ for (const prof of PROFILES) {
       const vw = document.documentElement.clientWidth; const wide = [];
       document.querySelectorAll('.phone-outer *').forEach(e => { const r = e.getBoundingClientRect(); if (r.width > 0 && (r.right > vw + 1 || r.left < -1)) wide.push(e.tagName.toLowerCase() + (e.id ? '#' + e.id : '')); });
       const smallInputs = [...document.querySelectorAll('input:not([type=checkbox]):not([type=color]):not([type=file]):not([type=range]),select,textarea')].filter(e => parseFloat(getComputedStyle(e).fontSize) < 16 && e.getBoundingClientRect().width > 0).length;
-      return { has: !!po, border: cs && cs.borderTopWidth, radius: cs && cs.borderTopLeftRadius, w: po && Math.round(po.getBoundingClientRect().width),
+      const bulk = [...document.querySelectorAll('.bulk-colors input')].map(e => e.getBoundingClientRect());
+      const box = document.querySelector('.bulk'), apply = document.querySelector('.bulk-apply');
+      const bulkInfo = bulk.length ? { n: bulk.length, widthSpread: Math.max(...bulk.map(r => r.width)) - Math.min(...bulk.map(r => r.width)), topSpread: Math.max(...bulk.map(r => r.top)) - Math.min(...bulk.map(r => r.top)),
+        applyFill: apply.getBoundingClientRect().width / (box.getBoundingClientRect().width - 28) } : null;
+      return { bulkInfo, has: !!po, border: cs && cs.borderTopWidth, radius: cs && cs.borderTopLeftRadius, w: po && Math.round(po.getBoundingClientRect().width),
                scrollW: document.documentElement.scrollWidth, vw, wide: [...new Set(wide)].slice(0, 4), nav: !!document.getElementById('navmenu') && !!document.querySelector('.brand'), smallInputs };
     });
     await page.screenshot({ path: `${outDir}/${prof.name}_${label}.png`, fullPage: prof.phone });
@@ -57,6 +61,12 @@ for (const prof of PROFILES) {
     }
     if (prof.phone && m.scrollW > m.vw + 1) bad(`page scrolls sideways (${m.scrollW}px wide on a ${m.vw}px screen)`);
     if (prof.phone && m.wide.length) bad(`sticks out past the screen edge: ${m.wide.join(', ')}`);
+    if (m.bulkInfo) {   // the "apply colours to all" box on the two editors
+      if (m.bulkInfo.n !== 3) bad('colour box should have 3 pickers, found ' + m.bulkInfo.n);
+      if (m.bulkInfo.widthSpread > 1) bad(`colour pickers are different widths (${m.bulkInfo.widthSpread.toFixed(0)}px apart)`);
+      if (m.bulkInfo.topSpread > 1) bad(`colour pickers are not on one row (${m.bulkInfo.topSpread.toFixed(0)}px apart vertically)`);
+      if (m.bulkInfo.applyFill < 0.95) bad('the Apply to All button does not span the box');
+    }
     if (!m.nav) bad('missing the shared header / menu');
     if (errors.length) bad('script error: ' + errors.join('; '));
   }

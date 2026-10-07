@@ -1803,3 +1803,13 @@ test suites (31 + 5 + 20) still pass. Screenshots reviewed. NOT yet seen on a re
 
 New tools in tests/host: extract_page.js, mock_board.js, layout_check.mjs (needs `npm install` there),
 check_pages_match_compiler.sh, dump_pages.cpp, package.json.
+
+## Colour box on the two editors tidied (build 106)
+
+The "apply colours to ALL cells" box on /gauges and /web-config had each label and swatch side by side,
+so "Needle" fit on one line while "Tick/Dial" and "Background" wrapped to three different heights, and
+"+ Add Page" sat 2px off the box edge. Now: title + one-line hint, three equal columns with the label
+above its swatch, a full-width Apply to All button, and a full-width dashed "+ Add Page". layout_check.mjs
+gained a rule (3 pickers, same width, same row, button spans the box) and was shown to fail when the grid
+rule is removed. Checked in headless Chrome at 350px and 430px; Apply to All still reaches the first and
+last cell.
