@@ -1458,3 +1458,46 @@ Changes:
   show a doubled rate on /can. Also clamps dlc to 8.
 
 NOT yet bench-tested as of this writing.
+
+## /gauges blank-page investigation: likely internal RAM exhaustion (2026-10-06)
+
+Symptom: /gauges (and /web-config) intermittently loaded with the top of
+the page but no page cards, and the buttons did nothing. A hard refresh
+and a confirmed fresh flash did not fix it.
+
+What was ruled out: every page's JavaScript was extracted from
+web_monitor.cpp and checked with node - all 7 parse cleanly, and the
+/gauges logic run against board-style JSON renders all 7 cards and
+Add/Copy/Delete/layout-change all work. So the page code is correct.
+
+Likely cause: the POST body buffers added in the last few rounds were
+static arrays - bodyBuf[24576] + webBodyBuf[24576] + logChanBuf[2048] =
+51,200 bytes of internal RAM held permanently (the earlier OTA-era build
+reported 104,128 bytes of globals with the old 8KB buffer; now roughly
+147KB of 327KB). The LVGL draw buffers take ~86KB more of internal DMA
+RAM (2 x 466 x 46 x 2 bytes). That leaves very little heap for WiFi/TCP,
+JSON and String building, which fits an intermittent failure. This is
+inferred from sizes, not yet measured on the board.
+
+Changes:
+- The three POST buffers are now allocated once from PSRAM (8MB
+  available) via allocPostBuf(), falling back to the normal heap if
+  PSRAM is unavailable. Frees ~51KB of internal RAM.
+- web_monitor_loop() prints a Serial line every 10s: internal free,
+  largest free block, lowest-ever free, PSRAM free. If the cause is
+  right, internal free should now be ~50KB higher than before and stay
+  stable while loading /gauges.
+- Config pages (/gauges, /web-config, /log-channels):
+  * A "Page script has not started yet..." banner sits near the top and
+    is cleared by the script's first line, so a truncated/stalled page
+    now says so on screen. window.onerror shows any script error there.
+  * The status line moved from a sticky bottom bar (which was easy to
+    cut off) to just under the back link.
+  * Save is refused until the list has actually loaded - previously a
+    failed load left an empty list and Save would POST [] and wipe every
+    page. Saving an intentionally empty list now asks for confirmation.
+  * Save checks the board's response and shows "Save FAILED" instead of
+    claiming success.
+
+Next step is to flash and watch the Heap line on the Serial monitor
+while reloading /gauges repeatedly.

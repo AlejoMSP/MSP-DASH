@@ -31,6 +31,19 @@
 #include <sys/stat.h>
 #include <Update.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
+#include "esp_heap_caps.h"
+
+// POST body buffers live in PSRAM, allocated once on first use. They used
+// to be static arrays - 51KB of internal RAM held permanently, on top of
+// the ~86KB the LVGL draw buffers need - which left the WiFi/TCP stack
+// and web server too little heap and caused intermittent stalls (config
+// pages loading blank). PSRAM is plentiful (8MB) and these are just
+// scratch space for parsing JSON.
+static char *allocPostBuf(size_t n) {
+  char *p = (char *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!p) p = (char *)malloc(n); // no PSRAM available - fall back to the normal heap
+  return p;
+}
 
 #define SD_MOUNT_POINT "/sd_card"
 
@@ -230,12 +243,14 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
     .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
-    #status { text-align:center; margin-top:10px; color:#4dd0e1; position:sticky; bottom:0; background:#000; padding:8px; }
+    #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
   </style>
 </head>
 <body>
   <h1>Gauge Configuration</h1>
   <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div id="status"></div>
+  <div id="boot">Page script has not started yet...</div>
 
   <div class="bulk">
     <strong>Apply colors to ALL cells on ALL pages</strong>
@@ -250,13 +265,15 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
   <button type="button" onclick="addPage()">+ Add Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
-  <div id="status"></div>
 
   <script>
+    window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
+    document.getElementById("boot").textContent = "";
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
 
@@ -392,6 +409,7 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
         const signalsRes = await fetch("/signals.json");
         signalActivity = await signalsRes.json();
         renderPages();
+        loaded = true;
         document.getElementById("status").textContent = "";
       } catch (e) {
         document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
@@ -399,9 +417,15 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
     }
 
     async function save() {
+      // Never save a list that failed to load - an empty array would wipe every page on the board.
+      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return; }
+      if (pages.length === 0 && !confirm("This will remove ALL pages. Save anyway?")) return;
       document.getElementById("status").textContent = "Saving...";
-      await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
-      document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+      try {
+        const r = await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
+        if (!r.ok) throw new Error("board returned " + r.status);
+        document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
 
     async function applyColorsToAll() {
@@ -446,12 +470,14 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
     .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
-    #status { text-align:center; margin-top:10px; color:#4dd0e1; position:sticky; bottom:0; background:#000; padding:8px; }
+    #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
   </style>
 </head>
 <body>
   <h1>Web Dashboard Configuration</h1>
   <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div id="status"></div>
+  <div id="boot">Page script has not started yet...</div>
 
   <div class="bulk">
     <strong>Apply colors to ALL cells on ALL pages</strong>
@@ -466,13 +492,15 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
   <button type="button" onclick="addPage()">+ Add Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
-  <div id="status"></div>
 
   <script>
+    window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
+    document.getElementById("boot").textContent = "";
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon"];
+    let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
 
@@ -603,6 +631,7 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
         const signalsRes = await fetch("/signals.json");
         signalActivity = await signalsRes.json();
         renderPages();
+        loaded = true;
         document.getElementById("status").textContent = "";
       } catch (e) {
         document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
@@ -610,9 +639,15 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
     }
 
     async function save() {
+      // Never save a list that failed to load - an empty array would wipe every page on the board.
+      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return; }
+      if (pages.length === 0 && !confirm("This will remove ALL pages. Save anyway?")) return;
       document.getElementById("status").textContent = "Saving...";
-      await fetch("/web-pages", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
-      document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+      try {
+        const r = await fetch("/web-pages", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
+        if (!r.ok) throw new Error("board returned " + r.status);
+        document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
 
     async function applyColorsToAll() {
@@ -703,7 +738,7 @@ static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
     h1 { font-size: 1.2em; text-align:center; }
     label { display:flex; align-items:center; gap:10px; padding:10px; background:#111; border-radius:6px; margin-bottom:6px; }
     button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin-top:10px; }
-    #status { text-align:center; margin-top:10px; color:#4dd0e1; }
+    #status, #boot { text-align:center; margin-top:10px; color:#4dd0e1; min-height:1.2em; }
   </style>
 </head>
 <body>
@@ -713,7 +748,11 @@ static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
   <div id="channels"></div>
   <button onclick="save()">Save</button>
   <div id="status"></div>
+  <div id="boot">Page script has not started yet...</div>
   <script>
+    window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
+    document.getElementById("boot").textContent = "";
+    let loaded = false;
     let channels = [];
     function render() {
       document.getElementById("channels").innerHTML = channels.map(c => `
@@ -726,15 +765,20 @@ static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
         const res = await fetch("/log-channels.json");
         channels = await res.json();
         render();
+        loaded = true;
         document.getElementById("status").textContent = "";
       } catch (e) {
         document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
       }
     }
     async function save() {
+      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return; }
       document.getElementById("status").textContent = "Saving...";
-      await fetch("/log-channels", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(channels) });
-      document.getElementById("status").textContent = "Saved.";
+      try {
+        const r = await fetch("/log-channels", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(channels) });
+        if (!r.ok) throw new Error("board returned " + r.status);
+        document.getElementById("status").textContent = "Saved.";
+      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
     load();
   </script>
@@ -1004,14 +1048,17 @@ void web_monitor_init(void) {
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static char webBodyBuf[24576]; // separate buffer from the display-config POST handler
-      if (index == 0) memset(webBodyBuf, 0, sizeof(webBodyBuf));
-      if (index + len < sizeof(webBodyBuf)) {
+      static const size_t webBodyBufSize = 24576;
+      static char *webBodyBuf = NULL;
+      if (!webBodyBuf) webBodyBuf = allocPostBuf(webBodyBufSize);
+      if (!webBodyBuf) return; // out of memory - drop this save rather than crash
+      if (index == 0) memset(webBodyBuf, 0, webBodyBufSize);
+      if (index + len < webBodyBufSize) {
         memcpy(webBodyBuf + index, data, len);
       }
       if (index + len == total) {
-        Serial.printf("Web dashboard config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)sizeof(webBodyBuf));
-        if (total >= sizeof(webBodyBuf)) {
+        Serial.printf("Web dashboard config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)webBodyBufSize);
+        if (total >= webBodyBufSize) {
           Serial.println("WARNING: POST body may have been truncated - buffer too small!");
         }
         JsonDocument doc;
@@ -1135,14 +1182,17 @@ void web_monitor_init(void) {
       // causing deserializeJson() to fail and the whole save to be
       // silently dropped (looked like "nothing happened", including
       // deletes never actually persisting).
-      static char bodyBuf[24576];
-      if (index == 0) memset(bodyBuf, 0, sizeof(bodyBuf));
-      if (index + len < sizeof(bodyBuf)) {
+      static const size_t bodyBufSize = 24576;
+      static char *bodyBuf = NULL;
+      if (!bodyBuf) bodyBuf = allocPostBuf(bodyBufSize);
+      if (!bodyBuf) return; // out of memory - drop this save rather than crash
+      if (index == 0) memset(bodyBuf, 0, bodyBufSize);
+      if (index + len < bodyBufSize) {
         memcpy(bodyBuf + index, data, len);
       }
       if (index + len == total) {
-        Serial.printf("Gauge config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)sizeof(bodyBuf));
-        if (total >= sizeof(bodyBuf)) {
+        Serial.printf("Gauge config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)bodyBufSize);
+        if (total >= bodyBufSize) {
           Serial.println("WARNING: POST body may have been truncated - buffer too small!");
         }
         JsonDocument doc;
@@ -1315,9 +1365,12 @@ void web_monitor_init(void) {
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static char logChanBuf[2048]; // small payload - 10 signals worth of {id,name,enabled}
-      if (index == 0) memset(logChanBuf, 0, sizeof(logChanBuf));
-      if (index + len < sizeof(logChanBuf)) {
+      static const size_t logChanBufSize = 2048;
+      static char *logChanBuf = NULL;
+      if (!logChanBuf) logChanBuf = allocPostBuf(logChanBufSize);
+      if (!logChanBuf) return; // out of memory - drop this save rather than crash
+      if (index == 0) memset(logChanBuf, 0, logChanBufSize);
+      if (index + len < logChanBufSize) {
         memcpy(logChanBuf + index, data, len);
       }
       if (index + len == total) {
@@ -1380,6 +1433,19 @@ void web_monitor_init(void) {
 
 void web_monitor_loop(void) {
   unsigned long now = millis();
+
+  // Heap readout every 10s - lets us see whether free internal RAM
+  // (and the largest single free block) is getting dangerously low
+  // while the web pages are misbehaving.
+  static unsigned long s_lastHeapLog = 0;
+  if (now - s_lastHeapLog >= 10000) {
+    s_lastHeapLog = now;
+    Serial.printf("Heap: internal free=%u largest=%u lowest-ever=%u | PSRAM free=%u\n",
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  }
 
   // Recompute Hz for each tracked CAN ID once per second.
   if (now - s_lastHzCalc >= 1000) {
