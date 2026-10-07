@@ -72,6 +72,14 @@ typedef struct {
   int32_t tick_font_size;  // numbers around a needle/half-moon dial: 14/28/36, -1 = hidden, 0 = follow value_font_size (configs saved before this existed)
   int32_t start_deg;       // needle/half-moon dial start, compass degrees (0 = straight up, clockwise). Standard gauge 225
   int32_t end_deg;         // dial end, clockwise from the start. Standard gauge 135 (a 270 degree sweep); half moon 270 -> 90
+  // ---- needle/half-moon dials: coloured tick marks and needle length ----
+  bool yellow_enabled;     // ticks at/above (or, zones_low, at/below) yellow_value are drawn yellow
+  int32_t yellow_value;    // in the dial's own units, between min and max
+  bool red_enabled;        // same for red; red wins where the zones overlap
+  int32_t red_value;
+  bool zones_low;          // true: the zones are at the LOW end of the scale (e.g. oil pressure); false: the HIGH end (e.g. coolant temperature)
+  int32_t needle_hub_pct;  // gap between the dial's centre and where the needle starts, % of the dial radius (0-60)
+  int32_t needle_tip_pct;  // how far short of its normal tip the needle stops, % of the dial radius (0-60; hub + tip <= 85)
   bool has_warning;
   float warning_threshold;
   bool warning_above;

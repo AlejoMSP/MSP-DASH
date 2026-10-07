@@ -67,4 +67,30 @@ static inline void gauge_dial_resolve(int isHalfMoon, int32_t startDeg, int32_t 
   *start = s; *end = e; *sweep = sw;
 }
 
+
+// ---- needle trim ----
+// The needle can be pulled back from BOTH ends, as a percentage of the dial's radius: a gap at the centre
+// (hub) and a stop-short at the tip. 0 and 0 is the normal needle. Each end up to 60%, together at most 85%:
+// the stock needle is about 94% of the radius long, so some needle is always left.
+#define GAUGE_NEEDLE_TRIM_MAX 60
+#define GAUGE_NEEDLE_TRIM_TOTAL 85
+
+static inline int32_t gauge_clamp_trim(int32_t v) {
+  return v < 0 ? 0 : (v > GAUGE_NEEDLE_TRIM_MAX ? GAUGE_NEEDLE_TRIM_MAX : v);
+}
+
+// Cleans up what the editor sent. If the two together are too much, the hub gap wins and the tip pull-back gives way.
+static inline void gauge_resolve_needle_trim(int32_t hubPct, int32_t tipPct, int32_t *hub, int32_t *tip) {
+  int32_t h = gauge_clamp_trim(hubPct), t = gauge_clamp_trim(tipPct);
+  if (h + t > GAUGE_NEEDLE_TRIM_TOTAL) t = GAUGE_NEEDLE_TRIM_TOTAL - h;
+  *hub = h; *tip = t;
+}
+
+// ---- tick colour zones ----
+// Ticks whose value is in a zone are drawn yellow or red instead of the dial's tick colour. A zone is at the
+// HIGH end of the scale (ticks at or above its value) or, with zonesLow, the LOW end (at or below it). Where
+// yellow and red overlap, red wins.
+#define GAUGE_ZONE_YELLOW 0xFFD600
+#define GAUGE_ZONE_RED    0xFF2A2A
+
 #endif

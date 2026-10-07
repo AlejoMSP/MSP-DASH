@@ -95,6 +95,9 @@ typedef struct {
   lv_obj_t *container;
   lv_obj_t *meter;         // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
+  lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
+  int32_t needleHubPct;         // needle trim, % of the dial radius: gap at the centre ...
+  int32_t needleTipPct;         // ... and how far short of its normal tip it stops
   lv_obj_t *numberLabel;   // used by GAUGE_TYPE_NUMBER; also doubles as the "show_value" readout for other types
   lv_obj_t *chart;         // used by GAUGE_TYPE_HISTOGRAM only
   lv_obj_t *noDataLabel;   // "NO DATA" over an empty trend graph (histogram only)
@@ -297,6 +300,37 @@ static void fit_chart_rect(CellRect cell, int16_t *ox, int16_t *oy, int16_t *ow,
   *ox = (int16_t)bx; *oy = (int16_t)by0; *ow = (int16_t)bw; *oh = (int16_t)(by1 - by0);
 }
 
+// Draws the needle shorter at either end. LVGL draws the needle from the dial's centre to a tip just inside
+// the ticks and, just before drawing, lets the app move those two end points (the end points are the draw
+// routine's own local variables; the event hands out const pointers to them). Only cells with a trim set
+// register this, so a normal needle is drawn by LVGL untouched.
+static void needle_trim_cb(lv_event_t *e) {
+  lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+  if (dsc->part != LV_PART_INDICATOR || dsc->type != LV_METER_DRAW_PART_NEEDLE_LINE) return;
+  CellRuntime *rt = (CellRuntime *)lv_event_get_user_data(e);
+  lv_point_t *tip = (lv_point_t *)dsc->p2;
+  const lv_point_t *centre = dsc->p1;
+  float dx = (float)(tip->x - centre->x), dy = (float)(tip->y - centre->y);
+  float len = sqrtf(dx * dx + dy * dy);
+  if (len < 4.0f) return;
+
+  lv_area_t content;
+  lv_obj_get_content_coords(lv_event_get_target(e), &content);
+  float radius = lv_area_get_width(&content) / 2.0f;
+  float hub = rt->needleHubPct * 0.01f * radius;
+  float back = rt->needleTipPct * 0.01f * radius;
+  if (hub + back > len - 4.0f) {            // never trim the needle away completely
+    float k = (len - 4.0f) / (hub + back);
+    hub *= k; back *= k;
+  }
+  float ux = dx / len, uy = dy / len;
+  rt->needleStart.x = (lv_coord_t)lroundf((float)centre->x + ux * hub);
+  rt->needleStart.y = (lv_coord_t)lroundf((float)centre->y + uy * hub);
+  tip->x = (lv_coord_t)lroundf((float)tip->x - ux * back);
+  tip->y = (lv_coord_t)lroundf((float)tip->y - uy * back);
+  dsc->p1 = &rt->needleStart;
+}
+
 // Builds one cell's content (meter+needle, or plain number) inside its
 // own container, sized/positioned to the given rect. Content is built
 // using relative positioning (center/align) within the container, so
@@ -452,10 +486,34 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
     if (tickSize < 0) lv_obj_set_style_text_opa(meter, LV_OPA_TRANSP, LV_PART_TICKS);   // dial numbers hidden; the tick marks stay
 
+    // Coloured tick zones. LVGL recolours the ticks whose value lies in [start, end] (both ends included) and
+    // lets a LATER indicator win over an earlier one, so yellow goes in first and red second: red wins where
+    // they overlap. High-end zones run from their value up to max; low-end zones from min up to their value.
+    for (int zone = 0; zone < 2; zone++) {
+      bool red = (zone == 1);
+      if (!(red ? cfg->red_enabled : cfg->yellow_enabled)) continue;
+      int32_t at = red ? cfg->red_value : cfg->yellow_value;
+      lv_color_t zc = lv_color_hex(red ? GAUGE_ZONE_RED : GAUGE_ZONE_YELLOW);
+      lv_meter_indicator_t *z = lv_meter_add_scale_lines(meter, scale, zc, zc, false, 0);
+      lv_meter_set_indicator_start_value(meter, z, cfg->zones_low ? cfg->min_val : at);
+      lv_meter_set_indicator_end_value(meter, z, cfg->zones_low ? at : cfg->max_val);
+    }
+
     lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 6, needleColor, -12);
     lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
     rt->meter = meter;
     rt->needle = needle;
+
+    // Needle trim: a gap at the centre and/or a stop-short at the tip.
+    gauge_resolve_needle_trim(cfg->needle_hub_pct, cfg->needle_tip_pct, &rt->needleHubPct, &rt->needleTipPct);
+    if (rt->needleHubPct > 0 || rt->needleTipPct > 0) {
+      lv_obj_add_event_cb(meter, needle_trim_cb, LV_EVENT_DRAW_PART_BEGIN, rt);
+    }
+    if (rt->needleHubPct > 0) {
+      // LVGL always draws a round hub dot at the centre; with a gap it would float on its own, so hide it.
+      lv_obj_set_style_bg_opa(meter, LV_OPA_TRANSP, LV_PART_INDICATOR);
+      lv_obj_set_style_border_width(meter, 0, LV_PART_INDICATOR);
+    }
 
     lv_obj_t *capLabel = lv_label_create(container);
     lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);

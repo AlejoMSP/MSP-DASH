@@ -1863,3 +1863,38 @@ layout check 24 page views incl. the front page's sizes; board-side type-check; 
 Screenshots reviewed: front page at several sizes, the editor's dial controls and live preview, and the real
 display code rendered in 8 configurations. NOT run on the board: the new fonts under the Arduino build, the
 Save & Reboot button and the /reboot endpoint.
+
+
+## Tick colour zones and needle length (build 108)
+
+Request: (1) set a value where the tick marks turn yellow and a value where they turn red; (2) make the needle
+shorter "back from both sides" (the sentence was cut off; read as: a gap at the centre AND a stop-short at the tip,
+as two independent settings, so either can stay 0).
+
+**Tick colours.** New cell fields yellow_enabled / yellow_value, red_enabled / red_value, zones_low. Ticks at or
+above the value turn that colour (the HIGH end, e.g. coolant temperature); with zones_low, ticks at or below it
+(the LOW end, e.g. oil pressure). Red wins where the two overlap. Values are in the dial's own units, between min
+and max. Fixed colours: GAUGE_ZONE_YELLOW 0xFFD600, GAUGE_ZONE_RED 0xFF2A2A (gauge_style.h). Implemented with LVGL's
+own `lv_meter_add_scale_lines`: it recolours ticks whose value is in [start, end] (both ends included) and a LATER
+indicator overrides an earlier one, so yellow is added first, red second, the needle last. The numbers around the
+dial keep the dial's normal colour (only the tick marks change). A value outside min..max just colours nothing /
+everything; a zone's value is kept while its box is unticked.
+
+**Needle length.** New fields needle_hub_pct (gap at the centre) and needle_tip_pct (how far short of its normal
+tip it stops), each a percentage of the dial radius, 0-60, together at most 85 (the stock needle is about 94% of
+the radius, so some needle is always left; if the sum is too big the hub gap wins and the tip gives way). 0 and 0 is
+the normal needle and takes the normal LVGL path untouched. Otherwise a DRAW_PART_BEGIN callback moves the needle's
+two end points just before LVGL draws it (the event hands out const pointers to the draw routine's own local
+variables - hence the cast; p1 is re-pointed at a per-cell point rather than writing to the shared centre point,
+which LVGL also uses for the hub). With a hub gap the grey hub dot (LVGL's LV_PART_INDICATOR rectangle) is made
+transparent, because it would float on its own in the gap.
+
+**Editor (display editor only; the web dashboard has no dial).** "Tick colors": high/low end, yellow and red
+(tick box + value; first tick-on offers 75%/90% of the scale for a high-end zone, 25%/10% for low-end), and the two
+needle boxes. The dial picture now shows the coloured ticks and the needle with its gap and stop-short, using the
+same rules as the display (zoneOf, tickValue = LVGL's integer maths, resolveTrim = gauge_resolve_needle_trim).
+
+**Verified (PC, sanitizers on).** config 105; zones 29 + 29 (LVGL indicator lists); zonepix 132 (colour of every
+tick, measured in the rendered image); needlepix 40 (where the needle really starts and stops, hub dot hidden only
+with a gap); editor 123; each of 8 display and 6 editor breakages caught; plus the earlier suites. Screenshots
+reviewed: the real display in 8 configurations. NOT run on the board.

@@ -123,3 +123,22 @@ code uses them for readouts of 48 px and up).
 - `layout_check.mjs` also measures the front page's numbers in a real browser (size honoured, capped at 26%
   of the cell width, never wider than the cell) and the editors' colour box.
 - `tools/gen_fonts.sh` (repo root) regenerates `font_digits_*.c`.
+
+## Tick colour zones and needle length
+
+- `test_zones_needle.c`: the real `gauge_app.c` against LVGL, one scenario per run
+  (`./t zones | zoneshalf | zonepix | needlepix`; link the font objects like the other display tests).
+  `zones` / `zoneshalf` read LVGL's own indicator list: which tick-colour ranges exist, from/to which value,
+  in which colour, and that YELLOW is added BEFORE red (LVGL draws the later one on top, so red wins where
+  they overlap) and that the needle is the newest indicator (drawn over everything). `zonepix` renders the
+  dial and measures the REAL colour of every tick along its ray (classified by colour proportions, because a
+  thin tick is an anti-aliased, darker blend): six zone configurations x 11 ticks, including a threshold that
+  falls between two ticks, a threshold exactly on a tick, low-end zones, and yellow above red. `needlepix`
+  renders a bright green needle and measures where it really starts and stops, for no trim, hub gap only, tip
+  only, both, the maximum, the over-limit case, and a small 2x2 dial; it also checks the grey hub dot is hidden
+  exactly when there is a gap. The needle's untrimmed length is measured from the picture itself, so the
+  expected values scale with the dial's real radius.
+- `test_editor_dial.js` (sections 9-13): the preview colours exactly the same ticks as the display (the same
+  hand-written cases as `zonepix`), the controls appear only for needle / half-moon cells, wording for the
+  high / low end, switching a zone on offers a value inside the scale, the preview needle's start and end, the
+  85% trim limit, and that all seven new settings are posted when saving.

@@ -54,6 +54,8 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.needle_color = 0xFF8800 + j; c.tick_color = 0x123456; c.bg_color = 0x0A0B0C;
       c.value_divisor = 1000.0f; c.tick_count = 40 + j; c.major_nth = 4; c.refresh_hz = 25; c.show_value = true; c.value_font_size = GAUGE_VALUE_SIZES[(i + j) % GAUGE_VALUE_SIZE_COUNT];
       c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
+      c.yellow_enabled = (j % 2) == 0; c.yellow_value = 150 + i; c.red_enabled = (i % 2) == 0; c.red_value = 200 + j; c.zones_low = (i + j) % 3 == 0;
+      c.needle_hub_pct = 5 + j; c.needle_tip_pct = 3 + i;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;
     }
@@ -149,7 +151,7 @@ int main(int argc, char **argv) {
   printf("S5 the web-format JSON round-trips (what the editors send and receive)\n");
   fillAll(p);
   std::string web = toJson(p);
-  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
+  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","yellow_enabled","yellow_value","red_enabled","red_value","zones_low","needle_hub_pct","needle_tip_pct","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
     CHECK(web.find(std::string("\"") + key + "\":") != std::string::npos, (std::string("key present in the JSON: ") + key).c_str());
   PageConfig scratch[MAX_PAGES];
   { JsonDocument d; deserializeJson(d, web); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); }
@@ -241,6 +243,29 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"start_deg\":0,\"end_deg\":359}");    CHECK(c10.start_deg == 0 && c10.end_deg == 359, "a nearly full circle (359) is allowed");
   c10 = load1("{\"enabled\":true,\"start_deg\":0,\"end_deg\":10}");     CHECK(c10.start_deg == 0 && c10.end_deg == 10, "the narrowest allowed dial (10) is kept");
   CHECK(gauge_snap_value_size(36) == 36 && gauge_snap_value_size(42) == 36 && gauge_snap_value_size(43) == 48, "snapping goes to the NEAREST size");
+
+  printf("S12 tick colour zones and needle trim\n");
+  wipe(); gauge_config_init(); p = gauge_config_get_pages();
+  CHECK(!p[0].cells[0].yellow_enabled && !p[0].cells[0].red_enabled && !p[0].cells[0].zones_low, "defaults: no coloured zones");
+  CHECK(p[0].cells[0].needle_hub_pct == 0 && p[0].cells[0].needle_tip_pct == 0, "defaults: the normal needle (no trim)");
+  p[0].cells[0].yellow_enabled = true; p[0].cells[0].yellow_value = 180; p[0].cells[0].red_enabled = true; p[0].cells[0].red_value = 220;
+  p[0].cells[0].zones_low = true; p[0].cells[0].needle_hub_pct = 12; p[0].cells[0].needle_tip_pct = 8;
+  CHECK(gauge_config_save(), "saves");
+  gauge_config_init(); p = gauge_config_get_pages();
+  CellConfig &z = p[0].cells[0];
+  CHECK(z.yellow_enabled && z.yellow_value == 180 && z.red_enabled && z.red_value == 220 && z.zones_low && z.needle_hub_pct == 12 && z.needle_tip_pct == 8, "all of them survive a reboot");
+  c10 = load1("{\"enabled\":true,\"gauge_type\":0}");
+  CHECK(!c10.yellow_enabled && !c10.red_enabled && c10.needle_hub_pct == 0 && c10.needle_tip_pct == 0, "a config saved before these existed: no zones, normal needle");
+  c10 = load1("{\"enabled\":true,\"yellow_enabled\":true,\"yellow_value\":-40,\"red_value\":300}");
+  CHECK(c10.yellow_enabled && c10.yellow_value == -40 && !c10.red_enabled && c10.red_value == 300, "a zone's value is kept even while it is switched off; negative values are fine");
+  c10 = load1("{\"enabled\":true,\"needle_hub_pct\":-5,\"needle_tip_pct\":999}");
+  CHECK(c10.needle_hub_pct == 0 && c10.needle_tip_pct == 60, "trim is clamped to 0..60 each (-5 -> 0, 999 -> 60)");
+  c10 = load1("{\"enabled\":true,\"needle_hub_pct\":60,\"needle_tip_pct\":60}");
+  CHECK(c10.needle_hub_pct == 60 && c10.needle_tip_pct == 25, "hub 60 + tip 60 is too much: the hub gap wins, the tip gives way to 25 (total 85)");
+  c10 = load1("{\"enabled\":true,\"needle_hub_pct\":40,\"needle_tip_pct\":45}");
+  CHECK(c10.needle_hub_pct == 40 && c10.needle_tip_pct == 45, "40 + 45 = 85 is allowed exactly");
+  c10 = load1("{\"enabled\":true,\"needle_hub_pct\":41,\"needle_tip_pct\":45}");
+  CHECK(c10.needle_hub_pct == 41 && c10.needle_tip_pct == 44, "41 + 45 = 86: the tip gives back 1");
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);
