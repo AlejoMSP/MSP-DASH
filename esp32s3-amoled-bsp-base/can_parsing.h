@@ -33,6 +33,7 @@
 #include "gauge_app.h"
 #include "gauge_config.h"
 #include "web_monitor.h"
+#include "simulator.h"
 
 // ---- rusEFI CAN IDs ----
 #define RUSEFI_BASE1 0x201
@@ -197,6 +198,7 @@ static void canReceiveTask(void *arg) {
   for (;;) {
     twai_message_t message;
     if (twai_receive(&message, pdMS_TO_TICKS(100)) == ESP_OK) {
+      sim_notify_real_frame(); // real traffic always wins: it switches the bench simulator off
       web_monitor_track_can_frame(message.identifier, message.data, message.data_length_code);
       handleRusefiFrame(message.identifier, message.data);
       handleSecondaryEcuFrame(message.identifier, message.data);

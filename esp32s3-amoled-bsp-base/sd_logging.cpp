@@ -20,11 +20,14 @@
 #include "sd_logging.h"
 #include "sd_storage.h"
 #include "gauge_config.h"
+#include "simulator.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <stdio.h>
 
-#define SD_MOUNT_POINT "/sd_card"
+#ifndef SD_MOUNT_POINT
+#define SD_MOUNT_POINT "/sd_card" // the host tests point this at a temp folder
+#endif
 #define LOGGING_RPM_THRESHOLD 800.0f
 
 static Preferences s_prefs;
@@ -69,6 +72,10 @@ bool sd_logging_is_active(void) {
 
 void sd_logging_loop(void) {
   if (!s_loggingReady) return;
+
+  // The bench simulator feeds fake values: never write those to a log (and
+  // keep the blinking "logging" dot off, since nothing is being logged).
+  if (sim_is_active()) { s_isLoggingActive = false; return; }
 
   bool engineRunning = gauge_config_signal_has_data(SIG_RPM) && gauge_config_signal_value(SIG_RPM) > LOGGING_RPM_THRESHOLD;
   s_isLoggingActive = engineRunning;

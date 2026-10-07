@@ -95,6 +95,7 @@ void loop()
   // without ever delaying a CAN frame.
   checkPageButton();
   web_monitor_loop();
+  sim_loop();
   sd_logging_loop();
   vTaskDelay(pdMS_TO_TICKS(5)); // previously paced by twai_receive()'s timeout - keeps this from spinning flat out
 }

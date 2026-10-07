@@ -25,6 +25,7 @@ public:
   String(float v) : std::string(std::to_string(v)) {}
   String(double v) : std::string(std::to_string(v)) {}
   long toInt() const { return atol(c_str()); }
+  double toFloat() const { return atof(c_str()); }
   unsigned char concat(const char *s, unsigned n) { append(s, n); return 1; }
   unsigned char concat(const char *s) { append(s); return 1; }
   unsigned char concat(char c) { push_back(c); return 1; }

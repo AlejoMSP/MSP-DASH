@@ -1717,3 +1717,49 @@ If SD logging stops mounting after this build, that is the first thing to look a
 
 NOTE: any settings the user believed were saved before this build were never
 saved. After flashing, configure once more.
+
+## Bench simulator (build 104)
+
+Why: with the board unplugged from the ECU nothing has data, so the gauges, trend
+graphs and full-screen alert could not be tested at a desk.
+
+**What it is.** simulator.h/.cpp feed fake values into the same globals the CAN
+decoder writes (units match the decoder: RPM, CLT/OIL TEMP in F, MAP/FUEL/OIL
+pressure in kPa, AFR, ETH %, TPS %, battery V), ~20 updates a second, marking each
+signal active so the normal 2s staleness logic applies. Two modes: **demo** (24s
+rev cycle idle to 6200, temperatures warming over a few minutes; deliberately
+stays clear of the DEFAULT warning thresholds so it never alarms by itself) and
+**manual** (one slider per signal; use this to test alerts, e.g. oil pressure 20
+with RPM 3000).
+
+**Safety rules (each has a test that fails without it):**
+- OFF at every boot; nothing is saved.
+- Switched on only from http://<board>/simulator ("Bench Simulator" in the menu).
+- Stops itself after 10 minutes without a change (touching a slider restarts it).
+- Stops the instant ANY real CAN frame arrives (the CAN task calls
+  sim_notify_real_frame()), and refuses to start while real frames are arriving
+  (HTTP 409 with the reason). Real data always wins, so fake and real never mix.
+- SD logging writes nothing while it runs and the blinking logging dot stays off.
+- The round screen shows an amber SIMULATED pill on every page (layered above a
+  full-screen alert), and the front page shows a SIMULATED DATA bar.
+- Stopping clears the "has data" flags (gauges return to "--") and WIPES every
+  trend graph; starting also wipes them, so fake and real traces never share a
+  graph. The stop reason is shown on the page and in /status.json ("simulator").
+
+**Also in this build**
+- Trend graphs show "NO DATA" while their signal has none (hidden within a tick of
+  data arriving, not on the graph's slow sample interval; returns on signal loss).
+- BUG FIX: the green "logging" dot was positioned in the top-right corner of the
+  square, entirely OFF the round glass, so it was never visible. Now top-centre,
+  inside the circle, with the SIMULATED pill just below it. Tests check both lie
+  fully inside the panel and do not overlap.
+- Repo: removed stale tests/host/Arduino.h and Preferences.h (old stub copies the
+  compiler picked up before tests/host/stubs). The board-side type-check caught a
+  missing #include <math.h> (NAN) in web_monitor.cpp.
+
+**Verified (PC):** simulator 42, SD-logging pause 9 (fails if the pause is removed),
+display 76 (new: banner, dot geometry, NO DATA, trace clearing), end-to-end 25 (real
+simulator + config + display with the default layout), simulator page 20, front page
+31, editor save 5, config storage 71, board-side type-check on 6 files; every new
+safety behavior was broken on purpose and caught. Screenshots reviewed (demo graph,
+simulated alert, state after a real frame). NOT yet run on the board.

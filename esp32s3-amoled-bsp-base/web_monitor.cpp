@@ -36,6 +36,8 @@
 #include <FFat.h>
 #include "build_info.h"
 #include "gauge_config_json.h"
+#include "simulator.h"
+#include <math.h> // NAN
 
 static const char FW_COMPILED[] = __DATE__ " " __TIME__; // when THIS file was compiled - changes on every rebuild
 
@@ -161,6 +163,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     #dot.st-ok { background:#2ecc71; }
     #dot.st-warn { background:#f5a623; }
     #dot.st-bad { background:#e74c3c; }
+    .simbar { display:none; background:#f5a623; color:#000; font-weight:bold; text-align:center; padding:6px; margin:0 3px 6px; border-radius:6px; font-size:0.85em; }
+    .simbar.on { display:block; }
   </style>
 </head>
 <body>
@@ -178,6 +182,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <a href="/gauges">Display Gauge Config &rarr;</a>
       <a href="/web-config">Web Dashboard Config &rarr;</a>
       <a href="/log-channels">Log Channels &rarr;</a>
+      <a href="/simulator">Bench Simulator &rarr;</a>
       <a href="/sd">SD Card &rarr;</a>
     </div>
     <div class="dash-nav">
@@ -185,6 +190,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <button onclick="changeWebPage(1)">Next &rarr;</button>
     </div>
     <div class="statusline"><span id="dot"></span><span id="stext">Connecting...</span></div>
+    <div class="simbar" id="simbar">SIMULATED DATA - not from the ECU</div>
     <div class="cellgrid" id="cellgrid"></div>
   </div>
 
@@ -262,12 +268,14 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         signalValues = m.v || {};
         live.fps = m.fps || 0;
         live.ids = m.ids || 0;
+        document.getElementById("simbar").className = m.sim ? "simbar on" : "simbar";
         render();
         updateStatus();
       };
       sock.onclose = () => {
         if (ws === sock) ws = null;
         signalValues = {};          // no connection means we don't know the values: show "--", not frozen numbers
+        document.getElementById("simbar").className = "simbar";
         render();
         updateStatus();
         setTimeout(connect, retryMs);
@@ -870,6 +878,134 @@ static const char SD_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+static const char SIM_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MSP-DASH Bench Simulator</title>
+  <style>
+    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; max-width:520px; margin:0 auto; }
+    h1 { font-size: 1.2em; text-align:center; }
+    .warnbox { background:#2a1f00; border:1px solid #f5a623; border-radius:8px; padding:10px; font-size:0.85em; color:#f5c26b; }
+    .statebox { margin:12px 0; padding:10px; border-radius:8px; background:#111; text-align:center; }
+    .statebox.on { background:#f5a623; color:#000; font-weight:bold; }
+    .btnrow { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+    button { padding:10px 14px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
+    button.danger { background:#F44336; color:#fff; }
+    #msg { text-align:center; margin:10px 0; min-height:1.2em; color:#4dd0e1; }
+    #msg.bad { color:#ff6b6b; }
+    .sl { margin:10px 0; }
+    .sl label { display:flex; justify-content:space-between; font-size:0.85em; color:#4dd0e1; }
+    .sl input { width:100%; }
+  </style>
+</head>
+<body>
+  <h1>Bench Simulator</h1>
+  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div class="warnbox"><strong>This feeds FAKE values</strong> to the gauges, graphs and alerts so you can test with no ECU connected. It switches itself off after 10 minutes without a change, at every reboot, and the moment a real CAN frame arrives. SD logging is paused while it runs, and the round screen and the front page both say SIMULATED.</div>
+  <div id="state" class="statebox">Loading...</div>
+  <div class="btnrow">
+    <button onclick="cmd('start','demo')">Start demo</button>
+    <button onclick="cmd('start','manual')">Start manual</button>
+    <button class="danger" onclick="cmd('stop')">Stop</button>
+  </div>
+  <div id="msg"></div>
+  <div id="sliders"></div>
+  <script>
+    let info = null;
+    let building = "";
+    let sending = false;
+    let pending = null;
+
+    function setMsg(t, bad) {
+      const m = document.getElementById("msg");
+      m.textContent = t;
+      m.className = bad ? "bad" : "";
+    }
+
+    async function post(params) {
+      const r = await fetch("/sim", { method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(params).toString() });
+      const t = await r.text();
+      if (!r.ok) throw new Error(t || ("board returned " + r.status));
+      return t;
+    }
+
+    async function cmd(c, mode) {
+      try { await post(mode ? { cmd: c, mode: mode } : { cmd: c }); setMsg(""); }
+      catch (e) { setMsg(e.message, true); }
+      refresh();
+    }
+
+    function fmtTime(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+    function render() {
+      const st = document.getElementById("state");
+      if (info.active) {
+        st.className = "statebox on";
+        st.textContent = "SIMULATING (" + (info.manual ? "manual" : "demo") + ") - switches off in " + fmtTime(info.seconds_left);
+      } else {
+        st.className = "statebox";
+        st.textContent = "Off" + (info.stop_reason ? " - last stopped: " + info.stop_reason : "");
+      }
+      buildSliders();
+    }
+
+    function shown(s) { return Number(s.value).toFixed(s.step < 1 ? 1 : 0); }
+
+    function buildSliders() {
+      const box = document.getElementById("sliders");
+      const key = info.active ? (info.manual ? "manual" : "demo") : "off";
+      if (key !== building) {                    // rebuild only when the mode changes, never while a slider is being dragged
+        building = key;
+        if (key === "off") { box.innerHTML = ""; return; }
+        box.innerHTML = info.signals.map(s =>
+          `<div class="sl"><label>${s.name} <span id="v${s.id}"></span></label>` +
+          `<input id="r${s.id}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" ${info.manual ? "" : "disabled"} oninput="slide(${s.id}, this.value)"></div>`).join("");
+      }
+      for (const s of info.signals) {
+        const lab = document.getElementById("v" + s.id), rng = document.getElementById("r" + s.id);
+        if (lab) lab.textContent = shown(s);
+        if (rng && document.activeElement !== rng) rng.value = s.value;
+      }
+    }
+
+    function slide(id, val) {
+      document.getElementById("v" + id).textContent = Number(val).toFixed(0);
+      pending = { id: id, val: val };
+      pump();
+    }
+
+    // One request at a time, always the newest slider position - never a pile of requests.
+    async function pump() {
+      if (sending) return;
+      sending = true;
+      while (pending) {
+        const p = pending; pending = null;
+        try { await post({ cmd: "set", sig: p.id, val: p.val }); }
+        catch (e) { setMsg(e.message, true); }
+      }
+      sending = false;
+    }
+
+    async function refresh() {
+      try {
+        const r = await fetch("/sim.json");
+        info = await r.json();
+        render();
+      } catch (e) {
+        document.getElementById("state").textContent = "Could not reach the board - retrying...";
+      }
+    }
+
+    setInterval(refresh, 1000);
+    refresh();
+  </script>
+</body>
+</html>
+)rawliteral";
+
 static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -1179,6 +1315,12 @@ void web_monitor_init(void) {
       can["state"] = "driver not installed";
     }
 
+    JsonObject simObj = doc["simulator"].to<JsonObject>();
+    simObj["active"] = sim_is_active();
+    simObj["manual"] = sim_is_manual();
+    simObj["seconds_left"] = sim_seconds_left();
+    simObj["last_stop"] = sim_last_stop_reason();
+
     JsonObject store = doc["storage"].to<JsonObject>();
     store["mounted"] = gauge_config_storage_ok();
     store["last_error"] = gauge_config_last_error();
@@ -1196,6 +1338,58 @@ void web_monitor_init(void) {
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
+  });
+
+  // ---- Bench simulator (see simulator.h for its safety rules) ----
+  server.on("/simulator", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", SIM_HTML);
+  });
+
+  server.on("/sim.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["active"] = sim_is_active();
+    doc["manual"] = sim_is_manual();
+    doc["seconds_left"] = sim_seconds_left();
+    doc["stop_reason"] = sim_last_stop_reason();
+    JsonArray arr = doc["signals"].to<JsonArray>();
+    for (int sig = 1; sig < SIG_COUNT; sig++) {
+      SimRange r = sim_range(sig);
+      JsonObject o = arr.add<JsonObject>();
+      o["id"] = sig;
+      o["name"] = gauge_config_signal_name((SignalId)sig);
+      o["min"] = r.min;
+      o["max"] = r.max;
+      o["step"] = r.step;
+      o["value"] = sim_value(sig);
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/sim", HTTP_POST, [](AsyncWebServerRequest *request) {
+    String cmd = request->hasParam("cmd", true) ? request->getParam("cmd", true)->value() : String("");
+    if (cmd == "start") {
+      uint32_t fps; int ids;
+      canTableTotals(&fps, &ids);
+      if (fps > 0) {
+        request->send(409, "text/plain", "Real CAN frames are arriving (" + String(fps) + " per second), so the simulator will not start. It only runs while the bus is silent.");
+        return;
+      }
+      bool manual = request->hasParam("mode", true) && request->getParam("mode", true)->value() == "manual";
+      sim_start(manual);
+      request->send(200, "text/plain", "OK");
+    } else if (cmd == "stop") {
+      sim_stop("stopped from the web page");
+      request->send(200, "text/plain", "OK");
+    } else if (cmd == "set") {
+      int sig = request->hasParam("sig", true) ? (int)request->getParam("sig", true)->value().toInt() : 0;
+      float val = request->hasParam("val", true) ? request->getParam("val", true)->value().toFloat() : NAN;
+      if (sim_set_manual(sig, val)) request->send(200, "text/plain", "OK");
+      else request->send(409, "text/plain", "The simulator is not running in manual mode");
+    } else {
+      request->send(400, "text/plain", "Unknown command");
+    }
   });
 
   server.on("/page-nav", HTTP_POST, [](AsyncWebServerRequest *request) {
@@ -1533,6 +1727,7 @@ void web_monitor_loop(void) {
   canTableTotals(&canFps, &canIds);
   doc["fps"] = canFps;
   doc["ids"] = canIds;
+  doc["sim"] = sim_is_active(); // the page shows a SIMULATED bar whenever this is true
   String json;
   serializeJson(doc, json);
   ws.textAll(json);

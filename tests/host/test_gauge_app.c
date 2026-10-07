@@ -26,7 +26,9 @@ const char *gauge_config_signal_name(SignalId s) {
   static const char *n[] = {"None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"};
   return n[s];
 }
-bool sd_logging_is_active(void) { return false; }
+static bool g_logging = false, g_simActive = false;
+bool sd_logging_is_active(void) { return g_logging; }
+bool sim_is_active(void) { return g_simActive; }
 
 /* ---------------- display ---------------- */
 static lv_color_t dbuf[466 * 20];
@@ -356,6 +358,79 @@ int main(void) {
     }
     CHECK(count == 10, "found all 10 trend graphs (1+2+3+4)");
     CHECK(ok, "every graph AND its caption fully inside the circle; graph inside its cell, at least 60x40, caption below it");
+  }
+
+
+  printf("T19 bench-simulator banner and the logging dot\n");
+  {
+    lv_obj_t *sys = lv_layer_sys();
+    lv_obj_t *banner = NULL, *dot = NULL, *overlay = find_overlay();
+    for (uint32_t k = 0; k < lv_obj_get_child_cnt(sys); k++) {
+      lv_obj_t *ch = lv_obj_get_child(sys, k);
+      if (lv_obj_check_type(ch, &lv_label_class) && strcmp(lv_label_get_text(ch), "SIMULATED") == 0) banner = ch;
+      else if (lv_obj_get_width(ch) == 14 && lv_obj_get_height(ch) == 14) dot = ch;
+    }
+    CHECK(banner != NULL && dot != NULL, "both exist on the system layer");
+    CHECK(lv_obj_has_flag(banner, LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(dot, LV_OBJ_FLAG_HIDDEN), "both hidden at boot");
+    g_simActive = true; run_ms(100);
+    CHECK(!lv_obj_has_flag(banner, LV_OBJ_FLAG_HIDDEN), "banner shows while the simulator runs");
+    g_simActive = false; run_ms(100);
+    CHECK(lv_obj_has_flag(banner, LV_OBJ_FLAG_HIDDEN), "banner hides when it stops");
+    lv_obj_update_layout(sys);
+    lv_area_t ba, da; lv_obj_get_coords(banner, &ba); lv_obj_get_coords(dot, &da);
+    int ok = 1;
+    lv_area_t *areas[2] = { &ba, &da };
+    for (int i = 0; i < 2; i++) {
+      int cc[4][2] = { {areas[i]->x1, areas[i]->y1}, {areas[i]->x2, areas[i]->y1}, {areas[i]->x1, areas[i]->y2}, {areas[i]->x2, areas[i]->y2} };
+      for (int q = 0; q < 4; q++) { double dx = cc[q][0] - 233.0, dy = cc[q][1] - 233.0; if (dx * dx + dy * dy > 233.0 * 233.0) { ok = 0; printf("  %s corner (%d,%d) is off the glass\n", i ? "logging dot" : "SIMULATED banner", cc[q][0], cc[q][1]); } }
+    }
+    CHECK(ok, "the banner AND the logging dot are fully inside the round panel (the dot used to sit in the off-glass corner)");
+    CHECK(da.y2 < ba.y1 || da.y1 > ba.y2 || da.x2 < ba.x1 || da.x1 > ba.x2, "banner and dot do not overlap");
+    CHECK(lv_obj_get_index(banner) > lv_obj_get_index(overlay) && lv_obj_get_index(dot) > lv_obj_get_index(overlay), "both are layered above the full-screen alert");
+    g_logging = true; int seen = 0;
+    for (int i = 0; i < 80; i++) { run_ms(25); if (!lv_obj_has_flag(dot, LV_OBJ_FLAG_HIDDEN)) seen++; }
+    CHECK(seen > 10 && seen < 70, "while logging the dot blinks (visible part of the time)");
+    g_logging = false; run_ms(100);
+    CHECK(lv_obj_has_flag(dot, LV_OBJ_FLAG_HIDDEN), "dot off when not logging");
+  }
+
+  printf("T20 a trend graph with no data says NO DATA - promptly, whatever its history length\n");
+  {
+    int vis = 0, total = 0;
+    s_has[SIG_BATTV] = false; run_ms(200);
+    for (uint32_t k = 0; k < lv_obj_get_child_cnt(screen(6)); k++) {
+      lv_obj_t *lab = find_label_text(lv_obj_get_child(screen(6), k), "NO DATA");
+      if (lab) { total++; if (!lv_obj_has_flag(lab, LV_OBJ_FLAG_HIDDEN)) vis++; }
+    }
+    CHECK(total == 3 && vis == 3, "all three graphs on the 3-up page say NO DATA when their signal has none");
+    s_has[SIG_BATTV] = true; s_val[SIG_BATTV] = 13.8f; run_ms(100);
+    vis = 0; for (uint32_t k = 0; k < lv_obj_get_child_cnt(screen(6)); k++) { lv_obj_t *lab = find_label_text(lv_obj_get_child(screen(6), k), "NO DATA"); if (lab && !lv_obj_has_flag(lab, LV_OBJ_FLAG_HIDDEN)) vis++; }
+    CHECK(vis == 0, "gone within 100ms of data arriving, even for the 10-minute graph (6s between samples)");
+    s_has[SIG_BATTV] = false; run_ms(100);
+    vis = 0; for (uint32_t k = 0; k < lv_obj_get_child_cnt(screen(6)); k++) { lv_obj_t *lab = find_label_text(lv_obj_get_child(screen(6), k), "NO DATA"); if (lab && !lv_obj_has_flag(lab, LV_OBJ_FLAG_HIDDEN)) vis++; }
+    CHECK(vis == 3, "back when the signal is lost");
+    CHECK(find_label_text(screen(0), "NO DATA") == NULL, "needle gauges have no such label");
+    s_has[SIG_BATTV] = true;
+  }
+
+
+  printf("T21 starting or stopping the simulator wipes the trend graphs (fake and real data never share a graph)\n");
+  {
+    lv_obj_t *ch = find_class(screen(4), &lv_chart_class);
+    lv_chart_series_t *sr = lv_chart_get_series_next(ch, NULL);
+    s_has[SIG_TPS] = true; s_val[SIG_TPS] = 50; run_ms(500);
+    lv_coord_t *y = lv_chart_get_y_array(ch, sr);
+    int n = 0; for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) n++;
+    CHECK(n > 10, "the graph has a trace to begin with");
+    g_simActive = true; run_ms(60);
+    n = 0; for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) n++;
+    CHECK(n <= 3, "simulator START clears it (old real data does not carry into the simulation)");
+    run_ms(500);
+    n = 0; for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) n++;
+    CHECK(n > 10, "and the graph then fills with the simulated data");
+    g_simActive = false; run_ms(60);
+    n = 0; for (int i = 0; i < 100; i++) if (y[i] != LV_CHART_POINT_NONE) n++;
+    CHECK(n <= 3, "simulator STOP clears it (fake data does not sit next to real data)");
   }
 
   printf("T14 soak: 5 simulated minutes of random values, signal drops, button presses and taps\n");

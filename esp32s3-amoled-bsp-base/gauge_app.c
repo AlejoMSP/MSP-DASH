@@ -25,6 +25,7 @@
 #include "gauge_app.h"
 #include "gauge_config.h"
 #include "sd_logging.h"
+#include "simulator.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -94,6 +95,7 @@ typedef struct {
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
   lv_obj_t *numberLabel;   // used by GAUGE_TYPE_NUMBER; also doubles as the "show_value" readout for other types
   lv_obj_t *chart;         // used by GAUGE_TYPE_HISTOGRAM only
+  lv_obj_t *noDataLabel;   // "NO DATA" over an empty trend graph (histogram only)
   lv_chart_series_t *chartSeries;
   bool enabled;
   GaugeType gauge_type;
@@ -125,6 +127,7 @@ static GaugePageRuntime pages[MAX_PAGES];
 static int s_num_active_pages = 0;
 static int s_current_page = 0;
 static uint32_t s_flash_counter = 0;
+static lv_obj_t *s_simBanner = NULL;    // "SIMULATED" pill on lv_layer_sys(): shown on every page while the bench simulator feeds fake data
 static lv_obj_t *s_logIndicator = NULL; // small dot on lv_layer_sys() - persists across every page without needing to be added to each one individually, same mechanism LVGL's own built-in perf monitor uses
 
 // ---- Full-screen alert (per-cell opt-in via CellConfig.alert_fullscreen) ----
@@ -257,6 +260,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->numberLabel = NULL;
   rt->chart = NULL;
   rt->chartSeries = NULL;
+  rt->noDataLabel = NULL;
 
   lv_obj_t *container = lv_obj_create(page);
   lv_obj_set_pos(container, rect.x, rect.y);
@@ -338,6 +342,14 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_chart_series_t *series = lv_chart_add_series(chart, needleColor, LV_CHART_AXIS_PRIMARY_Y);
     rt->chart = chart;
     rt->chartSeries = series;
+
+    // An empty graph looks broken. Say why, until the first real data arrives
+    // (and again whenever the signal is lost - the old trace stays visible behind it).
+    lv_obj_t *noData = lv_label_create(chart);
+    lv_label_set_text(noData, "NO DATA");
+    lv_obj_set_style_text_color(noData, lv_color_hex(0x909090), 0);
+    lv_obj_center(noData);
+    rt->noDataLabel = noData;
 
     // Caption with the time span, so the graph's horizontal scale is never a guess
     char cap[GAUGE_CAPTION_MAXLEN + 12];
@@ -520,9 +532,31 @@ static void update_alert_overlay(uint32_t now) {
   }
 }
 
+// Wipes every trend graph's trace. Done whenever the bench simulator starts or
+// stops, so fake data and real data are never drawn on the same graph.
+static void clear_all_traces(void) {
+  for (int p = 0; p < s_num_active_pages; p++) {
+    for (int i = 0; i < pages[p].numCells; i++) {
+      CellRuntime *c = &pages[p].cells[i];
+      if (c->chart && c->chartSeries) lv_chart_set_all_value(c->chart, c->chartSeries, LV_CHART_POINT_NONE);
+    }
+  }
+}
+
 static void gauge_update_timer_cb(lv_timer_t *timer) {
   s_flash_counter++;
   uint32_t now = lv_tick_get();
+
+  static bool s_simWasActive = false;
+  bool simNow = sim_is_active();
+  if (simNow != s_simWasActive) { clear_all_traces(); s_simWasActive = simNow; }
+
+  if (s_simBanner) {
+    bool want = sim_is_active();
+    bool hidden = lv_obj_has_flag(s_simBanner, LV_OBJ_FLAG_HIDDEN);
+    if (want && hidden) lv_obj_clear_flag(s_simBanner, LV_OBJ_FLAG_HIDDEN);
+    else if (!want && !hidden) lv_obj_add_flag(s_simBanner, LV_OBJ_FLAG_HIDDEN);
+  }
 
   if (s_logIndicator) {
     if (sd_logging_is_active()) {
@@ -558,6 +592,12 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
       float value = gauge_config_signal_value(c->signal) / c->value_divisor;
       bool has_data = gauge_config_signal_has_data(c->signal);
+
+      if (c->noDataLabel) {                       // every tick, so it never lingers for a long history's slow sample interval
+        bool hidden = lv_obj_has_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
+        if (has_data && !hidden) lv_obj_add_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
+        else if (!has_data && hidden) lv_obj_clear_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
+      }
 
       bool shouldUpdate = !has_data || (now - c->last_update_ms >= c->refresh_interval_ms);
       if (!shouldUpdate) continue;
@@ -666,8 +706,23 @@ void build_gauge_app(void) {
   lv_obj_set_style_radius(s_logIndicator, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(s_logIndicator, 0, 0);
   lv_obj_set_style_bg_color(s_logIndicator, lv_color_hex(0x00C800), 0);
-  lv_obj_align(s_logIndicator, LV_ALIGN_TOP_RIGHT, -10, 10);
+  // Top centre, NOT the corner: the panel is a circle, and the old top-right
+  // corner position was entirely off the glass, so the dot was never visible.
+  lv_obj_align(s_logIndicator, LV_ALIGN_TOP_MID, 0, 14);
   lv_obj_add_flag(s_logIndicator, LV_OBJ_FLAG_HIDDEN); // hidden until logging actually starts
+
+  // Bench-simulator banner, just under the logging dot. Created after the alert
+  // overlay so it stays visible on top of a full-screen alert.
+  s_simBanner = lv_label_create(lv_layer_sys());
+  lv_label_set_text(s_simBanner, "SIMULATED");
+  lv_obj_set_style_text_color(s_simBanner, lv_color_black(), 0);
+  lv_obj_set_style_bg_color(s_simBanner, lv_color_hex(0xF5A623), 0);
+  lv_obj_set_style_bg_opa(s_simBanner, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(s_simBanner, 10, 0);
+  lv_obj_set_style_pad_hor(s_simBanner, 10, 0);
+  lv_obj_set_style_pad_ver(s_simBanner, 2, 0);
+  lv_obj_align(s_simBanner, LV_ALIGN_TOP_MID, 0, 36);
+  lv_obj_add_flag(s_simBanner, LV_OBJ_FLAG_HIDDEN); // only while fake data is being fed
 
   lv_timer_create(gauge_update_timer_cb, 20, NULL); // 20ms = 50Hz, fastest per-cell refresh rate supported
 }

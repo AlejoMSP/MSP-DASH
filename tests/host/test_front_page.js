@@ -118,6 +118,17 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   docListeners.visibilitychange();
   check(FakeWS.all.length >= before, "visibility change never creates a duplicate while one is pending");
 
+  console.log("9b. SIMULATED bar follows the board's flag");
+  ws = FakeWS.all[FakeWS.all.length - 1]; if (ws.readyState !== 1) open(ws);
+  send(ws, { v: { "1": 3000 }, fps: 0, ids: 0, sim: 1 });
+  check(els.simbar && els.simbar.className === "simbar on", "bar shown while the simulator is on: " + (els.simbar && els.simbar.className));
+  send(ws, { v: { "1": 3000 }, fps: 400, ids: 30, sim: 0 });
+  check(els.simbar.className === "simbar", "bar hidden when it is off");
+  send(ws, { v: { "1": 3000 }, fps: 0, ids: 0, sim: 1 });
+  ws.close();
+  check(els.simbar.className === "simbar", "bar hidden on disconnect (we no longer know)");
+  advance(1100); ws = FakeWS.all[FakeWS.all.length - 1]; open(ws);
+
   console.log("10. page buttons still work");
   ws = FakeWS.all[FakeWS.all.length - 1]; if (ws.readyState !== 1) open(ws);
   send(ws, { v: { "1": 3000, "2": 90, "3": 100, "4": 14.1 }, fps: 380, ids: 36 });
