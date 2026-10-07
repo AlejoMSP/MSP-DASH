@@ -164,3 +164,21 @@ code uses them for readouts of 48 px and up).
   drive an indicators page; "off" differs from "no data", and silence turns every lamp dark.
 - `layout_check.mjs` also checks, in a real browser, that each lamp on the front page has the colour and text the live
   mock data calls for, and that the editors show every lamp card with its ON and OFF chips.
+
+## Warning zones (TunerStudio style)
+
+Four thresholds per needle / half-moon dial (low critical = red, low warning = yellow, high warning = yellow, high critical =
+red), each switched on by itself, drawn as coloured arc BANDS behind the tick marks, as coloured TICK MARKS, or both.
+
+- `test_zones.c`: the pure-C range logic in `gauge_style.h` (`gauge_zone_ranges`): each threshold alone, all four in DRAW
+  order (yellow first, red last, so red covers yellow), thresholds outside the scale clamped to it, scales that do not start
+  at zero, min = max, and the style setting (unset or invalid means bands).
+- `test_zones_needle.c` (`./t zones | zoneshalf | zonepix | bandpix | needlepix`): the real `gauge_app.c` against LVGL.
+  `zones`/`zoneshalf` read LVGL's indicator lists for eight cases (the arcs and the coloured-tick ranges, colours, order,
+  band width, no zero-width bands, a case with the style left unset, the needle newest). `zonepix` measures the colour of every
+  tick in the rendered image (coloured-tick style). `bandpix` measures the bands in the image: the colour at 14 values (just
+  inside and outside each threshold, between ticks), the band's thickness, that red covers yellow only where they overlap, and
+  that a tick inside a band is still drawn ON TOP of it.
+- `test_editor_dial.js` (sections 9-11): the preview colours the same ticks as `zonepix` (the same hand-written cases),
+  draws bands in the right order and at the right angles, and the four threshold rows are each wired to their own threshold.
+- `test_gauge_config.cpp` (S12, S12b): the new fields, and conversion of build 108's one-sided yellow/red zones.

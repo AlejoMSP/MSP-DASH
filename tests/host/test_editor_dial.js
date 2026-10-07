@@ -16,7 +16,7 @@ global.window = global;
 const board = { posts: [], status: "up", statusCalls: 0, saveStatus: 200, rebootFails: false, comesBackAfter: 2, build: 107 };
 const cellJson = (o) => Object.assign({ enabled: true, signal: 4, gauge_type: 0, min: 0, max: 250, rest: 0, caption: "AFR", needle_color: 0xFFFFFF, tick_color: 0xFFFFFF, bg_color: 0,
   value_divisor: 1, tick_count: 26, major_nth: 5, refresh_hz: 10, show_value: true, value_font_size: 28, tick_font_size: 28, start_deg: 225, end_deg: 135,
-  yellow_enabled: false, yellow_value: 0, red_enabled: false, red_value: 0, zones_low: false, needle_hub_pct: 0, needle_tip_pct: 0,
+  low_crit_on: false, low_crit: 0, low_warn_on: false, low_warn: 0, high_warn_on: false, high_warn: 0, high_crit_on: false, high_crit: 0, zone_style: 1, needle_hub_pct: 0, needle_tip_pct: 0,
   has_warning: false, warning_threshold: 0, warning_above: false, alert_fullscreen: false, history_sec: 30, ref_enabled: false, ref_value: 0 }, o);
 global.fetch = async (url, opts) => {
   if (opts && opts.method === "POST") {
@@ -40,7 +40,7 @@ global.fetch = async (url, opts) => {
 };
 
 const script = pageScript('GAUGES_HTML');
-eval(script + "\n;global.__t = { renderCell, dialGeometry, dialSvg, setAngle, changeGaugeType, save, saveAndReboot, emptyCell, VALUE_SIZES, TICK_SIZES, zoneOf, tickValue, resolveTrim, toggleZone, setZoneSide, setZone, setTrim, getPages: () => pages, setPages: p => { pages = p; loaded = true; } };");
+eval(script + "\n;global.__t = { renderCell, dialGeometry, dialSvg, setAngle, changeGaugeType, save, saveAndReboot, emptyCell, VALUE_SIZES, TICK_SIZES, zoneOf, zoneRanges, tickValue, resolveTrim, toggleZone, setZoneStyle, setZone, setTrim, getPages: () => pages, setPages: p => { pages = p; loaded = true; } };");
 const T = global.__t;
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => global.process.nextTick(r)); };
 
@@ -147,53 +147,75 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
   check(web.includes("VALUE_SIZES") && /\[120,"120 Max"\]/.test(web), "has the same eight text sizes (the front page now uses them)");
   check(!web.includes("setAngle") && !web.includes("dialSvg") && !web.includes("saveAndReboot") && !web.includes("Dial numbers"), "no dial angles, dial numbers or reboot button (a web page has no dial and needs no reboot)");
 
-  console.log("9. tick colours: which ticks the picture colours (the SAME hand-written cases as the display's pixel test)");
-  //  min 0, max 100, 11 ticks: tick i has value 10*i.   [name, yellowOn, yellowAt, redOn, redAt, low, expectedYellowTicks, expectedRedTicks]
-  const ZC = [["no zones", 0, 0, 0, 0, 0, [], []], ["yellow >= 70, red >= 90", 1, 70, 1, 90, 0, [70, 80], [90, 100]],
-    ["low end: red <= 20, yellow <= 40", 1, 40, 1, 20, 1, [30, 40], [0, 10, 20]], ["only red >= 100", 0, 0, 1, 100, 0, [], [100]],
-    ["yellow >= 55 (between two ticks)", 1, 55, 0, 0, 0, [60, 70, 80, 90, 100], []], ["red >= 90 with yellow >= 95", 1, 95, 1, 90, 0, [], [90, 100]]];
-  for (const [name, yOn, yAt, rOn, rAt, low, wantY, wantR] of ZC) {
-    const c = { gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, needle_color: 0xFFFFFF,
-                yellow_enabled: !!yOn, yellow_value: yAt, red_enabled: !!rOn, red_value: rAt, zones_low: !!low };
-    const svg = T.dialSvg(c);
-    const ticks = [...svg.matchAll(/<line class="tick([^"]*)"/g)].map(m => m[1].trim());
+  console.log("9. warning zones: which ticks the picture colours (the SAME hand-written cases as the display's pixel test)");
+  const OFF = null;
+  //  min 0, max 100, 11 ticks: tick i has value 10*i.   [name, [lowCrit, lowWarn, highWarn, highCrit], expectedYellowTicks, expectedRedTicks]
+  const ZC = [["no zones", [OFF, OFF, OFF, OFF], [], []], ["high warning 70, high critical 90", [OFF, OFF, 70, 90], [70, 80], [90, 100]],
+    ["low critical 20, low warning 40", [20, 40, OFF, OFF], [30, 40], [0, 10, 20]], ["only high critical 100", [OFF, OFF, OFF, 100], [], [100]],
+    ["high warning 55 (between two ticks)", [OFF, OFF, 55, OFF], [60, 70, 80, 90, 100], []], ["all four: 10, 30, 70, 90", [10, 30, 70, 90], [20, 30, 70, 80], [0, 10, 90, 100]]];
+  const zcell = (th, style) => ({ gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, needle_color: 0xFFFFFF, zone_style: style,
+    low_crit_on: th[0] !== OFF, low_crit: th[0] || 0, low_warn_on: th[1] !== OFF, low_warn: th[1] || 0, high_warn_on: th[2] !== OFF, high_warn: th[2] || 0, high_crit_on: th[3] !== OFF, high_crit: th[3] || 0 });
+  for (const [name, th, wantY, wantR] of ZC) {
+    const ticks = [...T.dialSvg(zcell(th, 2)).matchAll(/<line class="tick([^"]*)"/g)].map(m => m[1].trim());     // style 2 = coloured tick marks
     const gotY = ticks.map((z, i) => z === "yellow" ? 10 * i : -1).filter(v => v >= 0), gotR = ticks.map((z, i) => z === "red" ? 10 * i : -1).filter(v => v >= 0);
     check(ticks.length === 11, `[${name}] 11 ticks drawn`);
     check(JSON.stringify(gotY) === JSON.stringify(wantY), `[${name}] yellow ticks ${JSON.stringify(wantY)} - got ${JSON.stringify(gotY)}`);
     check(JSON.stringify(gotR) === JSON.stringify(wantR), `[${name}] red ticks ${JSON.stringify(wantR)} - got ${JSON.stringify(gotR)}`);
   }
-  check(T.dialSvg({ gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, yellow_enabled: true, yellow_value: 50, zones_low: false }).includes('stroke="#ffd600"'), "yellow ticks use the display's yellow (#ffd600)");
-  check(T.dialSvg({ gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, red_enabled: true, red_value: 50 }).includes('stroke="#ff2a2a"'), "red ticks use the display's red (#ff2a2a)");
+  const bandsOf = svg => [...svg.matchAll(/<path class="band (\w+)" d="M([\d.-]+) ([\d.-]+) A/g)].map(m => ({ color: m[1], x: +m[2], y: +m[3] }));
+  const tickColoured = svg => /<line class="tick (yellow|red)"/.test(svg);
+  { const all = zcell([10, 30, 70, 90], 1);
+    check(bandsOf(T.dialSvg(all)).map(b => b.color).join(",") === "yellow,yellow,red,red", "style 1 with all four on: 4 bands, yellow ones first and red ones last (so red is drawn over yellow)");
+    check(!tickColoured(T.dialSvg(all)), "style 1 (bands): the tick marks keep their normal colour");
+    check(bandsOf(T.dialSvg(zcell([10, 30, 70, 90], 2))).length === 0 && tickColoured(T.dialSvg(zcell([10, 30, 70, 90], 2))), "style 2 (tick marks): no bands, coloured ticks");
+    check(bandsOf(T.dialSvg(zcell([10, 30, 70, 90], 3))).length === 4 && tickColoured(T.dialSvg(zcell([10, 30, 70, 90], 3))), "style 3 (both): bands and coloured ticks");
+    check(bandsOf(T.dialSvg(Object.assign(zcell([10, 30, 70, 90], 1), { zone_style: undefined }))).length === 4 && bandsOf(T.dialSvg(Object.assign(zcell([10, 30, 70, 90], 1), { zone_style: 0 }))).length === 4 && bandsOf(T.dialSvg(Object.assign(zcell([10, 30, 70, 90], 1), { zone_style: 9 }))).length === 4, "an unset or invalid style is bands, as on the display");
+    check(bandsOf(T.dialSvg(zcell([OFF, OFF, OFF, OFF], 1))).length === 0, "nothing switched on: no bands");
+    check(bandsOf(T.dialSvg(zcell([OFF, -5, OFF, OFF], 1))).length === 0 && bandsOf(T.dialSvg(zcell([OFF, -5, OFF, OFF], 3))).length === 0, "a threshold with no width (low warning -5 on a 0..100 scale) draws no band");
+    check(/A36 36 0 1 1 /.test(T.dialSvg(zcell([OFF, 300, OFF, OFF], 1)).match(/<path class="band[^>]*>/)[0]) && /A36 36 0 0 1 /.test(T.dialSvg(zcell([OFF, 20, OFF, OFF], 1)).match(/<path class="band[^>]*>/)[0]), "a band over the whole 270 degree scale takes the long way round (large-arc flag 1); a short one (the first 20%) does not (flag 0)");
+    // where a band starts: high warning 70 on the 225..135 dial is 225 + 270 * 0.7 = 414 = 54 degrees; the picture's radius for bands is 36
+    const b = bandsOf(T.dialSvg(zcell([OFF, OFF, 70, OFF], 1)))[0], ang = 54 * Math.PI / 180;
+    check(Math.abs(b.x - (48 + 36 * Math.sin(ang))) < 0.15 && Math.abs(b.y - (48 - 36 * Math.cos(ang))) < 0.15, `a band starts at its threshold's angle: (${b.x}, ${b.y}) vs (${(48 + 36 * Math.sin(ang)).toFixed(1)}, ${(48 - 36 * Math.cos(ang)).toFixed(1)})`);
+  }
+  check(T.dialSvg({ gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, high_warn_on: true, high_warn: 50, zone_style: 2 }).includes('stroke="#ffd600"'), "yellow uses the display's yellow (#ffd600)");
+  check(T.dialSvg({ gauge_type: 0, start_deg: 225, end_deg: 135, tick_count: 11, major_nth: 2, min: 0, max: 100, high_crit_on: true, high_crit: 50, zone_style: 1 }).includes('stroke="#ff2a2a"'), "red uses the display's red (#ff2a2a)");
+  { const r = T.zoneRanges(zcell([20, 40, 60, 80], 1)).map(z => `${z.color}:${z.start}-${z.end}`).join(" ");
+    check(r === "yellow:0-40 yellow:60-100 red:0-20 red:80-100", "the ranges, in draw order, are the same as the display's: " + r);
+    const edge = T.zoneRanges({ min: 0, max: 100, low_warn_on: true, low_warn: 300, high_warn_on: true, high_warn: -50, high_crit_on: true, high_crit: 100 }).map(z => `${z.color}:${z.start}-${z.end}`).join(" ");
+    check(edge === "yellow:0-100 yellow:0-100 red:100-100", "thresholds outside the scale are clamped to it: " + edge);
+    check(T.zoneRanges({ min: 5, max: 5, low_crit_on: true, low_crit: 5 }).length === 1, "a scale with min = max does not break it"); }
+  { const c = zcell([20, 40, 70, 90], 2);
+    check(T.zoneOf(c, 20) === "red" && T.zoneOf(c, 21) === "yellow" && T.zoneOf(c, 40) === "yellow" && T.zoneOf(c, 41) === null && T.zoneOf(c, 70) === "yellow" && T.zoneOf(c, 89) === "yellow" && T.zoneOf(c, 90) === "red", "a tick exactly AT a threshold is coloured (both ends included); red wins over yellow"); }
   const lvmap = (i, n, mn, mx) => mn + Math.trunc(i * (mx - mn) / (n - 1));
   check(T.tickValue({ min: 0, max: 250 }, 3, 26) === 30 && T.tickValue({ min: -40, max: 50 }, 4, 11) === lvmap(4, 11, -40, 50) && T.tickValue({ min: 0, max: 100 }, 5, 7) === 83, "tick values come out as LVGL's integer maths gives them (e.g. 5 of 7 ticks on 0..100 is 83)");
 
-  console.log("10. the controls for colours and needle length");
+  console.log("10. the controls for warning zones and needle length");
   const needle2 = html(cellJson({})), half2 = html(cellJson({ gauge_type: 2 })), num2 = html(cellJson({ gauge_type: 1 })), trend2 = html(cellJson({ gauge_type: 3 }));
   for (const [name, h, want] of [["needle", needle2, true], ["half moon", half2, true], ["number", num2, false], ["trend graph", trend2, false]]) {
-    check(h.includes("Tick colors") === want && h.includes("Needle gap at center") === want && h.includes("Needle short of tip") === want, `${name}: colour + needle controls ${want ? "shown" : "hidden"}`);
+    check(h.includes("Warning zones") === want && h.includes("Needle gap at center") === want && h.includes("Needle short of tip") === want, `${name}: warning zones + needle controls ${want ? "shown" : "hidden"}`);
   }
-  check(needle2.includes(">High end (e.g.") && needle2.includes(">Low end (e.g."), "the side can be chosen: high end or low end");
-  check(needle2.includes("Yellow from") && needle2.includes("Red from") && needle2.includes("at or above"), "high end wording: 'from' and 'at or above'");
-  const low2 = html(cellJson({ zones_low: true }));
-  check(low2.includes("Yellow up to") && low2.includes("Red up to") && low2.includes("at or below") && low2.includes('<option value="1" selected>Low end'), "low end wording: 'up to' and 'at or below', and the choice is shown selected");
-  check((needle2.match(/<input type="number" step="1" value="0" disabled/g) || []).length === 2, "the two value boxes are greyed out while their zone is off");
-  const on2 = html(cellJson({ yellow_enabled: true, yellow_value: 200, red_enabled: true, red_value: 230 }));
-  check(on2.includes('value="200"') && on2.includes('value="230"') && !/value="200" disabled/.test(on2) && on2.includes('toggleZone(0,0,\'yellow\',this.checked)'), "with a zone on its value box is usable and shows the saved value");
+  check(["Low critical (red) up to", "Low warning (yellow) up to", "High warning (yellow) from", "High critical (red) from"].every(t => needle2.includes(t)), "four thresholds, each named, in the order low critical, low warning, high warning, high critical");
+  check((needle2.match(/<input type="number" step="1" value="0" disabled/g) || []).length === 4, "all four value boxes are greyed out while their threshold is off");
+  const on2 = html(cellJson({ low_crit_on: true, low_crit: 20, high_crit_on: true, high_crit: 230 }));
+  check(on2.includes('value="20"') && on2.includes('value="230"') && !/value="20" disabled/.test(on2) && !/value="230" disabled/.test(on2) && (on2.match(/value="0" disabled/g) || []).length === 2, "a threshold that is on has a usable box with its value; the two that are off stay greyed");
+  check(["low_crit", "low_warn", "high_warn", "high_crit"].every(k => on2.includes(`toggleZone(0,0,'${k}',this.checked)`) && on2.includes(`setZone(0,0,'${k}',this.value)`)), "each of the four rows has its OWN tick box and value box wired to its own threshold");
+  check(!needle2.includes("Tick colors") && !needle2.includes("High end (e.g.") && !needle2.includes("Yellow from"), "the old one-sided 'Tick colors' controls are gone");
+  check(needle2.includes('<option value="1" selected>Colored bands behind the ticks') && html(cellJson({ zone_style: 2 })).includes('<option value="2" selected>Colored tick marks') && html(cellJson({ zone_style: 3 })).includes('<option value="3" selected>Both'), "'Show as': bands, tick marks or both, with the saved one selected");
+  check(html(cellJson({ zone_style: undefined })).includes('<option value="1" selected>'), "an unset style shows as bands");
 
-  console.log("11. switching a zone on, and typing values");
+  console.log("11. switching a threshold on, and typing values");
   const zc = cellJson({ min: 0, max: 250 }); T.setPages([{ enabled: true, layout: 0, cells: [zc] }]); els.pages = { innerHTML: "" };
-  T.toggleZone(0, 0, "yellow", true); T.toggleZone(0, 0, "red", true);
-  check(zc.yellow_enabled && zc.red_enabled && zc.yellow_value === 188 && zc.red_value === 225, "first switch-on offers 75% and 90% of the scale for a high-end zone (188, 225)");
-  zc.yellow_value = 150; T.toggleZone(0, 0, "yellow", false); T.toggleZone(0, 0, "yellow", true);
-  check(zc.yellow_value === 150, "switching a zone off and on again keeps the value you typed");
-  const lz = cellJson({ min: 0, max: 250, zones_low: true }); T.setPages([{ enabled: true, layout: 0, cells: [lz] }]);
-  T.toggleZone(0, 0, "yellow", true); T.toggleZone(0, 0, "red", true);
-  check(lz.yellow_value === 63 && lz.red_value === 25, "for a low-end zone it offers 25% and 10% (63, 25)");
-  T.setZoneSide(0, 0, false); check(lz.zones_low === false, "the side can be changed");
+  for (const k of ["low_crit", "low_warn", "high_warn", "high_crit"]) T.toggleZone(0, 0, k, true);
+  check(zc.low_crit_on && zc.low_warn_on && zc.high_warn_on && zc.high_crit_on && zc.low_crit === 25 && zc.low_warn === 63 && zc.high_warn === 188 && zc.high_crit === 225, "first switch-on offers 10%, 25%, 75% and 90% of the scale (25, 63, 188, 225 on 0..250)");
+  zc.high_warn = 150; T.toggleZone(0, 0, "high_warn", false); check(zc.high_warn_on === false && zc.high_warn === 150, "switching off keeps the value you typed ...");
+  T.toggleZone(0, 0, "high_warn", true); check(zc.high_warn === 150, "... and switching it back on keeps it too");
+  const sz = cellJson({ min: -40, max: 140 }); T.setPages([{ enabled: true, layout: 0, cells: [sz] }]); T.toggleZone(0, 0, "low_crit", true); T.toggleZone(0, 0, "high_crit", true);
+  check(sz.low_crit === -22 && sz.high_crit === 122, "on a -40..140 scale the offered values are -22 and 122");
   els.dial_0_0 = { innerHTML: "" };
-  T.setZone(0, 0, "yellow_value", "80"); check(lz.yellow_value === 80 && els.dial_0_0.innerHTML.includes("<svg"), "typing a value stores it and redraws the picture");
-  T.setZone(0, 0, "yellow_value", ""); T.setZone(0, 0, "yellow_value", "abc"); check(lz.yellow_value === 80, "an empty or non-numeric box changes nothing");
-  T.setZone(0, 0, "yellow_value", "-40"); check(lz.yellow_value === -40, "negative values are fine");
+  T.setZone(0, 0, "high_crit", "130"); check(sz.high_crit === 130 && els.dial_0_0.innerHTML.includes("<svg"), "typing a value stores it and redraws the picture");
+  T.setZone(0, 0, "high_crit", ""); T.setZone(0, 0, "high_crit", "abc"); check(sz.high_crit === 130, "an empty or non-numeric box changes nothing");
+  T.setZone(0, 0, "low_crit", "-40"); check(sz.low_crit === -40, "negative values are fine");
+  T.setZoneStyle(0, 0, 3); check(sz.zone_style === 3 && els.dial_0_0.innerHTML.includes("<svg"), "'Show as' changes the style and redraws the picture");
 
   console.log("12. needle length and the picture of the needle");
   const needleLine = (c) => { const m = T.dialSvg(Object.assign({ tick_count: 11, major_nth: 2, min: 0, max: 100 }, c)).match(/<line class="needle" x1="([\d.-]+)" y1="([\d.-]+)" x2="([\d.-]+)" y2="([\d.-]+)"/);
@@ -218,14 +240,14 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
 
   console.log("13. new cells and saving");
   const e2 = T.emptyCell();
-  check(!e2.yellow_enabled && !e2.red_enabled && !e2.zones_low && e2.needle_hub_pct === 0 && e2.needle_tip_pct === 0, "a new cell has no colour zones and the normal needle");
-  const sc = cellJson({ yellow_enabled: true, yellow_value: 200, red_enabled: true, red_value: 230, zones_low: true, needle_hub_pct: 15, needle_tip_pct: 5 });
+  check(!e2.low_crit_on && !e2.low_warn_on && !e2.high_warn_on && !e2.high_crit_on && e2.zone_style === 1 && e2.needle_hub_pct === 0 && e2.needle_tip_pct === 0, "a new cell has no warning zones (bands if you switch them on) and the normal needle");
+  const sc = cellJson({ low_crit_on: true, low_crit: 20, low_warn_on: true, low_warn: 40, high_warn_on: true, high_warn: 200, high_crit_on: true, high_crit: 230, zone_style: 3, needle_hub_pct: 15, needle_tip_pct: 5 });
   T.setPages([{ enabled: true, layout: 0, cells: [sc] }]); board.posts = []; els.status = { textContent: "" };
   await T.save();
   const sent = JSON.parse(board.posts[0].body)[0].cells[0];
-  check(sent.yellow_enabled === true && sent.yellow_value === 200 && sent.red_enabled === true && sent.red_value === 230 && sent.zones_low === true && sent.needle_hub_pct === 15 && sent.needle_tip_pct === 5, "all seven new settings are sent to the board when saving");
+  check(sent.low_crit_on === true && sent.low_crit === 20 && sent.low_warn_on === true && sent.low_warn === 40 && sent.high_warn_on === true && sent.high_warn === 200 && sent.high_crit_on === true && sent.high_crit === 230 && sent.zone_style === 3 && sent.needle_hub_pct === 15 && sent.needle_tip_pct === 5, "the four thresholds, the style and the needle trim are all sent to the board when saving");
   const web2 = pageHtml('WEBCFG_HTML');
-  check(!web2.includes("Tick colors") && !web2.includes("Needle gap") && !web2.includes("zoneOf"), "the web dashboard editor has none of this (a web page has no dial)");
+  check(!web2.includes("Warning zones") && !web2.includes("Needle gap") && !web2.includes("zoneOf"), "the web dashboard editor has none of this (a web page has no dial)");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

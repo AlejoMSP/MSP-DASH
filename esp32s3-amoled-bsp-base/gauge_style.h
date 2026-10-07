@@ -15,6 +15,7 @@
 */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 // ---- readout text sizes ----
 #define GAUGE_VALUE_SIZE_COUNT 8
@@ -86,11 +87,44 @@ static inline void gauge_resolve_needle_trim(int32_t hubPct, int32_t tipPct, int
   *hub = h; *tip = t;
 }
 
-// ---- tick colour zones ----
-// Ticks whose value is in a zone are drawn yellow or red instead of the dial's tick colour. A zone is at the
-// HIGH end of the scale (ticks at or above its value) or, with zonesLow, the LOW end (at or below it). Where
-// yellow and red overlap, red wins.
+// ---- warning zones (TunerStudio style) ----
+// A dial has four thresholds, each switched on or off on its own:
+//     LOW CRITICAL  (red)     the scale from its minimum up to the value
+//     LOW WARNING   (yellow)  the scale from its minimum up to the value
+//     HIGH WARNING  (yellow)  the scale from the value up to its maximum
+//     HIGH CRITICAL (red)     the scale from the value up to its maximum
+// They are drawn in a fixed order - yellow ones first, then red - and what is drawn later wins, so red covers
+// yellow where they overlap: with low critical 20 and low warning 40 the dial is red up to 20 and yellow from 20 to 40.
+// They can be drawn as coloured BANDS behind the tick marks, as coloured TICK MARKS, or both.
 #define GAUGE_ZONE_YELLOW 0xFFD600
 #define GAUGE_ZONE_RED    0xFF2A2A
+#define GAUGE_ZONE_BANDS  1     // zone_style bit: a coloured arc behind the ticks
+#define GAUGE_ZONE_TICKS  2     // zone_style bit: the tick marks themselves are coloured
+#define GAUGE_ZONE_BAND_WIDTH 12   // pixels
+
+static inline int32_t gauge_resolve_zone_style(int32_t v) { return (v >= 1 && v <= 3) ? v : GAUGE_ZONE_BANDS; }
+
+typedef struct { int32_t start, end; int red; } GaugeZoneRange;
+
+// Threshold index: 0 = low critical, 1 = low warning, 2 = high warning, 3 = high critical.
+// Fills `out` with the ranges to draw, IN DRAW ORDER (yellow low, yellow high, red low, red high), for the thresholds
+// that are on, clamped to [min, max]. A range that would be empty (start > end) is left out. Returns how many.
+static inline int gauge_zone_ranges(const bool on[4], const int32_t at[4], int32_t min, int32_t max, GaugeZoneRange out[4]) {
+  static const int order[4] = { 1, 2, 0, 3 };
+  int n = 0;
+  for (int k = 0; k < 4; k++) {
+    int i = order[k];
+    if (!on[i]) continue;
+    bool low = (i < 2);
+    int32_t a = low ? min : at[i], b = low ? at[i] : max;
+    if (a < min) a = min;
+    if (a > max) a = max;
+    if (b < min) b = min;
+    if (b > max) b = max;
+    if (a > b) continue;
+    out[n].start = a; out[n].end = b; out[n].red = (i == 0 || i == 3); n++;
+  }
+  return n;
+}
 
 #endif

@@ -390,7 +390,9 @@ R"rawliteral(<style>
     .dialprev { flex:none; width:96px; text-align:center; }
     .dialcap { font-size:0.7em; color:#888; }
     .zonebox { background:#0d0d0d; border:1px solid #222; border-radius:8px; padding:8px; margin:8px 0; }
-    .zonebox input[type=number] { margin-top:4px; }
+    .zonerow { display:flex; align-items:center; gap:8px; margin:4px 0; }
+    .zonerow label { flex:1; }
+    .zonerow input[type=number] { width:92px; margin:0; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
@@ -438,7 +440,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, start_deg:225, end_deg:135,
-        yellow_enabled:false, yellow_value:0, red_enabled:false, red_value:0, zones_low:false, needle_hub_pct:0, needle_tip_pct:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -504,20 +506,20 @@ R"rawliteral(
           </div>
           <p class="hint">0 is straight up and angles run clockwise (90 = 3 o'clock, 180 = straight down). The dial sweeps clockwise from start to end. Standard gauge: 225 to 135.</p>
           <div class="zonebox">
-            <strong>Tick colors</strong>
-            <label>Colored ticks are at the
-              <select onchange="setZoneSide(${pIdx},${cIdx},this.value==='1')">
-                <option value="0" ${!c.zones_low?"selected":""}>High end (e.g. coolant temp)</option>
-                <option value="1" ${c.zones_low?"selected":""}>Low end (e.g. oil pressure)</option>
+            <strong>Warning zones</strong>
+            <p class="hint">Like TunerStudio: up to four thresholds, each switched on by itself. Values are in the dial's own units (between Min and Max). Red covers yellow where they overlap.</p>
+            ${[["low_crit", "Low critical (red) up to"], ["low_warn", "Low warning (yellow) up to"], ["high_warn", "High warning (yellow) from"], ["high_crit", "High critical (red) from"]].map(([k, name]) => `
+            <div class="zonerow">
+              <label><input type="checkbox" ${c[k + "_on"] ? "checked" : ""} onchange="toggleZone(${pIdx},${cIdx},'${k}',this.checked)"> ${name}</label>
+              <input type="number" step="1" value="${c[k]}" ${c[k + "_on"] ? "" : "disabled"} oninput="setZone(${pIdx},${cIdx},'${k}',this.value)">
+            </div>`).join("")}
+            <label>Show as
+              <select onchange="setZoneStyle(${pIdx},${cIdx},parseInt(this.value))">
+                <option value="1" ${(c.zone_style || 1) === 1 ? "selected" : ""}>Colored bands behind the ticks</option>
+                <option value="2" ${c.zone_style === 2 ? "selected" : ""}>Colored tick marks</option>
+                <option value="3" ${c.zone_style === 3 ? "selected" : ""}>Both</option>
               </select>
             </label>
-            <div class="row2">
-              <div><label><input type="checkbox" ${c.yellow_enabled?"checked":""} onchange="toggleZone(${pIdx},${cIdx},'yellow',this.checked)"> Yellow ${c.zones_low?"up to":"from"}</label>
-                <input type="number" step="1" value="${c.yellow_value}" ${c.yellow_enabled?"":"disabled"} oninput="setZone(${pIdx},${cIdx},'yellow_value',this.value)"></div>
-              <div><label><input type="checkbox" ${c.red_enabled?"checked":""} onchange="toggleZone(${pIdx},${cIdx},'red',this.checked)"> Red ${c.zones_low?"up to":"from"}</label>
-                <input type="number" step="1" value="${c.red_value}" ${c.red_enabled?"":"disabled"} oninput="setZone(${pIdx},${cIdx},'red_value',this.value)"></div>
-            </div>
-            <p class="hint">Tick marks at or ${c.zones_low?"below":"above"} the value turn yellow or red. Red wins where they overlap. Use the dial's own numbers (between Min and Max).</p>
           </div>
           <div class="row2">
             <div><label>Needle gap at center (%) <input type="number" min="0" max="60" step="1" value="${c.needle_hub_pct||0}" oninput="setTrim(${pIdx},${cIdx},'needle_hub_pct',this.value)"></label></div>
@@ -566,16 +568,33 @@ R"rawliteral(
       return { start: s, end: e, sweep: sw, standard: standard };
     }
 
-    // Tick colours (GAUGE_ZONE_YELLOW / GAUGE_ZONE_RED in gauge_style.h).
+    // Warning zones (gauge_style.h). Colours: GAUGE_ZONE_YELLOW / GAUGE_ZONE_RED.
     const ZONE_COLORS = { yellow: "#ffd600", red: "#ff2a2a" };
+    // The four thresholds, in the order the display uses: 0 low critical, 1 low warning, 2 high warning, 3 high critical.
+    const ZONE_KEYS = ["low_crit", "low_warn", "high_warn", "high_crit"];
 
-    // Which zone a tick of this value is in: "red", "yellow" or null. Mirrors the display: a zone at the high end
-    // covers ticks AT OR ABOVE its value, one at the low end AT OR BELOW it, and red wins where they overlap.
+    // The ranges of the scale to colour, IN DRAW ORDER (yellow first, red last, so red covers yellow). Mirrors
+    // gauge_zone_ranges() in gauge_style.h: a "low" threshold covers the scale from its minimum up to the value, a "high" one
+    // from the value up to its maximum; values are clamped to the scale; an empty range is left out.
+    function zoneRanges(c) {
+      const mn = parseInt(c.min) || 0, mx = parseInt(c.max) || 0, out = [];
+      const clamp = v => Math.min(mx, Math.max(mn, v));
+      for (const i of [1, 2, 0, 3]) {
+        if (!c[ZONE_KEYS[i] + "_on"]) continue;
+        const low = i < 2, at = parseInt(c[ZONE_KEYS[i]]) || 0;
+        const a = clamp(low ? mn : at), b = clamp(low ? at : mx);
+        if (a > b) continue;
+        out.push({ start: a, end: b, color: (i === 0 || i === 3) ? "red" : "yellow" });
+      }
+      return out;
+    }
+
+    // The colour of a tick of this value ("red", "yellow" or null) when zones are drawn as tick marks: the last range that
+    // holds it wins (both ends included), exactly as LVGL recolours ticks.
     function zoneOf(c, value) {
-      const hit = (on, at) => on && (c.zones_low ? value <= at : value >= at);
-      if (hit(c.red_enabled, c.red_value)) return "red";
-      if (hit(c.yellow_enabled, c.yellow_value)) return "yellow";
-      return null;
+      let hit = null;
+      for (const z of zoneRanges(c)) if (value >= z.start && value <= z.end) hit = z.color;
+      return hit;
     }
 
     // The value of tick i of n, the way LVGL computes it (integer maths).
@@ -600,11 +619,23 @@ R"rawliteral(
       const f = v => v.toFixed(1);
       const a0 = pt(g.start, R), a1 = pt(g.start + g.sweep, R);
       const n = Math.max(2, Math.min(60, parseInt(c.tick_count) || 26)), major = Math.max(1, parseInt(c.major_nth) || 5);
+      // zone_style: 1 = bands behind the ticks, 2 = coloured tick marks, 3 = both (anything else is bands, like the display)
+      const style = [1, 2, 3].includes(Number(c.zone_style)) ? Number(c.zone_style) : 1;
+      const mnV = parseInt(c.min) || 0, spanV = (parseInt(c.max) || 0) - mnV;
+      let bands = "";
+      if ((style & 1) && spanV > 0) {
+        for (const z of zoneRanges(c)) {
+          if (z.start >= z.end) continue;                         // a band with no width draws nothing
+          const s0 = g.start + g.sweep * (z.start - mnV) / spanV, s1 = g.start + g.sweep * (z.end - mnV) / spanV;
+          const q0 = pt(s0, R - 4), q1 = pt(s1, R - 4);
+          bands += `<path class="band ${z.color}" d="M${f(q0[0])} ${f(q0[1])} A${R - 4} ${R - 4} 0 ${(s1 - s0) > 180 ? 1 : 0} 1 ${f(q1[0])} ${f(q1[1])}" fill="none" stroke="${ZONE_COLORS[z.color]}" stroke-width="5"/>`;
+        }
+      }
       let ticks = "";
       for (let i = 0; i < n; i++) {
         const a = g.start + g.sweep * i / (n - 1), len = (i % major === 0) ? 9 : 5;
         const p0 = pt(a, R - 3), p1 = pt(a, R - 3 - len);
-        const zone = zoneOf(c, tickValue(c, i, n));
+        const zone = (style & 2) ? zoneOf(c, tickValue(c, i, n)) : null;
         ticks += `<line class="tick${zone ? " " + zone : ""}" x1="${f(p0[0])}" y1="${f(p0[1])}" x2="${f(p1[0])}" y2="${f(p1[1])}" stroke="${zone ? ZONE_COLORS[zone] : "#888"}" stroke-width="${zone ? 2 : (i % major === 0 ? 1.6 : 1)}"/>`;
       }
       const trim = resolveTrim(c), needleAt = g.start + g.sweep * 0.65;
@@ -613,6 +644,7 @@ R"rawliteral(
       return `<svg viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="dial preview">` +
         `<circle cx="48" cy="48" r="${R}" fill="none" stroke="#222"/>` +
         `<path d="M${f(a0[0])} ${f(a0[1])} A${R} ${R} 0 ${g.sweep > 180 ? 1 : 0} 1 ${f(a1[0])} ${f(a1[1])}" fill="none" stroke="#4dd0e1" stroke-width="3"/>` +
+        bands +
         ticks +
         `<line class="needle" x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needleColor}" stroke-width="2.2" stroke-linecap="round"/>` +
         (trim.hub === 0 ? `<circle class="hub" cx="48" cy="48" r="2.6" fill="#666"/>` : "") +
@@ -645,22 +677,21 @@ R"rawliteral(
       refreshDial(pIdx, cIdx);
     }
 
-    // Switching a zone on for the first time offers a sensible value inside the scale instead of 0.
-    function toggleZone(pIdx, cIdx, which, on) {
+    // Switching a threshold on for the first time offers a sensible value inside the scale instead of 0.
+    function toggleZone(pIdx, cIdx, key, on) {
       const c = pages[pIdx].cells[cIdx];
-      c[which + "_enabled"] = on;
-      if (on && !c[which + "_value"]) {
+      c[key + "_on"] = on;
+      if (on && !c[key]) {
         const mn = parseInt(c.min) || 0, mx = parseInt(c.max) || 0;
-        const frac = c.zones_low ? (which === "red" ? 0.1 : 0.25) : (which === "red" ? 0.9 : 0.75);
-        c[which + "_value"] = Math.round(mn + (mx - mn) * frac);
+        const frac = { low_crit: 0.1, low_warn: 0.25, high_warn: 0.75, high_crit: 0.9 }[key];
+        c[key] = Math.round(mn + (mx - mn) * frac);
       }
       renderPages();
     }
 
-    // Which end of the scale the zones are at changes the wording ("from" / "up to") and the picture.
-    function setZoneSide(pIdx, cIdx, low) {
-      pages[pIdx].cells[cIdx].zones_low = low;
-      renderPages();
+    function setZoneStyle(pIdx, cIdx, style) {
+      pages[pIdx].cells[cIdx].zone_style = style;
+      refreshDial(pIdx, cIdx);
     }
 
     // Switching between Needle and Half-Moon keeps that type's standard dial - unless the dial was customised.

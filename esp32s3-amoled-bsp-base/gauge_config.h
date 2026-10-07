@@ -89,12 +89,16 @@ typedef struct {
   int32_t tick_font_size;  // numbers around a needle/half-moon dial: 14/28/36, -1 = hidden, 0 = follow value_font_size (configs saved before this existed)
   int32_t start_deg;       // needle/half-moon dial start, compass degrees (0 = straight up, clockwise). Standard gauge 225
   int32_t end_deg;         // dial end, clockwise from the start. Standard gauge 135 (a 270 degree sweep); half moon 270 -> 90
-  // ---- needle/half-moon dials: coloured tick marks and needle length ----
-  bool yellow_enabled;     // ticks at/above (or, zones_low, at/below) yellow_value are drawn yellow
-  int32_t yellow_value;    // in the dial's own units, between min and max
-  bool red_enabled;        // same for red; red wins where the zones overlap
-  int32_t red_value;
-  bool zones_low;          // true: the zones are at the LOW end of the scale (e.g. oil pressure); false: the HIGH end (e.g. coolant temperature)
+  // ---- needle/half-moon dials: warning zones (TunerStudio style) and needle length ----
+  bool low_crit_on;        // red: the scale from its minimum up to low_crit
+  int32_t low_crit;        // in the dial's own units, between min and max
+  bool low_warn_on;        // yellow: from the minimum up to low_warn
+  int32_t low_warn;
+  bool high_warn_on;       // yellow: from high_warn up to the maximum
+  int32_t high_warn;
+  bool high_crit_on;       // red: from high_crit up to the maximum. Red covers yellow where they overlap.
+  int32_t high_crit;
+  int32_t zone_style;      // 1 = coloured bands behind the ticks, 2 = coloured tick marks, 3 = both (GAUGE_ZONE_BANDS / _TICKS)
   int32_t needle_hub_pct;  // gap between the dial's centre and where the needle starts, % of the dial radius (0-60)
   int32_t needle_tip_pct;  // how far short of its normal tip the needle stops, % of the dial radius (0-60; hub + tip <= 85)
   bool has_warning;

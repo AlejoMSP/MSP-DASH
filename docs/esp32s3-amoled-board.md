@@ -1944,3 +1944,40 @@ printed on the face; decimal places; border size.
 indicator scenarios; editor 109; front page 77; end to end 49; browser layout check 24 page views (lamp colours, escaped text,
 sizes); deliberate breakages of the display, web page and editor were each caught (two weak tests were strengthened, one
 change was a redundant safeguard with no visible effect). NOT run on the board.
+
+
+## Warning zones, TunerStudio style (build 110)
+
+Request: build the TunerStudio-style four-threshold zones drawn as coloured bands (from the TunerStudio gauge properties
+dialog: Low Critical / Low Warning / High Warning / High Critical).
+
+**What replaced what.** Build 108's one-sided "Tick colors" (one yellow and one red value, at the high OR the low end) is
+replaced. A needle / half-moon cell now has FOUR thresholds, each with its own on/off switch and value, in the dial's units:
+low critical (red) and low warning (yellow) colour the scale from its minimum up to the value; high warning (yellow) and high
+critical (red) colour it from the value up to its maximum. Fields: low_crit_on / low_crit, low_warn_on / low_warn,
+high_warn_on / high_warn, high_crit_on / high_crit, and zone_style (1 = coloured arc bands behind the ticks, 2 = coloured
+tick marks, 3 = both; unset or invalid = 1). Colours are fixed (GAUGE_ZONE_YELLOW 0xFFD600, GAUGE_ZONE_RED 0xFF2A2A).
+
+**Conversion.** A config saved by build 108 (keys yellow_enabled / yellow_value / red_enabled / red_value / zones_low, no
+zone_style) is converted when loaded and looks the same: yellow becomes the warning threshold and red the critical one on the
+side it was on, and the style becomes 2 (coloured tick marks, as it was). Saving writes only the new keys. If the new keys are
+present the old ones are ignored.
+
+**Drawing.** gauge_zone_ranges() (gauge_style.h, pure C) returns the ranges in DRAW ORDER: yellow low, yellow high, red low, red
+high, clamped to the scale, an empty range left out. Bands are `lv_meter_add_arc` indicators (12 px wide, outer edge at the
+dial's edge, square ends); LVGL draws arcs BEFORE the tick marks, so ticks sit on top of the bands, and a later indicator is
+drawn over an earlier one, so red covers yellow where they overlap. Coloured ticks are the existing `lv_meter_add_scale_lines`
+ranges (both ends included). A band with no width (a threshold at or beyond the end of the scale) draws nothing. The needle
+is added after everything so it is on top.
+
+**Editor.** "Warning zones": four rows (tick box + value), "Show as" (bands / tick marks / both), and the dial preview draws
+the bands and the coloured ticks with the same rules (zoneRanges / zoneOf mirror gauge_zone_ranges; the editor tests run them
+through the same hand-written cases as the display's pixel test). Switching a threshold on for the first time offers 10%,
+25%, 75% and 90% of the scale (low critical, low warning, high warning, high critical) instead of 0.
+
+**Still not done from the TunerStudio dialog:** gauge title and units printed on the face, decimal places, border size.
+
+**Verified (PC, sanitizers on).** zone logic 20; config 161 (incl. conversion); display: LVGL indicator lists 52 + 52, tick
+colours 132, rendered bands 17, needle trim 40; editor 139; each of 14 deliberate breakages of the display and the editor was
+caught (two weak tests were strengthened); earlier suites unchanged. Screenshots reviewed: eight dial configurations. NOT run on
+the board.

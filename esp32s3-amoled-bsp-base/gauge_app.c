@@ -507,17 +507,31 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
     if (tickSize < 0) lv_obj_set_style_text_opa(meter, LV_OPA_TRANSP, LV_PART_TICKS);   // dial numbers hidden; the tick marks stay
 
-    // Coloured tick zones. LVGL recolours the ticks whose value lies in [start, end] (both ends included) and
-    // lets a LATER indicator win over an earlier one, so yellow goes in first and red second: red wins where
-    // they overlap. High-end zones run from their value up to max; low-end zones from min up to their value.
-    for (int zone = 0; zone < 2; zone++) {
-      bool red = (zone == 1);
-      if (!(red ? cfg->red_enabled : cfg->yellow_enabled)) continue;
-      int32_t at = red ? cfg->red_value : cfg->yellow_value;
-      lv_color_t zc = lv_color_hex(red ? GAUGE_ZONE_RED : GAUGE_ZONE_YELLOW);
-      lv_meter_indicator_t *z = lv_meter_add_scale_lines(meter, scale, zc, zc, false, 0);
-      lv_meter_set_indicator_start_value(meter, z, cfg->zones_low ? cfg->min_val : at);
-      lv_meter_set_indicator_end_value(meter, z, cfg->zones_low ? at : cfg->max_val);
+    // Warning zones, TunerStudio style (gauge_style.h): up to four thresholds drawn as coloured arc BANDS behind the tick
+    // marks (LVGL draws arcs before ticks) and/or as coloured TICK MARKS (it recolours the ticks whose value lies in the
+    // range, both ends included). gauge_zone_ranges() hands them over in draw order, yellow first and red last, and LVGL
+    // draws a later indicator over an earlier one, so red covers yellow where they overlap. The needle is added after all
+    // of them so it is drawn on top.
+    {
+      const bool zoneOn[4] = { cfg->low_crit_on, cfg->low_warn_on, cfg->high_warn_on, cfg->high_crit_on };
+      const int32_t zoneAt[4] = { cfg->low_crit, cfg->low_warn, cfg->high_warn, cfg->high_crit };
+      GaugeZoneRange zr[4];
+      int nz = gauge_zone_ranges(zoneOn, zoneAt, cfg->min_val, cfg->max_val, zr);
+      int32_t zstyle = gauge_resolve_zone_style(cfg->zone_style);
+      if (zstyle & GAUGE_ZONE_BANDS) lv_obj_set_style_arc_rounded(meter, false, LV_PART_ITEMS);   // square band ends, exactly at the threshold
+      for (int k = 0; k < nz; k++) {
+        lv_color_t zc = lv_color_hex(zr[k].red ? GAUGE_ZONE_RED : GAUGE_ZONE_YELLOW);
+        if ((zstyle & GAUGE_ZONE_BANDS) && zr[k].start < zr[k].end) {    // a band with no width draws nothing
+          lv_meter_indicator_t *band = lv_meter_add_arc(meter, scale, GAUGE_ZONE_BAND_WIDTH, zc, 0);
+          lv_meter_set_indicator_start_value(meter, band, zr[k].start);
+          lv_meter_set_indicator_end_value(meter, band, zr[k].end);
+        }
+        if (zstyle & GAUGE_ZONE_TICKS) {
+          lv_meter_indicator_t *tick = lv_meter_add_scale_lines(meter, scale, zc, zc, false, 0);
+          lv_meter_set_indicator_start_value(meter, tick, zr[k].start);
+          lv_meter_set_indicator_end_value(meter, tick, zr[k].end);
+        }
+      }
     }
 
     lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 6, needleColor, -12);

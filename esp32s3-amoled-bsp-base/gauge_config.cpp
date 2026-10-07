@@ -66,7 +66,9 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.value_font_size = 28;
   c.tick_font_size = 28;
   gauge_dial_defaults(0, &c.start_deg, &c.end_deg);
-  c.yellow_enabled = false; c.yellow_value = 0; c.red_enabled = false; c.red_value = 0; c.zones_low = false;
+  c.low_crit_on = c.low_warn_on = c.high_warn_on = c.high_crit_on = false;
+  c.low_crit = c.low_warn = c.high_warn = c.high_crit = 0;
+  c.zone_style = GAUGE_ZONE_BANDS;
   c.needle_hub_pct = 0; c.needle_tip_pct = 0;
   c.has_warning = hasWarning;
   c.warning_threshold = warnThresh;
@@ -142,11 +144,15 @@ static void serializeCell(JsonObject o, const CellConfig *c) {
   o["tick_font_size"] = c->tick_font_size;
   o["start_deg"] = c->start_deg;
   o["end_deg"] = c->end_deg;
-  o["yellow_enabled"] = c->yellow_enabled;
-  o["yellow_value"] = c->yellow_value;
-  o["red_enabled"] = c->red_enabled;
-  o["red_value"] = c->red_value;
-  o["zones_low"] = c->zones_low;
+  o["low_crit_on"] = c->low_crit_on;
+  o["low_crit"] = c->low_crit;
+  o["low_warn_on"] = c->low_warn_on;
+  o["low_warn"] = c->low_warn;
+  o["high_warn_on"] = c->high_warn_on;
+  o["high_warn"] = c->high_warn;
+  o["high_crit_on"] = c->high_crit_on;
+  o["high_crit"] = c->high_crit;
+  o["zone_style"] = c->zone_style;
   o["needle_hub_pct"] = c->needle_hub_pct;
   o["needle_tip_pct"] = c->needle_tip_pct;
   o["has_warning"] = c->has_warning;
@@ -190,12 +196,27 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
     gauge_dial_defaults(isHalf, &defStart, &defEnd);
     gauge_dial_resolve(isHalf, o["start_deg"] | defStart, o["end_deg"] | defEnd, &c->start_deg, &c->end_deg, &sweep);
   }
-  // Colour zones and needle trim: a config without these keys has no zones and the normal needle.
-  c->yellow_enabled = o["yellow_enabled"] | false;
-  c->yellow_value = o["yellow_value"] | 0;
-  c->red_enabled = o["red_enabled"] | false;
-  c->red_value = o["red_value"] | 0;
-  c->zones_low = o["zones_low"] | false;
+  // Warning zones and needle trim: a config without these keys has no zones and the normal needle.
+  if (!o["zone_style"].isNull()) {
+    c->low_crit_on = o["low_crit_on"] | false;   c->low_crit = o["low_crit"] | 0;
+    c->low_warn_on = o["low_warn_on"] | false;   c->low_warn = o["low_warn"] | 0;
+    c->high_warn_on = o["high_warn_on"] | false; c->high_warn = o["high_warn"] | 0;
+    c->high_crit_on = o["high_crit_on"] | false; c->high_crit = o["high_crit"] | 0;
+    c->zone_style = gauge_resolve_zone_style(o["zone_style"] | GAUGE_ZONE_BANDS);
+  } else if (!o["yellow_enabled"].isNull() || !o["red_enabled"].isNull() || !o["zones_low"].isNull()) {
+    // Saved by build 108, which had one yellow and one red zone on ONE side of the scale, drawn as coloured ticks.
+    // Same look after the update: yellow becomes the warning threshold and red the critical one, on that side.
+    bool low = o["zones_low"] | false;
+    bool yOn = o["yellow_enabled"] | false, rOn = o["red_enabled"] | false;
+    int32_t yAt = o["yellow_value"] | 0, rAt = o["red_value"] | 0;
+    c->low_warn_on = low && yOn;   c->low_warn = low ? yAt : 0;
+    c->low_crit_on = low && rOn;   c->low_crit = low ? rAt : 0;
+    c->high_warn_on = !low && yOn; c->high_warn = low ? 0 : yAt;
+    c->high_crit_on = !low && rOn; c->high_crit = low ? 0 : rAt;
+    c->zone_style = GAUGE_ZONE_TICKS;
+  } else {
+    c->zone_style = GAUGE_ZONE_BANDS;
+  }
   gauge_resolve_needle_trim(o["needle_hub_pct"] | 0, o["needle_tip_pct"] | 0, &c->needle_hub_pct, &c->needle_tip_pct);
   c->has_warning = o["has_warning"] | false;
   c->warning_threshold = o["warning_threshold"] | 0.0f;

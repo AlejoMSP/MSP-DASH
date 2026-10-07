@@ -56,7 +56,7 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.needle_color = 0xFF8800 + j; c.tick_color = 0x123456; c.bg_color = 0x0A0B0C;
       c.value_divisor = 1000.0f; c.tick_count = 40 + j; c.major_nth = 4; c.refresh_hz = 25; c.show_value = true; c.value_font_size = GAUGE_VALUE_SIZES[(i + j) % GAUGE_VALUE_SIZE_COUNT];
       c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
-      c.yellow_enabled = (j % 2) == 0; c.yellow_value = 150 + i; c.red_enabled = (i % 2) == 0; c.red_value = 200 + j; c.zones_low = (i + j) % 3 == 0;
+      c.low_crit_on = (j % 2) == 0; c.low_crit = 10 + i; c.low_warn_on = (i % 2) == 0; c.low_warn = 30 + j; c.high_warn_on = (i + j) % 2 == 1; c.high_warn = 150 + i; c.high_crit_on = (i + j) % 3 == 0; c.high_crit = 200 + j; c.zone_style = 1 + (i + j) % 3;
       c.needle_hub_pct = 5 + j; c.needle_tip_pct = 3 + i;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;
@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
   printf("S5 the web-format JSON round-trips (what the editors send and receive)\n");
   fillAll(p);
   std::string web = toJson(p);
-  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","yellow_enabled","yellow_value","red_enabled","red_value","zones_low","needle_hub_pct","needle_tip_pct","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
+  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","low_crit_on","low_crit","low_warn_on","low_warn","high_warn_on","high_warn","high_crit_on","high_crit","zone_style","needle_hub_pct","needle_tip_pct","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
     CHECK(web.find(std::string("\"") + key + "\":") != std::string::npos, (std::string("key present in the JSON: ") + key).c_str());
   PageConfig scratch[MAX_PAGES];
   { JsonDocument d; deserializeJson(d, web); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); }
@@ -246,20 +246,39 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"start_deg\":0,\"end_deg\":10}");     CHECK(c10.start_deg == 0 && c10.end_deg == 10, "the narrowest allowed dial (10) is kept");
   CHECK(gauge_snap_value_size(36) == 36 && gauge_snap_value_size(42) == 36 && gauge_snap_value_size(43) == 48, "snapping goes to the NEAREST size");
 
-  printf("S12 tick colour zones and needle trim\n");
+  printf("S12 warning zones and needle trim\n");
   wipe(); gauge_config_init(); p = gauge_config_get_pages();
-  CHECK(!p[0].cells[0].yellow_enabled && !p[0].cells[0].red_enabled && !p[0].cells[0].zones_low, "defaults: no coloured zones");
+  { CellConfig &d = p[0].cells[0];
+    CHECK(!d.low_crit_on && !d.low_warn_on && !d.high_warn_on && !d.high_crit_on && d.zone_style == GAUGE_ZONE_BANDS, "defaults: no warning zones, and coloured bands if you switch them on"); }
   CHECK(p[0].cells[0].needle_hub_pct == 0 && p[0].cells[0].needle_tip_pct == 0, "defaults: the normal needle (no trim)");
-  p[0].cells[0].yellow_enabled = true; p[0].cells[0].yellow_value = 180; p[0].cells[0].red_enabled = true; p[0].cells[0].red_value = 220;
-  p[0].cells[0].zones_low = true; p[0].cells[0].needle_hub_pct = 12; p[0].cells[0].needle_tip_pct = 8;
+  { CellConfig &z0 = p[0].cells[0];
+    z0.low_crit_on = true; z0.low_crit = 20; z0.low_warn_on = true; z0.low_warn = 40; z0.high_warn_on = true; z0.high_warn = 180; z0.high_crit_on = true; z0.high_crit = 220;
+    z0.zone_style = 3; z0.needle_hub_pct = 12; z0.needle_tip_pct = 8; }
   CHECK(gauge_config_save(), "saves");
   gauge_config_init(); p = gauge_config_get_pages();
   CellConfig &z = p[0].cells[0];
-  CHECK(z.yellow_enabled && z.yellow_value == 180 && z.red_enabled && z.red_value == 220 && z.zones_low && z.needle_hub_pct == 12 && z.needle_tip_pct == 8, "all of them survive a reboot");
+  CHECK(z.low_crit_on && z.low_crit == 20 && z.low_warn_on && z.low_warn == 40 && z.high_warn_on && z.high_warn == 180 && z.high_crit_on && z.high_crit == 220 && z.zone_style == 3 && z.needle_hub_pct == 12 && z.needle_tip_pct == 8, "all four thresholds, the style and the needle trim survive a reboot");
   c10 = load1("{\"enabled\":true,\"gauge_type\":0}");
-  CHECK(!c10.yellow_enabled && !c10.red_enabled && c10.needle_hub_pct == 0 && c10.needle_tip_pct == 0, "a config saved before these existed: no zones, normal needle");
-  c10 = load1("{\"enabled\":true,\"yellow_enabled\":true,\"yellow_value\":-40,\"red_value\":300}");
-  CHECK(c10.yellow_enabled && c10.yellow_value == -40 && !c10.red_enabled && c10.red_value == 300, "a zone's value is kept even while it is switched off; negative values are fine");
+  CHECK(!c10.low_crit_on && !c10.high_crit_on && c10.zone_style == GAUGE_ZONE_BANDS && c10.needle_hub_pct == 0 && c10.needle_tip_pct == 0, "a config saved before these existed: no zones, normal needle");
+  c10 = load1("{\"enabled\":true,\"zone_style\":1,\"low_warn_on\":true,\"low_warn\":-40,\"high_crit\":300}");
+  CHECK(c10.low_warn_on && c10.low_warn == -40 && !c10.high_crit_on && c10.high_crit == 300, "a threshold's value is kept even while it is switched off; negative values are fine");
+  c10 = load1("{\"enabled\":true,\"zone_style\":0}"); CHECK(c10.zone_style == 1, "style 0 -> bands");
+  c10 = load1("{\"enabled\":true,\"zone_style\":9}"); CHECK(c10.zone_style == 1, "style 9 -> bands");
+  c10 = load1("{\"enabled\":true,\"zone_style\":2}"); CHECK(c10.zone_style == 2, "style 2 (tick marks) is kept");
+
+  printf("S12b zones saved by build 108 (one yellow and one red on one side, drawn as ticks) look the same afterwards\n");
+  c10 = load1("{\"enabled\":true,\"yellow_enabled\":true,\"yellow_value\":200,\"red_enabled\":true,\"red_value\":230,\"zones_low\":false}");
+  CHECK(c10.high_warn_on && c10.high_warn == 200 && c10.high_crit_on && c10.high_crit == 230 && !c10.low_warn_on && !c10.low_crit_on, "high end: yellow 200 becomes HIGH WARNING 200, red 230 becomes HIGH CRITICAL 230");
+  CHECK(c10.zone_style == GAUGE_ZONE_TICKS, "... still drawn as coloured tick marks, as it was");
+  c10 = load1("{\"enabled\":true,\"yellow_enabled\":true,\"yellow_value\":40,\"red_enabled\":true,\"red_value\":20,\"zones_low\":true}");
+  CHECK(c10.low_warn_on && c10.low_warn == 40 && c10.low_crit_on && c10.low_crit == 20 && !c10.high_warn_on && !c10.high_crit_on, "low end: yellow 40 becomes LOW WARNING 40, red 20 becomes LOW CRITICAL 20");
+  c10 = load1("{\"enabled\":true,\"yellow_enabled\":false,\"yellow_value\":200,\"red_enabled\":true,\"red_value\":230}");
+  CHECK(!c10.high_warn_on && c10.high_crit_on && c10.high_crit == 230, "only red was on: only HIGH CRITICAL is on");
+  c10 = load1("{\"enabled\":true,\"zone_style\":1,\"yellow_enabled\":true,\"yellow_value\":5,\"high_warn_on\":true,\"high_warn\":99}");
+  CHECK(c10.high_warn_on && c10.high_warn == 99 && c10.zone_style == 1, "if the NEW keys are there the old ones are ignored (no double conversion)");
+  { wipe(); gauge_config_init(); p = gauge_config_get_pages(); p[0].cells[0].high_crit_on = true; p[0].cells[0].high_crit = 222; gauge_config_save();
+    JsonDocument d; gauge_config_pages_to_json(p, d); std::string js; serializeJson(d, js);
+    CHECK(js.find("yellow_enabled") == std::string::npos && js.find("zones_low") == std::string::npos && js.find("\"high_crit\":222") != std::string::npos, "saving writes only the new keys; the old ones are gone from the file"); }
   c10 = load1("{\"enabled\":true,\"needle_hub_pct\":-5,\"needle_tip_pct\":999}");
   CHECK(c10.needle_hub_pct == 0 && c10.needle_tip_pct == 60, "trim is clamped to 0..60 each (-5 -> 0, 999 -> 60)");
   c10 = load1("{\"enabled\":true,\"needle_hub_pct\":60,\"needle_tip_pct\":60}");
