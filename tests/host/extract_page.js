@@ -53,7 +53,12 @@ function pageHtml(name) {
   const exprStart = cpp.indexOf('=', start) + 1;
   // the expression ends at the first ';' that is outside every literal
   let end = exprStart, toks = [];
-  const rest = cpp.slice(exprStart);
+  // `#include "file.h"` lines inside a page expression (e.g. the indicators editor shared by two pages) are replaced by that
+  // file's text, the way the compiler does it, before the expression is read.
+  const rest = cpp.slice(exprStart).replace(/^[ \t]*#include[ \t]+"([^"]+)"[ \t]*$/gm, (line, file) => {
+    const f = path.join(SKETCH, file);
+    return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : line;
+  });
   const all = tokenize(rest);
   for (const t of all) { if (t.t === 'other' && t.v === ';') break; toks.push(t); }
   const expand = (list, depth = 0) => {

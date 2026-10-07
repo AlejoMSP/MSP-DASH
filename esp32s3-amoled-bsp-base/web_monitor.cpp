@@ -58,7 +58,7 @@ static char *allocPostBuf(size_t n) {
 // The answer to the browser is the REAL outcome: 200 only if the settings
 // were written to flash, otherwise 500 with the reason, which the page shows.
 // (The page used to say "Saved" no matter what happened.)
-#define CONFIG_POST_MAX 24576  // 8 pages x 4 cells of settings is ~16KB of JSON
+#define CONFIG_POST_MAX 32768  // 8 pages x 4 cells is ~16KB of JSON; 8 indicator pages x 12 lamps is ~25KB
 
 static unsigned long s_rebootAtMs = 0;   // when the /reboot request asked the board to restart (0 = no request)
 
@@ -124,6 +124,11 @@ R"rawliteral(<style>
     #dot.st-ok { background:#2ecc71; }
     #dot.st-warn { background:#f5a623; }
     #dot.st-bad { background:#e74c3c; }
+    .cellgrid.indhost { display:block; min-height:0; padding:0; }
+    .indgrid { display:grid; grid-template-columns:repeat(var(--cols,2),1fr); gap:8px; padding:8px 8px 16px; }
+    .lamp { container-type:inline-size; display:flex; align-items:center; justify-content:center; aspect-ratio:1.6 / 1; border-radius:14px;
+            border:2px solid rgba(255,255,255,.25); font-weight:bold; text-align:center; overflow:hidden; }
+    .lamp span { font-size:min(1.5em, 17cqw); padding:0 4px; }
     .simbar { display:none; background:#f5a623; color:#000; font-weight:bold; text-align:center; padding:6px; margin:0 3px 6px; border-radius:6px; font-size:0.85em; }
     .simbar.on { display:block; }
   </style>)rawliteral" PH_OPEN
@@ -147,6 +152,45 @@ R"rawliteral(
     let webPages = [];
     let currentWebPage = 0;
     let signalValues = {};      // signals that currently have live data, keyed by signal id
+
+// ---- indicator lamps (an "indicators page" is a grid of on/off lamps) ----
+let lampOn = {};            // "page:lamp" -> is it on? Remembered between updates, for the hysteresis band
+let blinkPhase = true;      // flips about twice a second, for lamps set to flash while on
+const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const hex6 = n => "#" + ((Number(n) >>> 0) & 0xFFFFFF).toString(16).padStart(6, "0");
+
+// Is a lamp on? The same rule as the round display (gauge_indicator_next in gauge_indicators.h; tests/host/test_front_page.js
+// runs both through the same cases): above = on when value > threshold, below = on when value < threshold; once on it
+// stays on until the value is `hysteresis` back past the threshold. No data, or no usable number: OFF.
+function indicatorNext(wasOn, hasData, value, op, threshold, hysteresis) {
+  if (!hasData || !Number.isFinite(value) || !Number.isFinite(threshold)) return false;
+  const h = hysteresis > 0 ? hysteresis : 0;
+  if (op === 1) return wasOn ? !(value >= threshold + h) : (value < threshold);
+  return wasOn ? !(value <= threshold - h) : (value > threshold);
+}
+
+// Re-evaluates every lamp on every indicators page (hidden pages too, so a lamp's memory is right when you flip to its page).
+function updateLamps() {
+  webPages.forEach((pg, pi) => {
+    if (pg.kind !== 1) return;
+    (pg.indicators || []).forEach((l, li) => {
+      const raw = signalValues[l.signal];
+      lampOn[pi + ":" + li] = indicatorNext(!!lampOn[pi + ":" + li], raw !== undefined, raw, l.op, l.threshold, l.hysteresis);
+    });
+  });
+}
+
+function renderIndicators(page, pageIdx) {
+  const lamps = page.indicators || [];
+  if (lamps.length === 0) return "<p class='empty-msg'>No indicators on this page.<br>Visit Web Dashboard Config in the menu.</p>";
+  const cols = Math.max(1, Math.min(4, page.cols || 2));
+  return `<div class="indgrid" style="--cols:${cols}">` + lamps.map((l, li) => {
+    const on = !!lampOn[pageIdx + ":" + li];
+    const look = on && (!l.blink || blinkPhase);      // a flashing lamp alternates between its on and off look
+    const text = look ? l.on_text : l.off_text;
+    return `<div class="lamp" data-on="${look ? 1 : 0}" style="background:${hex6(look ? l.on_color : l.off_color)};color:${hex6(look ? l.on_text_color : l.off_text_color)}"><span>${escHtml(text || "")}</span></div>`;
+  }).join("") + `</div>`;
+}
     let live = { fps: 0, ids: 0 };
     let ws = null;
     let lastMsg = 0;            // when the last message arrived (0 = none since this connection opened)
@@ -159,7 +203,13 @@ R"rawliteral(
         grid.innerHTML = "<p class='empty-msg'>No web dashboard pages configured.<br>Visit Web Dashboard Config in the menu.</p>";
         return;
       }
+      updateLamps();
       const page = webPages[currentWebPage];
+      if (page.kind === 1) {
+        grid.className = "cellgrid indhost";
+        grid.innerHTML = renderIndicators(page, currentWebPage);
+        return;
+      }
       grid.className = "cellgrid " + LAYOUT_CLASSES[page.layout];
       grid.innerHTML = page.cells.map((c, i) => {
         if (!c.enabled) return `<div class="dcell c${i}"></div>`;
@@ -220,6 +270,7 @@ R"rawliteral(
       sock.onclose = () => {
         if (ws === sock) ws = null;
         signalValues = {};          // no connection means we don't know the values: show "--", not frozen numbers
+        lampOn = {};                // ... and every lamp goes dark
         document.getElementById("simbar").className = "simbar";
         render();
         updateStatus();
@@ -236,6 +287,13 @@ R"rawliteral(
       if (ws && ws.readyState === 1 && lastMsg !== 0 && Date.now() - lastMsg > 8000) { try { ws.close(); } catch (e) {} }
       updateStatus();
     }, 1000);
+
+    // Flashing lamps: flip the phase about twice a second and redraw - but only when the page on screen has one.
+    setInterval(() => {
+      blinkPhase = !blinkPhase;
+      const pg = webPages[currentWebPage];
+      if (pg && pg.kind === 1 && (pg.indicators || []).some(l => l.blink)) render();
+    }, 480);
 
     // A phone that was asleep or in another app comes back with a dead connection.
     document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
@@ -354,6 +412,7 @@ R"rawliteral(<div class="pad">
   </div>
 
   <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
+  <button type="button" class="addpage" onclick="addIndicatorPage()">+ Add Indicators Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save</button>
   <button onclick="saveAndReboot()">Save &amp; Reboot Board</button>
@@ -391,7 +450,7 @@ R"rawliteral(
       });
       let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
       for (const s of sorted) {
-        if (s.id === 0) continue;
+        if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
         const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
         html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
       }
@@ -624,7 +683,8 @@ R"rawliteral(
       if (action === "delete") {
         pages.splice(pIdx, 1);
       } else if (action === "empty") {
-        pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
+        if (pages[pIdx].kind === 1) pages[pIdx].indicators = [];
+        else pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
       } else if (action === "copy") {
         const copy = JSON.parse(JSON.stringify(pages[pIdx]));
         pages.push(copy);
@@ -640,6 +700,7 @@ R"rawliteral(
     function renderPages() {
       const container = document.getElementById("pages");
       container.innerHTML = pages.map((p, pIdx) => {
+        if (p.kind === 1) return renderIndicatorPage(pIdx, p);
         const needed = CELLS_PER_LAYOUT[p.layout];
         while (p.cells.length < needed) p.cells.push(emptyCell());
         let cellsHtml = "";
@@ -729,6 +790,9 @@ R"rawliteral(
       document.getElementById("status").textContent = "Applied locally - click Save to persist.";
     }
 
+)rawliteral"
+#include "web_indicator_editor.h"
+R"rawliteral(
     load();
   </script>
 </body>
@@ -777,6 +841,7 @@ R"rawliteral(<div class="pad">
   </div>
 
   <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
+  <button type="button" class="addpage" onclick="addIndicatorPage()">+ Add Indicators Page</button>
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
 
@@ -811,7 +876,7 @@ R"rawliteral(
       });
       let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
       for (const s of sorted) {
-        if (s.id === 0) continue;
+        if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
         const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
         html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
       }
@@ -877,7 +942,8 @@ R"rawliteral(
       if (action === "delete") {
         pages.splice(pIdx, 1);
       } else if (action === "empty") {
-        pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
+        if (pages[pIdx].kind === 1) pages[pIdx].indicators = [];
+        else pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
       } else if (action === "copy") {
         const copy = JSON.parse(JSON.stringify(pages[pIdx]));
         pages.push(copy);
@@ -893,6 +959,7 @@ R"rawliteral(
     function renderPages() {
       const container = document.getElementById("pages");
       container.innerHTML = pages.map((p, pIdx) => {
+        if (p.kind === 1) return renderIndicatorPage(pIdx, p);
         const needed = CELLS_PER_LAYOUT[p.layout];
         while (p.cells.length < needed) p.cells.push(emptyCell());
         let cellsHtml = "";
@@ -956,6 +1023,9 @@ R"rawliteral(
       document.getElementById("status").textContent = "Applied locally - click Save to persist.";
     }
 
+)rawliteral"
+#include "web_indicator_editor.h"
+R"rawliteral(
     load();
   </script>
 </body>
@@ -1572,6 +1642,7 @@ void web_monitor_init(void) {
       o["id"] = sig;
       o["name"] = gauge_config_signal_name((SignalId)sig);
       o["age_ms"] = gauge_config_signal_age_ms((SignalId)sig);
+      o["flag"] = gauge_signal_is_flag(sig);   // an ECU on/off flag: 1 or 0
     }
     String out;
     serializeJson(doc, out);

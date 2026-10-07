@@ -142,3 +142,25 @@ code uses them for readouts of 48 px and up).
   hand-written cases as `zonepix`), the controls appear only for needle / half-moon cells, wording for the
   high / low end, switching a zone on offers a value inside the scale, the preview needle's start and end, the
   85% trim limit, and that all seven new settings are posted when saving.
+
+## ECU flags and indicator pages
+
+- `test_can_flags.c` (run from the repo root: `./t [docs/rusefi.dbc]`): the decoder for the ECU's 9 on/off flags
+  (`can_flags.h`). Hand-written frames (each flag alone, all on, all off, other bytes ignored, wrong id, short frame)
+  AND a CONTRACT test that reads the official DBC and checks the flag order and bit positions we decode.
+- `test_indicators.c`: the pure-C lamp logic (`gauge_indicators.h`): the on/off rule (above/below, hysteresis band,
+  no data, NaN, ECU flags) and the grid layout for every lamp count 1-12 and 1-6 columns (every corner on the round
+  glass, no overlaps, centred rows, as large as possible).
+- `test_indicator_page.c`: the real `gauge_app.c` against LVGL, one scenario per run
+  (`./t layout | states | pixels | nav`; link the font objects like the other display tests): lamps where the layout says,
+  text fits, live states incl. hysteresis / no data / flags / flashing, rendered pixels, page cycle, lamps tracking
+  while their page is hidden, and a full-screen alert still working over an indicator page.
+- `test_editor_indicators.js`: the shared indicators editor (`web_indicator_editor.h`) in BOTH editors that include it:
+  presets, adding/removing/reordering (12 max), flag vs analog controls, HTML escaping, copy/empty/delete, saving, and a
+  contract test that the editor's signal numbers equal the `SignalId` order in `gauge_config.h`.
+- `test_front_page.js` (sections 13-16): the dashboard's lamp rule runs the SAME cases as `test_indicators.c`; live
+  states, escaping, flashing driven by the page timer, hidden-page tracking, columns, empty page.
+- `test_integration.cpp` (E5-E7): the real simulator and real DBC-layout CAN frames (through `can_apply_status_flags`)
+  drive an indicators page; "off" differs from "no data", and silence turns every lamp dark.
+- `layout_check.mjs` also checks, in a real browser, that each lamp on the front page has the colour and text the live
+  mock data calls for, and that the editors show every lamp card with its ON and OFF chips.

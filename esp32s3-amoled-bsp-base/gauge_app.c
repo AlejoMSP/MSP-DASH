@@ -28,9 +28,11 @@
 #include "simulator.h"
 #include "gauge_style.h"
 #include "gauge_fonts.h"
+#include "gauge_indicators.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -55,6 +57,8 @@ volatile bool g_boost_has_data = false;
 volatile bool g_rpm_has_data = false;
 volatile bool g_tps_has_data = false;
 volatile bool g_battv_has_data = false;
+volatile uint16_t g_flag_bits = 0;
+volatile uint16_t g_flag_seen = 0;
 
 volatile int g_requested_page = -1;
 volatile int g_page_nav_delta = 0;
@@ -122,10 +126,27 @@ typedef struct {
   uint32_t refresh_interval_ms, last_update_ms;
 } CellRuntime;
 
+// One indicator lamp on an indicators page. Settings are copied here at build time, so editing the config
+// while the board runs cannot change a lamp half way (the display picks changes up after a reboot).
+typedef struct {
+  lv_obj_t *lamp;                  // the rounded rectangle
+  lv_obj_t *label;                 // its text
+  SignalId signal;
+  int32_t op;
+  float threshold, hysteresis;
+  bool blink;
+  bool on;                         // the lamp's state, including its hysteresis memory
+  int8_t shown;                    // the look drawn now: -1 nothing yet, 0 the "off" look, 1 the "on" look
+  uint32_t onColor, offColor, onTextColor, offTextColor;
+  char onText[IND_TEXT_MAXLEN], offText[IND_TEXT_MAXLEN];
+} IndLamp;
+
 typedef struct {
   lv_obj_t *page;
-  int numCells;
+  int numCells;                    // 0 on an indicators page
   CellRuntime cells[MAX_CELLS_PER_PAGE];
+  IndLamp *lamps;                  // indicators pages only: numLamps lamps (allocated when the page is built)
+  int numLamps;
 } GaugePageRuntime;
 
 static GaugePageRuntime pages[MAX_PAGES];
@@ -574,6 +595,98 @@ static void build_page(int pageIndex, PageConfig *cfg) {
   }
 }
 
+// Biggest of 36 / 28 / 14 at which the wider of a lamp's two texts fits inside it.
+static const lv_font_t *pick_lamp_font(const char *a, const char *b, int w, int h) {
+  const lv_font_t *const fonts[3] = { &lv_font_montserrat_36, &lv_font_montserrat_28, &lv_font_montserrat_14 };
+  for (int i = 0; i < 2; i++) {
+    lv_point_t sa, sb;
+    lv_txt_get_size(&sa, a, fonts[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_txt_get_size(&sb, b, fonts[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int tw = sa.x > sb.x ? sa.x : sb.x, th = sa.y > sb.y ? sa.y : sb.y;
+    if (tw <= w * 0.88f && th <= h * 0.8f) return fonts[i];
+  }
+  return fonts[2];
+}
+
+// Draws a lamp in its on (look 1) or off (look 0) colours and text.
+static void apply_lamp_look(IndLamp *l, int look) {
+  uint32_t bg = look ? l->onColor : l->offColor;
+  lv_obj_set_style_bg_color(l->lamp, lv_color_hex(bg), 0);
+  lv_obj_set_style_border_color(l->lamp, lv_color_mix(lv_color_white(), lv_color_hex(bg), LV_OPA_30), 0);   // a faint lighter edge, so a near-black lamp still has an outline
+  lv_obj_set_style_text_color(l->label, lv_color_hex(look ? l->onTextColor : l->offTextColor), 0);
+  lv_label_set_text_static(l->label, look ? l->onText : l->offText);
+  l->shown = (int8_t)look;
+}
+
+// A page of on/off lamps. The grid is laid out by gauge_indicator_layout() so every lamp lies fully on the round glass.
+static void build_indicator_page(int pageIndex, PageConfig *cfg) {
+  lv_obj_t *page = lv_obj_create(NULL);
+  lv_obj_set_style_bg_color(page, lv_color_black(), 0);
+  lv_obj_set_style_pad_all(page, 0, 0);
+  lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+  pages[pageIndex].page = page;
+  pages[pageIndex].numCells = 0;
+  pages[pageIndex].lamps = NULL;
+  pages[pageIndex].numLamps = 0;
+
+  int n = cfg->ind_count;
+  if (n < 0) n = 0;
+  if (n > MAX_INDICATORS_PER_PAGE) n = MAX_INDICATORS_PER_PAGE;
+  if (n == 0) {                          // an empty page says so, rather than looking broken
+    lv_obj_t *none = lv_label_create(page);
+    lv_label_set_text(none, "NO INDICATORS");
+    lv_obj_set_style_text_color(none, lv_color_hex(0x707070), 0);
+    lv_obj_set_style_text_font(none, &lv_font_montserrat_28, 0);
+    lv_obj_center(none);
+    lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+    return;
+  }
+
+  GaugeLampRect rects[MAX_INDICATORS_PER_PAGE];
+  gauge_indicator_layout(n, cfg->ind_cols, rects);
+  IndLamp *lamps = (IndLamp *)calloc((size_t)n, sizeof(IndLamp));
+  if (!lamps) return;                    // out of memory: leave the page empty rather than crash
+  pages[pageIndex].lamps = lamps;
+  pages[pageIndex].numLamps = n;
+
+  for (int i = 0; i < n; i++) {
+    const IndicatorConfig *c = &cfg->indicators[i];
+    IndLamp *l = &lamps[i];
+    l->signal = c->signal; l->op = c->op; l->threshold = c->threshold; l->hysteresis = c->hysteresis; l->blink = c->blink;
+    l->onColor = c->on_color; l->offColor = c->off_color; l->onTextColor = c->on_text_color; l->offTextColor = c->off_text_color;
+    strncpy(l->onText, c->on_text, IND_TEXT_MAXLEN - 1);
+    strncpy(l->offText, c->off_text, IND_TEXT_MAXLEN - 1);
+    l->on = false;
+
+    l->lamp = lv_obj_create(page);
+    lv_obj_set_pos(l->lamp, rects[i].x, rects[i].y);
+    lv_obj_set_size(l->lamp, rects[i].w, rects[i].h);
+    lv_obj_clear_flag(l->lamp, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(l->lamp, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_style_radius(l->lamp, rects[i].h / 5 > 6 ? rects[i].h / 5 : 6, 0);
+    lv_obj_set_style_border_width(l->lamp, 2, 0);
+    lv_obj_set_style_pad_all(l->lamp, 0, 0);
+
+    l->label = lv_label_create(l->lamp);
+    lv_obj_set_style_text_font(l->label, pick_lamp_font(l->onText, l->offText, rects[i].w, rects[i].h), 0);
+    lv_obj_center(l->label);
+    apply_lamp_look(l, 0);               // every lamp starts in its off look, until its signal says otherwise
+  }
+  lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+}
+
+// Re-evaluates every lamp of an indicators page and redraws only the ones that changed.
+static void update_indicator_page(GaugePageRuntime *pr) {
+  bool blinkPhase = (s_flash_counter / 24) % 2 == 0;     // ~480ms per phase, the same rate as the warning flash
+  for (int i = 0; i < pr->numLamps; i++) {
+    IndLamp *l = &pr->lamps[i];
+    l->on = gauge_indicator_next(l->on, gauge_config_signal_has_data(l->signal), gauge_config_signal_value(l->signal),
+                                 (int)l->op, l->threshold, l->hysteresis);
+    int look = (l->on && (!l->blink || blinkPhase)) ? 1 : 0;
+    if (look != l->shown) apply_lamp_look(l, look);
+  }
+}
+
 #if ENABLE_TOUCH_SWIPE_NAV
 static void gesture_event_cb(lv_event_t *e) {
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
@@ -722,6 +835,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   if (s_flash_counter % 5 == 0) update_alert_overlay(now); // every ~100ms
 
   for (int p = 0; p < s_num_active_pages; p++) {
+    if (pages[p].numLamps > 0) update_indicator_page(&pages[p]);
     for (int i = 0; i < pages[p].numCells; i++) {
       CellRuntime *c = &pages[p].cells[i];
       if (!c->enabled) continue;
@@ -822,7 +936,8 @@ void build_gauge_app(void) {
   int pageIdx = 0;
   for (int i = 0; i < MAX_PAGES; i++) {
     if (!pageConfigs[i].enabled) continue;
-    build_page(pageIdx, &pageConfigs[i]);
+    if (pageConfigs[i].kind == PAGE_INDICATORS) build_indicator_page(pageIdx, &pageConfigs[i]);
+    else build_page(pageIdx, &pageConfigs[i]);
     pageIdx++;
   }
 

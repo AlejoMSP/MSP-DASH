@@ -23,8 +23,23 @@ typedef enum {
   SIG_FLEX,
   SIG_TPS,
   SIG_BATTV,
+  // ---- ECU on/off status flags (value 1 = on, 0 = off). Decoded in can_flags.h, from the official
+  // rusEFI DBC (docs/rusefi.dbc). The ORDER matters: it is the bit order of the BASE0 status byte.
+  SIG_REVLIM,      // rev limiter active
+  SIG_MAINRELAY,   // main relay on
+  SIG_FUELPUMP,    // fuel pump on
+  SIG_CEL,         // check engine light
+  SIG_EGOHEAT,     // O2 sensor heater on
+  SIG_LAMBDAPROT,  // lambda (AFR) protection active
+  SIG_FAN,         // fan 1 on
+  SIG_FAN2,        // fan 2 on
+  SIG_BRAKE,       // brake pedal pressed (BASE11)
   SIG_COUNT
 } SignalId;
+
+#define SIG_FIRST_FLAG SIG_REVLIM
+#define SIG_FLAG_COUNT (SIG_COUNT - SIG_FIRST_FLAG)
+static inline bool gauge_signal_is_flag(int sig) { return sig >= SIG_FIRST_FLAG && sig < SIG_COUNT; }
 
 // ---- Page layout templates - a fixed set of common arrangements
 // rather than a fully arbitrary grid, per project decision. ----
@@ -47,6 +62,8 @@ typedef enum {
 
 #define GAUGE_CAPTION_MAXLEN 24
 #define MAX_CELLS_PER_PAGE 4   // matches the largest fixed layout (2x2)
+#define MAX_INDICATORS_PER_PAGE 12
+#define IND_TEXT_MAXLEN 12     // 11 characters + the end marker
 #define MAX_PAGES 8
 
 // Everything a single cell needs to render and behave - essentially
@@ -90,12 +107,35 @@ typedef struct {
   float ref_value;         // where that line sits, in the same units as min/max
 } CellConfig;
 
+// What a page holds: gauge cells in one of the layouts, or a grid of on/off indicator lamps.
+typedef enum { PAGE_GAUGES = 0, PAGE_INDICATORS = 1, PAGE_KIND_COUNT } PageKind;
+
+// One indicator lamp (TunerStudio style): shows its on text / colours while its condition holds and its off
+// text / colours otherwise. The condition is "signal is above (or below) a threshold"; an ECU on/off flag is
+// 1 or 0, so for those the editor uses "above 0.5" (flag on) or "below 0.5" (flag off). See gauge_indicators.h.
+typedef struct {
+  SignalId signal;
+  int32_t op;                       // GAUGE_IND_ABOVE (0) or GAUGE_IND_BELOW (1)
+  float threshold;                  // in the signal's own units (rpm, degrees F, kPa, AFR, %, volts)
+  float hysteresis;                 // >= 0: once on, stays on until the value is this far back past the threshold
+  char on_text[IND_TEXT_MAXLEN];    // printable ASCII
+  char off_text[IND_TEXT_MAXLEN];
+  uint32_t on_color, off_color;     // lamp background, 0xRRGGBB
+  uint32_t on_text_color, off_text_color;
+  bool blink;                       // flash while on
+} IndicatorConfig;
+
 // A page: a chosen layout template plus however many cells that
-// layout needs (unused cells beyond the layout's count are ignored).
+// layout needs (unused cells beyond the layout's count are ignored) - or, for an indicators page, a grid of lamps.
 typedef struct {
   bool enabled;    // false = this page is skipped in the page cycle
   LayoutType layout;
   CellConfig cells[MAX_CELLS_PER_PAGE];
+  // ---- indicator pages (kind == PAGE_INDICATORS): layout and cells are unused ----
+  PageKind kind;
+  int32_t ind_cols;                 // lamps per row, 1-4
+  int32_t ind_count;                // lamps in use, 0-12: indicators[0 .. ind_count-1]
+  IndicatorConfig indicators[MAX_INDICATORS_PER_PAGE];
 } PageConfig;
 
 // Loads the persisted page/cell configuration from NVS (falls back to

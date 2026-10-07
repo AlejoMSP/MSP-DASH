@@ -40,7 +40,7 @@ global.fetch = async (url) => {
   return { json: async () => webPages };
 };
 
-eval(script + "\n;global.__next=changeWebPage;");
+eval(script + "\n;global.__next=changeWebPage; global.__ind=indicatorNext;");
 const open = (ws) => { ws.readyState = 1; ws.onopen(); };
 const send = (ws, o) => ws.onmessage({ data: JSON.stringify(o) });
 const status = () => `[${els.dot.className}] ${els.stext.textContent}`;
@@ -146,6 +146,82 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   check(sizeOf(vals()[0]) === "35", "a cell with no saved size falls back to Medium");
   cells[0].value_font_size = 96; cells[1].value_font_size = 64; cells[2].value_font_size = 48; cells[3].value_font_size = 80; __next(0);
   check(vals().map(sizeOf).join(",") === "120,80,60,100", "96/64/48/80 -> 120/80/60/100px: " + vals().map(sizeOf).join(","));
+  console.log("13. indicator lamps: the same on/off rule as the round display");
+  { // the SAME cases, with the SAME expected answers, as tests/host/test_indicators.c
+    const N = (was, v, op, thr, hyst) => __ind(was, true, v, op, thr, hyst);
+    check(!N(false, 99.9, 0, 100, 0) && !N(false, 100, 0, 100, 0) && N(false, 100.1, 0, 100, 0), "above: off below, off exactly at, on above the threshold");
+    check(N(true, 100.1, 0, 100, 0) && !N(true, 100, 0, 100, 0), "above, no hysteresis: off the moment it is no longer above");
+    check(!N(false, 98, 0, 100, 5) && N(false, 100.5, 0, 100, 5) && N(true, 98, 0, 100, 5) && N(true, 95.1, 0, 100, 5) && !N(true, 95, 0, 100, 5) && !N(true, 90, 0, 100, 5), "above 100 with a band of 5: stays on down to just above 95, off at 95");
+    check(!N(false, 40, 1, 40, 3) && N(false, 39.9, 1, 40, 3) && N(true, 42.9, 1, 40, 3) && !N(true, 43, 1, 40, 3) && !N(false, 41, 1, 40, 3), "below 40 with a band of 3: on below 40, stays on until 43");
+    { let on = false, flips = 0; for (const v of [99, 101, 100.2, 99.8, 100.3, 99.5, 100.1, 94, 99, 101]) { const n = N(on, v, 0, 100, 5); if (n !== on) flips++; on = n; } check(flips === 3, "a value wobbling around the threshold flips the lamp 3 times, not on every wobble"); }
+    check(!__ind(true, false, 5, 0, 1, 0) && !__ind(true, false, 5, 1, 100, 0), "no data: off, even for a lamp that was on");
+    check(!N(true, NaN, 0, 1, 0) && !N(true, Infinity, 0, 1, 0) && !N(true, -Infinity, 1, 1, 0), "NaN and infinity: off");
+    check(N(false, 101, 0, 100, -4) && !N(true, 100, 0, 100, -4) && N(false, 101, 0, 100, NaN) && !N(true, 100, 0, 100, NaN) && N(false, 101, 0, 100, undefined), "a negative, NaN or missing hysteresis acts like none");
+    check(!N(false, 5, 0, NaN, 0) && !N(true, 5, 0, NaN, 0), "a NaN threshold never lights a lamp");
+    check(N(false, 1, 0, 0.5, 0) && !N(false, 0, 0, 0.5, 0) && N(false, 0, 1, 0.5, 0) && !N(false, 1, 1, 0.5, 0), "ECU flags (1 or 0) with threshold 0.5: 'flag on' and 'flag off' lamps");
+  }
+  const lampsOnPage = () => [...grid().matchAll(/<div class="lamp" data-on="(\d)" style="background:(#[0-9a-f]{6});color:(#[0-9a-f]{6})"><span>([^<]*)<\/span>/g)].map(m => ({ on: m[1] === "1", bg: m[2], fg: m[3], text: m[4] }));
+  const lamp = (sig, op, thr, hyst, on, off, onC, offC, blink) => ({ signal: sig, op, threshold: thr, hysteresis: hyst, on_text: on, off_text: off, on_color: onC, off_color: offC, on_text_color: 0xFFFFFF, off_text_color: 0x808080, blink: !!blink });
+  const indPage = { enabled: true, kind: 1, cols: 3, indicators: [
+    lamp(5, 1, 40, 3, "OIL", "oil", 0xE53935, 0x2A2A2A), lamp(2, 0, 200, 10, "HOT", "temp", 0xFB8C00, 0x2A2A2A), lamp(17, 0, 0.5, 0, "FAN", "fan", 0x1E88E5, 0x2A2A2A),
+    lamp(19, 1, 0.5, 0, "NO BRK", "brk", 0x8E24AA, 0x2A2A2A), lamp(10, 1, 12, 0, "BATT", "batt", 0xFDD835, 0x2A2A2A, true), lamp(4, 0, 15, 0, "A<b>&B", "x<i>", 0x43A047, 0x2A2A2A) ] };
+  webPages.push(indPage);
+  ws = FakeWS.all[FakeWS.all.length - 1]; if (ws.readyState !== 1) open(ws);
+  send(ws, { v: {}, fps: 400, ids: 30 });
+  const idx = webPages.length - 1; const cur = () => { /* where are we? step until the indicators page is showing */ for (let i = 0; i < 5 && !/class="indgrid"/.test(grid()); i++) __next(1); };
+  cur();
+  console.log("14. an indicators page on the front page");
+  check(els.cellgrid.className === "cellgrid indhost" && /style="--cols:3"/.test(grid()) && lampsOnPage().length === 6, "six lamps in a 3-column grid");
+  check(lampsOnPage().every(l => !l.on && l.bg === "#2a2a2a" && l.fg === "#808080"), "with no data every lamp is off (including the 'below' and 'flag is off' lamps)");
+  check(lampsOnPage().map(l => l.text).join("|") === "oil|temp|fan|brk|batt|x&lt;i&gt;", "an off lamp shows its OFF text, HTML-escaped: " + lampsOnPage().map(l => l.text).join("|"));
+  check(!/<b>|<i>/.test(grid()), "typed text can never inject markup into the page");
+  send(ws, { v: { "5": 35 } });
+  check(lampsOnPage()[0].on && lampsOnPage()[0].bg === "#e53935" && lampsOnPage()[0].fg === "#ffffff" && lampsOnPage()[0].text === "OIL", "oil pressure 35 (below 40): lamp on, its ON colours and text");
+  send(ws, { v: { "5": 45 } }); check(!lampsOnPage()[0].on && lampsOnPage()[0].text === "oil", "oil pressure 45: off again");
+  send(ws, { v: { "5": 40 } }); check(!lampsOnPage()[0].on, "exactly 40 is not below 40");
+  send(ws, { v: { "5": 35 } }); send(ws, { v: {} }); check(!lampsOnPage()[0].on, "the oil pressure signal drops out of the data while the lamp is lit: the lamp goes OUT (a lost sensor is not an alarm)");
+  send(ws, { v: { "2": 195 } }); check(!lampsOnPage()[1].on, "coolant 195 (threshold 200): off");
+  send(ws, { v: { "2": 205 } }); check(lampsOnPage()[1].on, "205: on");
+  send(ws, { v: { "2": 195 } }); check(lampsOnPage()[1].on, "back to 195: STILL on, inside the 10 degree band");
+  send(ws, { v: { "2": 190 } }); check(!lampsOnPage()[1].on, "190: off");
+  send(ws, { v: { "2": 195 } }); check(!lampsOnPage()[1].on, "and back at 195 it stays off");
+  send(ws, { v: { "17": 0 } }); check(!lampsOnPage()[2].on, "fan flag 0: off"); send(ws, { v: { "17": 1 } }); check(lampsOnPage()[2].on, "fan flag 1: on");
+  send(ws, { v: { "19": 1 } }); check(!lampsOnPage()[3].on, "'on while the brake flag is OFF' lamp, brake 1: off"); send(ws, { v: { "19": 0 } }); check(lampsOnPage()[3].on, "brake 0: on");
+  send(ws, { v: {} }); check(!lampsOnPage()[3].on, "brake flag not reported: off (unknown is not 'off')");
+
+  console.log("15. flashing lamps use the page's own timer");
+  let renders = 0; { const el = els.cellgrid; let html = el.innerHTML; Object.defineProperty(el, "innerHTML", { get() { return html; }, set(v) { renders++; html = v; }, configurable: true }); }
+  send(ws, { v: { "10": 13.8 } });
+  { const seen = new Set(); for (let i = 0; i < 6; i++) { advance(480); seen.add(lampsOnPage()[4].on); } check(seen.size === 1 && seen.has(false), "battery 13.8: the flashing lamp stays dark"); }
+  send(ws, { v: { "10": 11 } });
+  { const seen = []; for (let i = 0; i < 8; i++) { advance(480); seen.push(lampsOnPage()[4].on ? 1 : 0); } check(seen.includes(1) && seen.includes(0) && seen.join("").includes("10") && seen.join("").includes("01"), "battery 11: the lamp alternates lit / dark as the timer ticks: " + seen.join("")); }
+  send(ws, { v: { "10": 13 } }); { const before = renders; advance(480 * 4); check(renders === before + 4 - 0 || renders >= before, "(timer ticks while the page has no lit flashing lamp)"); }
+  // a page with NO flashing lamp is not redrawn by the timer
+  indPage.indicators[4].blink = false; send(ws, { v: { "10": 11 } });
+  { const before = renders; advance(480 * 6); check(renders === before, "no flashing lamp on the page: the blink timer redraws nothing (" + (renders - before) + " redraws in 6 ticks)"); }
+  indPage.indicators[4].blink = true;
+
+  console.log("16. other behaviour");
+  indPage.cols = 9; send(ws, { v: {} }); check(/--cols:4"/.test(grid()), "9 columns is clamped to 4");
+  delete indPage.cols; send(ws, { v: {} }); check(/--cols:2"/.test(grid()), "no column count: 2");
+  indPage.cols = 1; send(ws, { v: {} }); check(/--cols:1"/.test(grid()), "1 column");
+  const saved = indPage.indicators; indPage.indicators = []; send(ws, { v: {} }); check(/No indicators on this page/.test(grid()), "an empty indicators page says so"); indPage.indicators = saved;
+  __next(1); check(/class="dcell/.test(grid()) && !/class="indgrid"/.test(grid()), "the next page, a gauge page, is drawn as before");
+  send(ws, { v: { "5": 35, "2": 205, "17": 1 } });
+  { for (let i = 0; i < 5 && !/class="indgrid"/.test(grid()); i++) __next(1);
+    check(lampsOnPage()[0].on && lampsOnPage()[1].on && lampsOnPage()[2].on, "lamps tracked their signals while their page was not showing: three are already on when you arrive"); }
+  { for (let i = 0; i < 5 && !/class="indgrid"/.test(grid()); i++) __next(1);
+    send(ws, { v: { "2": 150 } }); check(!lampsOnPage()[1].on, "(coolant 150: the lamp is off, and remembers being off)");
+    __next(1);                                          // away to another page ...
+    send(ws, { v: { "2": 205 } });                      // ... the coolant rises past 200 (the lamp comes on) ...
+    send(ws, { v: { "2": 195 } });                      // ... and falls back into the 10 degree band (it stays on)
+    for (let i = 0; i < 5 && !/class="indgrid"/.test(grid()); i++) __next(1);
+    check(lampsOnPage()[1].on, "a lamp keeps its hysteresis memory while its page is hidden: it was off, went on at 205 and stayed on at 195 while nobody was looking - on when you arrive"); }
+  ws.close();
+  { for (let i = 0; i < 5 && !/class="indgrid"/.test(grid()); i++) __next(1); check(lampsOnPage().every(l => !l.on), "the connection drops: every lamp goes dark (nothing frozen on)"); }
+  advance(1100); ws = FakeWS.all[FakeWS.all.length - 1]; open(ws);
+  webPages.pop();
+
 
 
   console.log(`\n${pass} passed, ${fail} failed`);

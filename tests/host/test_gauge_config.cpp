@@ -10,6 +10,7 @@
 #include "gauge_config.h"
 #include "gauge_config_json.h"
 #include "gauge_style.h"
+#include "gauge_indicators.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -33,6 +34,7 @@ volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, 
               g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data;
 volatile int g_requested_page = -1;
 volatile int g_page_nav_delta = 0;
+volatile uint16_t g_flag_bits = 0, g_flag_seen = 0;
 
 static int pass = 0, fail = 0;
 #define CHECK(c, m) do { if (c) pass++; else { fail++; printf("  FAIL: %s (line %d)\n", m, __LINE__); } } while (0)
@@ -266,6 +268,118 @@ int main(int argc, char **argv) {
   CHECK(c10.needle_hub_pct == 40 && c10.needle_tip_pct == 45, "40 + 45 = 85 is allowed exactly");
   c10 = load1("{\"enabled\":true,\"needle_hub_pct\":41,\"needle_tip_pct\":45}");
   CHECK(c10.needle_hub_pct == 41 && c10.needle_tip_pct == 44, "41 + 45 = 86: the tip gives back 1");
+
+  printf("S13 the ECU on/off flags as signals\n");
+  {
+    static const char *NAMES[9] = { "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal" };
+    bool namesOk = true; for (int i = 0; i < 9; i++) if (strcmp(gauge_config_signal_name((SignalId)(SIG_FIRST_FLAG + i)), NAMES[i]) != 0) namesOk = false;
+    CHECK(namesOk && SIG_COUNT == 20, "nine flag signals with readable names (20 signals in all)");
+    CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(0), "which signals are flags");
+    g_fake_millis = 50000; g_flag_bits = 0; g_flag_seen = 0;
+    CHECK(!gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 0.0f, "before any frame: no data");
+    g_flag_bits = (1u << (SIG_FAN - SIG_FIRST_FLAG)); g_flag_seen = 0x00FF; for (int i = 0; i < 8; i++) gauge_config_mark_signal_active((SignalId)(SIG_FIRST_FLAG + i));
+    CHECK(gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 1.0f, "fan on: has data, value 1");
+    CHECK(gauge_config_signal_has_data(SIG_CEL) && gauge_config_signal_value(SIG_CEL) == 0.0f, "check engine off: has data (it was reported), value 0 - 'off' is not 'no data'");
+    CHECK(!gauge_config_signal_has_data(SIG_BRAKE), "the brake flag has not been reported yet: no data (it comes in a different frame)");
+    g_fake_millis += 2001;
+    CHECK(!gauge_config_signal_has_data(SIG_FAN), "2 seconds without a frame: the flag goes stale like any other signal");
+    gauge_config_mark_signal_active(SIG_FAN);
+    CHECK(gauge_config_signal_has_data(SIG_FAN), "and comes back with the next frame");
+    g_flag_bits = 0xFFFF; CHECK(gauge_config_signal_value(SIG_BRAKE) == 1.0f && gauge_config_signal_value(SIG_REVLIM) == 1.0f, "every bit maps to its own signal");
+    g_flag_bits = 0; g_flag_seen = 0;
+  }
+  printf("S14 log channels: flags are NOT logged unless you ask\n");
+  {
+    gauge_config_log_init();
+    bool analogOn = true; for (int sg = 1; sg < SIG_FIRST_FLAG; sg++) if (!gauge_config_is_log_enabled((SignalId)sg)) analogOn = false;
+    bool flagsOff = true; for (int sg = SIG_FIRST_FLAG; sg < SIG_COUNT; sg++) if (gauge_config_is_log_enabled((SignalId)sg)) flagsOff = false;
+    CHECK(analogOn, "the ten analog signals are still logged by default (the CSV columns people use do not change)");
+    CHECK(flagsOff, "the nine flags default to not logged");
+    gauge_config_set_log_enabled(SIG_FAN, true); CHECK(gauge_config_is_log_enabled(SIG_FAN), "but a flag can be switched on");
+    gauge_config_log_save(); gauge_config_set_log_enabled(SIG_FAN, false); gauge_config_log_init();
+    CHECK(gauge_config_is_log_enabled(SIG_FAN), "and that choice is remembered");
+  }
+
+  printf("S15 indicator pages\n");
+  {
+    auto fillLamp = [](IndicatorConfig &l, int seed) {
+      memset(&l, 0, sizeof(l));
+      l.signal = (SignalId)(1 + seed % (SIG_COUNT - 1)); l.op = seed % 2; l.threshold = 10.5f + seed; l.hysteresis = 0.25f * (seed % 5);
+      snprintf(l.on_text, IND_TEXT_MAXLEN, "ON %d", seed); snprintf(l.off_text, IND_TEXT_MAXLEN, "OFF %d", seed);
+      l.on_color = 0x100000 + seed * 4097; l.off_color = 0x202020 + seed * 17; l.on_text_color = 0xF0F000 + seed; l.off_text_color = 0x707070 + seed; l.blink = (seed % 3) == 0;
+    };
+    wipe(); gauge_config_init(); p = gauge_config_get_pages();
+    bool allGauge = true; for (int i = 0; i < MAX_PAGES; i++) if (p[i].kind != PAGE_GAUGES || p[i].ind_count != 0) allGauge = false;
+    CHECK(allGauge, "the default pages are all gauge pages");
+
+    // a page of 5 lamps, then a gauge page, then a page of 12 lamps
+    p[0].enabled = true; p[0].kind = PAGE_INDICATORS; p[0].ind_cols = 3; p[0].ind_count = 5; for (int k = 0; k < 5; k++) fillLamp(p[0].indicators[k], k);
+    PageConfig keepGauge = p[1];   // an ordinary default gauge page
+    p[2].enabled = true; p[2].kind = PAGE_INDICATORS; p[2].ind_cols = 4; p[2].ind_count = 12; for (int k = 0; k < 12; k++) fillLamp(p[2].indicators[k], 20 + k);
+    CHECK(gauge_config_save(), "saves");
+    gauge_config_init(); p = gauge_config_get_pages();
+    CHECK(p[0].kind == PAGE_INDICATORS && p[0].ind_cols == 3 && p[0].ind_count == 5, "page 1: an indicator page, 3 columns, 5 lamps");
+    bool lampsOk = true;
+    for (int k = 0; k < 5; k++) { IndicatorConfig e; fillLamp(e, k); if (memcmp(&e, &p[0].indicators[k], sizeof(e)) != 0) { if (e.signal != p[0].indicators[k].signal || e.op != p[0].indicators[k].op || e.threshold != p[0].indicators[k].threshold || e.hysteresis != p[0].indicators[k].hysteresis || strcmp(e.on_text, p[0].indicators[k].on_text) || strcmp(e.off_text, p[0].indicators[k].off_text) || e.on_color != p[0].indicators[k].on_color || e.off_color != p[0].indicators[k].off_color || e.on_text_color != p[0].indicators[k].on_text_color || e.off_text_color != p[0].indicators[k].off_text_color || e.blink != p[0].indicators[k].blink) lampsOk = false; } }
+    CHECK(lampsOk, "every field of every lamp survives a reboot (signal, condition, threshold, hysteresis, texts, four colours, blink)");
+    CHECK(p[1].kind == PAGE_GAUGES && p[1].layout == keepGauge.layout && strcmp(p[1].cells[0].caption, keepGauge.cells[0].caption) == 0, "page 2 is still an ordinary gauge page, untouched");
+    CHECK(p[2].kind == PAGE_INDICATORS && p[2].ind_cols == 4 && p[2].ind_count == 12 && strcmp(p[2].indicators[11].on_text, "ON 31") == 0, "page 3: 12 lamps, the last one intact");
+
+    // what the editors receive
+    { JsonDocument d; gauge_config_pages_to_json(p, d); std::string js; serializeJson(d, js);
+      JsonArray arr = d.as<JsonArray>();
+      CHECK(arr[0]["kind"] == 1 && arr[0]["cols"] == 3 && arr[0]["indicators"].size() == 5, "an indicator page is sent with kind 1, its columns and its lamps");
+      CHECK(arr[0]["cells"].isNull() && arr[0]["layout"].isNull(), "... and without a layout or cells");
+      CHECK(arr[1]["kind"].isNull() && !arr[1]["cells"].isNull(), "a gauge page carries no 'kind' (so the JSON older tools know is unchanged)");
+      CHECK(arr[0]["indicators"][0]["on_text"] == "ON 0" && arr[0]["indicators"][0]["threshold"] == 10.5, "lamp fields are named plainly"); }
+
+    printf("S16 pages saved before indicator pages existed\n");
+    JsonDocument d1; deserializeJson(d1, "[{\"enabled\":true,\"layout\":1,\"cells\":[{\"enabled\":true,\"signal\":3}]}]");
+    gauge_config_pages_from_json(d1.as<JsonArray>(), scratch);
+    CHECK(scratch[0].kind == PAGE_GAUGES && scratch[0].layout == LAYOUT_2UP && scratch[0].ind_count == 0, "no 'kind' means a gauge page");
+
+    printf("S17 bad indicator data is repaired, not stored\n");
+    auto lamp1 = [&](const std::string &lampJson, int cols = 2) -> IndicatorConfig {
+      std::string j = "[{\"enabled\":true,\"kind\":1,\"cols\":" + std::to_string(cols) + ",\"indicators\":[" + lampJson + "]}]";
+      JsonDocument d; deserializeJson(d, j); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); return scratch[0].indicators[0]; };
+    IndicatorConfig L = lamp1("{}");
+    CHECK(scratch[0].ind_count == 1 && L.signal == SIG_NONE && L.op == GAUGE_IND_ABOVE && L.threshold == 0 && L.hysteresis == 0 && L.on_text[0] == 0 && !L.blink, "an empty lamp gets safe defaults");
+    CHECK(L.on_color == 0xE53935 && L.off_color == 0x2A2A2A && L.on_text_color == 0xFFFFFF && L.off_text_color == 0x808080, "... and readable colours: red when on, dark grey when off");
+    L = lamp1("{\"signal\":99,\"op\":5,\"hysteresis\":-3}"); CHECK(L.signal == SIG_NONE && L.op == GAUGE_IND_ABOVE && L.hysteresis == 0, "signal 99 -> none, op 5 -> above, negative hysteresis -> 0");
+    L = lamp1("{\"signal\":-4}"); CHECK(L.signal == SIG_NONE, "a negative signal -> none");
+    L = lamp1("{\"op\":1}"); CHECK(L.op == GAUGE_IND_BELOW, "op 1 stays 'below'");
+    L = lamp1("{\"on_text\":\"ABCDEFGHIJKLMNOP\"}"); CHECK(strcmp(L.on_text, "ABCDEFGHIJK") == 0, "text is cut to 11 characters");
+    L = lamp1("{\"on_text\":\"caf\\u00e9 \\u0007OK\\u2603\"}"); CHECK(strcmp(L.on_text, "caf OK") == 0, "accents, control characters and symbols the fonts cannot draw are dropped");
+    L = lamp1("{\"on_color\":4294967295,\"off_color\":16777216,\"on_text_color\":-1}"); CHECK(L.on_color == 0xFFFFFF && L.off_color == 0 && L.on_text_color == 0xFFFFFF, "colours are masked to 24 bits");
+    L = lamp1("{\"threshold\":null,\"hysteresis\":null}"); CHECK(L.threshold == 0 && L.hysteresis == 0, "null numbers become 0");
+    lamp1("{}", 0); CHECK(scratch[0].ind_cols == 1, "columns 0 -> 1");
+    lamp1("{}", 9); CHECK(scratch[0].ind_cols == 4, "columns 9 -> 4");
+    { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"kind\":1,\"indicators\":[{}]}]"); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); CHECK(scratch[0].ind_cols == 2, "columns left out -> 2"); }
+    { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"kind\":7,\"layout\":3,\"cells\":[]}]"); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); CHECK(scratch[0].kind == PAGE_GAUGES && scratch[0].layout == LAYOUT_2X2, "an unknown kind is a gauge page"); }
+    { std::string j = "[{\"enabled\":true,\"kind\":1,\"cols\":3,\"indicators\":["; for (int k = 0; k < 20; k++) j += std::string(k ? "," : "") + "{\"on_text\":\"L" + std::to_string(k) + "\"}"; j += "]}]";
+      JsonDocument d; deserializeJson(d, j); gauge_config_pages_from_json(d.as<JsonArray>(), scratch);
+      CHECK(scratch[0].ind_count == 12 && strcmp(scratch[0].indicators[11].on_text, "L11") == 0, "20 lamps are cut to 12"); }
+    { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"kind\":1,\"cols\":2,\"indicators\":[{\"on_text\":\"X\"}]},{\"enabled\":true,\"layout\":0,\"cells\":[{\"enabled\":true}]}]");
+      gauge_config_pages_from_json(d.as<JsonArray>(), scratch);
+      CHECK(scratch[0].kind == PAGE_INDICATORS && scratch[1].kind == PAGE_GAUGES && scratch[1].ind_count == 0, "mixed pages come out in order, each its own kind"); }
+    { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"kind\":1,\"indicators\":[{\"on_text\":\"X\"},{\"on_text\":\"Y\"}]}]"); gauge_config_pages_from_json(d.as<JsonArray>(), scratch);
+      JsonDocument d2; deserializeJson(d2, "[{\"enabled\":true,\"layout\":0,\"cells\":[{\"enabled\":true}]}]"); gauge_config_pages_from_json(d2.as<JsonArray>(), scratch);
+      CHECK(scratch[0].kind == PAGE_GAUGES && scratch[0].ind_count == 0 && scratch[0].indicators[0].on_text[0] == 0, "replacing an indicator page with a gauge page leaves none of the old lamps behind"); }
+
+    printf("S18 the biggest possible configuration\n");
+    wipe(); gauge_config_init(); p = gauge_config_get_pages();
+    for (int pg = 0; pg < MAX_PAGES; pg++) {
+      p[pg].enabled = true; p[pg].kind = PAGE_INDICATORS; p[pg].ind_cols = 1 + pg % 4; p[pg].ind_count = 12;
+      for (int k = 0; k < 12; k++) { fillLamp(p[pg].indicators[k], pg * 12 + k); snprintf(p[pg].indicators[k].on_text, IND_TEXT_MAXLEN, "ABCDEFGHIJK"); snprintf(p[pg].indicators[k].off_text, IND_TEXT_MAXLEN, "abcdefghijk"); p[pg].indicators[k].threshold = 12345.678f; }
+    }
+    std::string before = toJson(p);
+    CHECK(gauge_config_save(), "8 pages of 12 lamps saves");
+    size_t big = gauge_config_saved_bytes(0);
+    printf("   8 indicator pages x 12 lamps = %zu bytes\n", big);
+    CHECK(big < 32768, "it fits in the 32KB the web page may POST (and the 64KB file limit)");
+    memset(p, 0, sizeof(PageConfig) * MAX_PAGES); gauge_config_init(); p = gauge_config_get_pages();
+    CHECK(toJson(p) == before, "and reloads exactly as saved");
+  }
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);

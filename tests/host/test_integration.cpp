@@ -6,6 +6,9 @@
 #include "gauge_config.h"
 #include "gauge_app.h"
 #include "simulator.h"
+#include "can_flags.h"
+#include "gauge_indicators.h"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -65,6 +68,14 @@ int main() {
   p[7].cells[0] = p[0].cells[0]; p[7].cells[0].signal = SIG_RPM; p[7].cells[0].gauge_type = GAUGE_TYPE_HISTOGRAM;
   strcpy(p[7].cells[0].caption, "RPM"); p[7].cells[0].min_val = 0; p[7].cells[0].max_val = 7000; p[7].cells[0].history_sec = 30; p[7].cells[0].has_warning = false;
   p[7].cells[1] = p[0].cells[0]; p[7].cells[1].signal = SIG_CLT; p[7].cells[1].gauge_type = GAUGE_TYPE_NUMBER; strcpy(p[7].cells[1].caption, "CLT"); p[7].cells[1].has_warning = false;
+  // The default page 7 (ETH %) becomes an INDICATORS page, so the whole path - simulator or CAN frame -> signals -> lamps - is exercised.
+  memset(&p[6], 0, sizeof(PageConfig)); p[6].enabled = true; p[6].kind = PAGE_INDICATORS; p[6].ind_cols = 3; p[6].ind_count = 7;
+  { struct { SignalId sig; int op; const char *on; uint32_t col; } L[7] = {
+      { SIG_REVLIM, GAUGE_IND_ABOVE, "REV", 0xE53935 }, { SIG_FAN, GAUGE_IND_ABOVE, "FAN", 0x1E88E5 }, { SIG_BRAKE, GAUGE_IND_ABOVE, "BRAKE", 0xE53935 },
+      { SIG_EGOHEAT, GAUGE_IND_ABOVE, "O2", 0xFFB300 }, { SIG_FUELPUMP, GAUGE_IND_ABOVE, "PUMP", 0x43A047 }, { SIG_CEL, GAUGE_IND_ABOVE, "CEL", 0xFFB300 },
+      { SIG_FUELPUMP, GAUGE_IND_BELOW, "NO PUMP", 0x8E24AA } };   // lit while the pump flag is reported OFF
+    for (int i = 0; i < 7; i++) { IndicatorConfig &l = p[6].indicators[i]; l.signal = L[i].sig; l.op = L[i].op; l.threshold = 0.5f; strcpy(l.on_text, L[i].on); strcpy(l.off_text, L[i].on);
+      l.on_color = L[i].col; l.off_color = 0x2A2A2A; l.on_text_color = 0xFFFFFF; l.off_text_color = 0x808080; } }
   build_gauge_app();
   int pages = gauge_app_get_num_pages();
   run_ms(200);
@@ -130,7 +141,67 @@ int main() {
   CHECK(visible(find_label_with(lv_scr_act(), "NO DATA")), "the trend graph says NO DATA again");
   save("e4_after_real_frame.rgb");
 
-  printf("E5 refuses to leave stale fake values: a restart of the demo begins clean\n");
+  printf("E5 the simulator's ECU flags light the right lamps over a whole 24 second demo cycle\n");
+  {
+    lv_disp_t *dsp = lv_disp_get_default(); lv_obj_t *indPage = NULL; int seen = 0;
+    for (uint32_t i = 0; i < dsp->screen_cnt; i++) { lv_obj_t *o = dsp->screens[i]; if (o == lv_layer_top() || o == lv_layer_sys() || lv_obj_get_child_cnt(o) == 0) continue; if (seen++ == 6) indPage = o; }
+    CHECK(indPage != NULL && lv_obj_get_child_cnt(indPage) == 7, "the indicators page is the 7th page and has its 7 lamps");
+    auto lit = [&](int i, uint32_t onColor) { return lv_obj_get_style_bg_color(lv_obj_get_child(indPage, i), LV_PART_MAIN).full == lv_color_hex(onColor).full; };
+    const uint32_t C[7] = { 0xE53935, 0x1E88E5, 0xE53935, 0xFFB300, 0x43A047, 0xFFB300, 0x8E24AA };
+    sim_stop("test"); sim_start(false);
+    uint32_t t0 = g_fake_millis; run_ms(100);
+    int samples = 0, revLit = 0, brakeLit = 0, o2Lit = 0, pumpLit = 0, celLit = 0, noPumpLit = 0, revMismatch = 0, brakeWrong = 0, o2Wrong = 0, fanWrong = 0;
+    for (int k = 0; k < 490; k++) {
+      run_ms(50); samples++;
+      float t = (g_fake_millis - t0) / 1000.0f, rpm = sim_value(SIG_RPM), clt = sim_value(SIG_CLT);
+      bool rev = lit(0, C[0]), fan = lit(1, C[1]), brake = lit(2, C[2]), o2 = lit(3, C[3]), pump = lit(4, C[4]), cel = lit(5, C[5]), noPump = lit(6, C[6]);
+      revLit += rev; brakeLit += brake; o2Lit += o2; pumpLit += pump; celLit += cel; noPumpLit += noPump;
+      if (rev != (rpm >= 6150.0f)) revMismatch++;
+      { float ph = fmodf(t, 10.0f); if (brake && ph >= 0.15f && ph < 8.4f) brakeWrong++; }   // the lamp lags its flag by up to ~70ms (a 50ms simulator tick, then the display's 20ms timer), so allow that slack at both edges of the window
+      if (o2 && t > 20.3f) o2Wrong++;
+      if (fan != (clt >= 195.0f)) fanWrong++;
+    }
+    printf("   over %d samples: rev limiter lit %d, brake %d, O2 heater %d, fuel pump %d, check engine %d, 'no pump' %d\n", samples, revLit, brakeLit, o2Lit, pumpLit, celLit, noPumpLit);
+    CHECK(revLit > 20 && revMismatch <= samples / 40, "the REV lamp is lit exactly while the simulated RPM is at the top of the rev cycle (>= 6150)");
+    CHECK(brakeLit > 15 && brakeWrong == 0, "the BRAKE lamp lights for the brake taps (8.5s into each 10s) and never at other times");
+    CHECK(o2Lit > 150 && o2Wrong == 0, "the O2 heater lamp is lit for the first 20 seconds only");
+    CHECK(pumpLit >= samples - 5, "the fuel pump lamp is lit all the time");
+    CHECK(celLit == 0, "the check engine lamp never lights by itself");
+    CHECK(noPumpLit == 0, "'NO PUMP' (lit when the pump flag is reported OFF) never lights: the pump is always on");
+    CHECK(fanWrong <= samples / 40, "the FAN lamp follows the simulated coolant temperature (on at 195 degrees F and above)");
+
+    printf("E6 manual mode: set a flag, the lamp lights\n");
+    sim_stop("test"); sim_start(true); run_ms(300);
+    CHECK(!lit(5, C[5]), "check engine starts off");
+    sim_set_manual(SIG_CEL, 1); run_ms(200); CHECK(lit(5, C[5]), "check engine switched on: its lamp lights");
+    sim_set_manual(SIG_CEL, 0); run_ms(200); CHECK(!lit(5, C[5]), "switched off: dark");
+    sim_set_manual(SIG_FUELPUMP, 0); run_ms(200); CHECK(!lit(4, C[4]) && lit(6, C[6]), "fuel pump flag OFF: 'PUMP' goes out and 'NO PUMP' lights (a flag reported as off is real data)");
+
+    printf("E7 real CAN frames in the official DBC layout drive the lamps - then silence turns them off\n");
+    sim_stop("done"); run_ms(2300);
+    CHECK(g_flag_seen == 0, "after the simulator stops no flag has been seen");
+    { bool allDark = true; for (int i = 0; i < 7; i++) if (lit(i, C[i])) allDark = false; CHECK(allDark, "no data at all: every lamp dark, including 'NO PUMP' (a flag nobody reported is not 'off')"); }
+    { uint8_t d[8] = { 0x11, 0x22, 0x33, 0x44, 0x44, 0x05, 0x66, 0x77 };      // byte 4 = 0x44: bit 2 (fuel pump) and bit 6 (fan 1)
+      can_apply_status_flags(0x200, d, 8); run_ms(100); }
+    CHECK(lit(1, C[1]) && lit(4, C[4]), "a BASE0 frame with the fan and fuel pump bits set: the FAN and PUMP lamps light");
+    CHECK(!lit(0, C[0]) && !lit(5, C[5]) && !lit(3, C[3]) && !lit(6, C[6]), "the other flags in that frame are 0: REV, CEL, O2 and NO PUMP stay dark");
+    CHECK(!lit(2, C[2]), "BRAKE is carried by a different frame (BASE11) which has not arrived: dark");
+    { uint8_t d[1] = { 0x01 }; can_apply_status_flags(0x20B, d, 1); run_ms(100); }
+    CHECK(lit(2, C[2]), "a BASE11 frame with the brake bit: the BRAKE lamp lights");
+    { uint8_t d[8] = { 0, 0, 0, 0, 0x00, 0, 0, 0 }; can_apply_status_flags(0x200, d, 8); run_ms(100); }
+    CHECK(!lit(1, C[1]) && !lit(4, C[4]) && lit(6, C[6]), "the next BASE0 frame says everything is off: FAN and PUMP go out, 'NO PUMP' lights");
+    CHECK(lit(2, C[2]), "... and the brake lamp (a different frame) is unaffected");
+    run_ms(1500);
+    CHECK(lit(6, C[6]) && lit(2, C[2]), "1.5 s without frames: still showing the last state");
+    run_ms(900);
+    { bool allDark = true; for (int i = 0; i < 7; i++) if (lit(i, C[i])) allDark = false; CHECK(allDark, "2.4 s of silence: every lamp goes dark - a dead bus never leaves a lamp lit or claims a flag is 'off'"); }
+    { uint8_t d[8] = { 0, 0, 0, 0, 0xFF, 0, 0, 0 }; can_apply_status_flags(0x200, d, 8); run_ms(100); }
+    CHECK(lit(0, C[0]) && lit(1, C[1]) && lit(3, C[3]) && lit(4, C[4]) && lit(5, C[5]) && !lit(6, C[6]), "frames resume with every bit set: REV, FAN, O2, PUMP and CEL light; 'NO PUMP' goes out");
+    { uint8_t d[8] = { 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF }; can_apply_status_flags(0x200, d, 8); run_ms(100); }
+    CHECK(!lit(0, C[0]) && !lit(5, C[5]), "a frame with every OTHER byte set but byte 4 clear lights nothing (warning counter, gear and distance are not flags)");
+  }
+
+  printf("E8 refuses to leave stale fake values: a restart of the demo begins clean\n");
   sim_start(false); run_ms(200);
   CHECK(sim_is_active() && sim_value(SIG_RPM) > 800 && sim_value(SIG_RPM) < 900, "demo restarts at idle");
 

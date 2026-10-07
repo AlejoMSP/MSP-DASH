@@ -15,6 +15,7 @@
 #include "gauge_config.h"
 #include "gauge_config_json.h"
 #include "gauge_style.h"
+#include "gauge_indicators.h"
 #include "gauge_app.h"
 #include <Preferences.h>   // still used for the small log-channel flags
 #include <FFat.h>
@@ -225,6 +226,54 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
 }
 
 // ---------------------------------------------------------------------------
+// Indicator lamps
+// ---------------------------------------------------------------------------
+static void serializeIndicator(JsonObject o, const IndicatorConfig *l) {
+  o["signal"] = (int)l->signal;
+  o["op"] = (int)l->op;
+  o["threshold"] = l->threshold;
+  o["hysteresis"] = l->hysteresis;
+  o["on_text"] = l->on_text;
+  o["off_text"] = l->off_text;
+  o["on_color"] = l->on_color;
+  o["off_color"] = l->off_color;
+  o["on_text_color"] = l->on_text_color;
+  o["off_text_color"] = l->off_text_color;
+  o["blink"] = l->blink;
+}
+
+// Lamp text is drawn with the display's normal fonts, which cover printable ASCII: anything else (control
+// characters, emoji, other scripts) is dropped rather than shown as empty boxes.
+static void copyLampText(char *dst, size_t cap, const char *src) {
+  size_t n = 0;
+  for (const char *p = src ? src : ""; *p && n + 1 < cap; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c >= 0x20 && c <= 0x7E) dst[n++] = (char)c;
+  }
+  dst[n] = '\0';
+}
+
+static void deserializeIndicator(JsonObject o, IndicatorConfig *l) {
+  memset(l, 0, sizeof(*l));
+  int sig = o["signal"] | 0;
+  if (sig < 0 || sig >= SIG_COUNT) sig = SIG_NONE;
+  l->signal = (SignalId)sig;
+  l->op = ((int)(o["op"] | 0) == GAUGE_IND_BELOW) ? GAUGE_IND_BELOW : GAUGE_IND_ABOVE;
+  float thr = o["threshold"] | 0.0f;
+  l->threshold = std::isfinite(thr) ? thr : 0.0f;
+  float hyst = o["hysteresis"] | 0.0f;
+  l->hysteresis = (std::isfinite(hyst) && hyst > 0.0f) ? hyst : 0.0f;
+  copyLampText(l->on_text, sizeof(l->on_text), o["on_text"] | "");
+  copyLampText(l->off_text, sizeof(l->off_text), o["off_text"] | "");
+  // A lamp saved without colours gets a readable default: red when on, dark grey when off.
+  l->on_color = (o["on_color"] | 0xE53935u) & 0xFFFFFFu;
+  l->off_color = (o["off_color"] | 0x2A2A2Au) & 0xFFFFFFu;
+  l->on_text_color = (o["on_text_color"] | 0xFFFFFFu) & 0xFFFFFFu;
+  l->off_text_color = (o["off_text_color"] | 0x808080u) & 0xFFFFFFu;
+  l->blink = o["blink"] | false;
+}
+
+// ---------------------------------------------------------------------------
 // JSON <-> pages (shared by the flash files and the web endpoints)
 // ---------------------------------------------------------------------------
 void gauge_config_pages_to_json(const PageConfig *pages, JsonDocument &doc) {
@@ -233,6 +282,16 @@ void gauge_config_pages_to_json(const PageConfig *pages, JsonDocument &doc) {
     if (!pages[i].enabled) continue; // disabled pages are not written - the editors already compact the list
     JsonObject pageObj = arr.add<JsonObject>();
     pageObj["enabled"] = true;
+    if (pages[i].kind == PAGE_INDICATORS) {        // a page of on/off lamps: no layout, no cells
+      pageObj["kind"] = (int)PAGE_INDICATORS;
+      pageObj["cols"] = pages[i].ind_cols;
+      JsonArray lamps = pageObj["indicators"].to<JsonArray>();
+      int count = pages[i].ind_count;
+      if (count < 0) count = 0;
+      if (count > MAX_INDICATORS_PER_PAGE) count = MAX_INDICATORS_PER_PAGE;
+      for (int j = 0; j < count; j++) serializeIndicator(lamps.add<JsonObject>(), &pages[i].indicators[j]);
+      continue;
+    }
     pageObj["layout"] = (int)pages[i].layout;
     JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
     int n = gauge_config_cells_for_layout(pages[i].layout);
@@ -246,6 +305,24 @@ void gauge_config_pages_from_json(JsonArray arr, PageConfig *pages) {
   for (JsonObject pageObj : arr) {
     if (i >= MAX_PAGES) break;
     pages[i].enabled = pageObj["enabled"] | false;
+    int kind = pageObj["kind"] | 0;                 // a page saved before indicator pages existed has no "kind": a gauge page
+    if (kind < 0 || kind >= PAGE_KIND_COUNT) kind = PAGE_GAUGES;
+    pages[i].kind = (PageKind)kind;
+    if (kind == PAGE_INDICATORS) {
+      int cols = pageObj["cols"] | 2;
+      if (cols < 1) cols = 1;
+      if (cols > GAUGE_IND_MAX_COLS) cols = GAUGE_IND_MAX_COLS;
+      pages[i].ind_cols = cols;
+      int n = 0;
+      for (JsonObject lampObj : pageObj["indicators"].as<JsonArray>()) {
+        if (n >= MAX_INDICATORS_PER_PAGE) break;
+        deserializeIndicator(lampObj, &pages[i].indicators[n]);
+        n++;
+      }
+      pages[i].ind_count = n;
+      i++;
+      continue;
+    }
     int layout = pageObj["layout"] | 0;
     if (layout < 0 || layout >= LAYOUT_COUNT) layout = LAYOUT_1CELL;
     pages[i].layout = (LayoutType)layout;
@@ -419,6 +496,15 @@ const char *gauge_config_signal_name(SignalId sig) {
     case SIG_FLEX: return "Ethanol %";
     case SIG_TPS: return "Throttle Position";
     case SIG_BATTV: return "Battery Voltage";
+    case SIG_REVLIM: return "Rev Limiter Active";
+    case SIG_MAINRELAY: return "Main Relay";
+    case SIG_FUELPUMP: return "Fuel Pump";
+    case SIG_CEL: return "Check Engine Light";
+    case SIG_EGOHEAT: return "O2 Heater";
+    case SIG_LAMBDAPROT: return "Lambda Protection";
+    case SIG_FAN: return "Fan 1";
+    case SIG_FAN2: return "Fan 2";
+    case SIG_BRAKE: return "Brake Pedal";
     default: return "None";
   }
 }
@@ -435,7 +521,9 @@ float gauge_config_signal_value(SignalId sig) {
     case SIG_FLEX: return g_flex_pct;
     case SIG_TPS: return g_tps;
     case SIG_BATTV: return g_battv;
-    default: return 0;
+    default:
+      if (gauge_signal_is_flag(sig)) return ((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f;
+      return 0;
   }
 }
 
@@ -452,7 +540,9 @@ bool gauge_config_signal_has_data(SignalId sig) {
     case SIG_FLEX: seen = g_flex_has_data; break;
     case SIG_TPS: seen = g_tps_has_data; break;
     case SIG_BATTV: seen = g_battv_has_data; break;
-    default: seen = false; break;
+    default:
+      seen = gauge_signal_is_flag(sig) && ((g_flag_seen >> (sig - SIG_FIRST_FLAG)) & 1u);
+      break;
   }
   if (!seen) return false;
   // The g_*_has_data flags are set on the first frame and never cleared,
@@ -475,12 +565,12 @@ uint32_t gauge_config_signal_age_ms(SignalId sig) {
 void gauge_config_log_init(void) {
   logPrefs.begin("logchans", false);
   for (int i = 0; i < SIG_COUNT; i++) {
-    // Default: log everything - user can narrow down via the Log
-    // Channels web page. Stored as one bit per signal in a single
-    // 32-bit value for simplicity (SIG_COUNT is 11, comfortably fits).
+    // Default: log every analog signal - user can narrow down via the Log
+    // Channels web page. The on/off status flags default to NOT logged, so the
+    // CSV columns people already use do not change; tick them on that page to log them.
     char key[8];
     snprintf(key, sizeof(key), "s%d", i);
-    s_logEnabled[i] = logPrefs.getBool(key, true);
+    s_logEnabled[i] = logPrefs.getBool(key, !gauge_signal_is_flag(i));
   }
 }
 

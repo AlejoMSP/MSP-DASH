@@ -2,6 +2,7 @@
 #define GAUGE_APP_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,9 @@ extern volatile bool g_boost_has_data;
 extern volatile bool g_rpm_has_data;
 extern volatile bool g_tps_has_data;
 extern volatile bool g_battv_has_data;
+// ECU on/off status flags: one bit per signal from SIG_FIRST_FLAG up (bit 0 = SIG_REVLIM ...). Written by the CAN task and the simulator.
+extern volatile uint16_t g_flag_bits;   // 1 = on
+extern volatile uint16_t g_flag_seen;   // 1 = a frame has carried this flag at least once
 
 // Set from Arduino's loop() when the BOOT button is pressed (debounced
 // there) - our LVGL timer callback checks this and performs the actual

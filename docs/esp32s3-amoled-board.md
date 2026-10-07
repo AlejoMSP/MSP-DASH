@@ -1898,3 +1898,49 @@ same rules as the display (zoneOf, tickValue = LVGL's integer maths, resolveTrim
 tick, measured in the rendered image); needlepix 40 (where the needle really starts and stops, hub dot hidden only
 with a gap); editor 123; each of 8 display and 6 editor breakages caught; plus the earlier suites. Screenshots
 reviewed: the real display in 8 configurations. NOT run on the board.
+
+
+## ECU on/off flags and indicator pages (build 109)
+
+Request: "this is how TunerStudio allows the manipulation of its gauges ... we should also add ability to create
+indicators page." (The TunerStudio dialog is a reference for FUTURE gauge settings, see the gap list below; this build
+adds the indicators page.)
+
+**ECU flags as signals.** docs/rusefi.dbc (the official DBC) puts the status flags in BASE0 (id 0x200) byte 4, one bit
+each starting at bit 0: RevLimAct, MainRelayAct, FuelPumpAct, CELAct, EGOHeatAct, LambdaProtectAct, Fan, Fan2 (DBC bits
+32-39); BrakePedal is BASE11 (0x20B) byte 0 bit 0. can_flags.h decodes them (pure C); can_apply_status_flags() is what the
+CAN task runs for every frame. They are 9 new SignalIds after SIG_BATTV (SIG_COUNT is now 20; the ORDER is the DBC bit order),
+value 1 or 0, stored as bits in g_flag_bits / g_flag_seen. A frame that carries a flag as 0 is real data; only a flag that
+no frame has carried (or not for 2 s, the usual staleness) is "no data". The log-channel default for flags is OFF, so existing
+CSV columns do not change. The simulator makes them (demo: relay and pump on, rev limiter at the top of the rev cycle, fans
+follow coolant, O2 heater for 20 s, brake tap every 10 s, check engine and lambda protect only in manual mode). /signals.json
+has "flag": true for them and gauge cells' signal lists hide them.
+
+**Indicator pages.** A page has `kind` 0 (gauge cells, as before) or 1 (lamps). Kind 1 holds `cols` (1-4) and up to 12 lamps:
+signal, op (above/below), threshold, hysteresis, on/off text (printable ASCII, 11 chars), on/off background and text colours,
+blink. A lamp is ON when value > threshold (above) or < threshold (below); once on it stays on until the value is `hysteresis`
+back past the threshold; NO DATA, NaN or a NaN threshold = OFF (a lost sensor is not an alarm). ECU flags use "above 0.5" /
+"below 0.5". The rule lives in gauge_indicators.h (C, display + tests) and indicatorNext() (JS, front page); both are tested
+against the same cases. Layout: gauge_indicator_layout() puts lamps in a grid, 1.6:1, 8px gap, as large as possible with every
+corner inside a 223px radius of the panel centre (6 lamps in 2 columns: 156x97; 12 in 3 columns: 106x66); a part-filled last row
+is centred. Text uses the biggest of 36/28/14 that fits. A lamp keeps tracking its signal while its page is hidden (so hysteresis
+memory is right). An empty page says NO INDICATORS. Config JSON for kind 1: `kind`, `cols`, `indicators[]` (no layout/cells);
+old pages without `kind` are gauge pages. Worst case (8 pages x 12 lamps) is ~20KB, so CONFIG_POST_MAX is now 32KB.
+
+**Editors.** web_indicator_editor.h is ONE raw string literal #included into both editors' scripts (the display editor and the
+web dashboard editor), so they cannot differ (the page extractor expands the #include like the compiler; Arduino copies .h
+files, which is why it is not .inc). "+ Add Indicators Page" starts with six lamps (check engine, oil, temperature, battery,
+rev limiter, fan 1); 18 presets (8 analog thresholds, 9 ECU flags and a rev-limit-by-RPM); ON/OFF preview chips; move up/down,
+remove, max 12. The editor's signal-number table is checked against gauge_config.h by a test.
+
+**Web dashboard.** Lamps are drawn on the front page from the live values; flashing uses a 480ms page timer that redraws only
+while the visible page has a flashing lamp; all text is HTML-escaped.
+
+**Gaps vs the TunerStudio gauge dialog (not done).** Four thresholds at once (low critical / low warning / high warning /
+high critical) drawn as colour BANDS behind the ticks (we have one side only, as coloured ticks); gauge title and units
+printed on the face; decimal places; border size.
+
+**Verified (PC, sanitizers on).** flags decoder 69 (incl. DBC contract); lamp logic 459; config 148; simulator 51; display
+indicator scenarios; editor 109; front page 77; end to end 49; browser layout check 24 page views (lamp colours, escaped text,
+sizes); deliberate breakages of the display, web page and editor were each caught (two weak tests were strengthened, one
+change was a redundant safeguard with no visible effect). NOT run on the board.

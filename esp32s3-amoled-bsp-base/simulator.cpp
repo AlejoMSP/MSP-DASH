@@ -36,7 +36,7 @@ SimRange sim_range(int sig) {
     case SIG_FLEX:  return {0, 100, 1};
     case SIG_TPS:   return {0, 100, 1};
     case SIG_BATTV: return {8, 16, 0.1f};
-    default:        return {0, 0, 1};
+    default:        return gauge_signal_is_flag(sig) ? SimRange{0, 1, 1} : SimRange{0, 0, 1};   // an on/off flag: 0 or 1
   }
 }
 
@@ -76,6 +76,18 @@ void sim_demo_values(float t, float out[SIG_COUNT]) {
   out[SIG_FUELP] = 58.0f + 3.0f * sinf(t * 1.3f);
   out[SIG_FLEX]  = 30.0f + 1.0f * sinf(t * 0.2f);
   out[SIG_BATTV] = 13.8f + 0.15f * sinf(t * 1.7f);
+
+  // On/off flags, so an indicators page has something to show. The check-engine light and lambda protection
+  // never come on by themselves (use manual mode to test those).
+  out[SIG_REVLIM]     = (rpm >= 6150.0f) ? 1.0f : 0.0f;                  // the top of the rev cycle
+  out[SIG_MAINRELAY]  = 1.0f;
+  out[SIG_FUELPUMP]   = 1.0f;
+  out[SIG_CEL]        = 0.0f;
+  out[SIG_EGOHEAT]    = (t < 20.0f) ? 1.0f : 0.0f;                       // the O2 heater, while the engine warms up
+  out[SIG_LAMBDAPROT] = 0.0f;
+  out[SIG_FAN]        = (out[SIG_CLT] >= 195.0f) ? 1.0f : 0.0f;
+  out[SIG_FAN2]       = (out[SIG_CLT] >= 200.0f) ? 1.0f : 0.0f;
+  out[SIG_BRAKE]      = (fmodf(t, 10.0f) >= 8.5f) ? 1.0f : 0.0f;         // a brake tap every 10 seconds
 }
 
 // Writes one tick of values exactly the way the CAN decoder would.
@@ -90,6 +102,14 @@ static void writeValues(const float *v) {
   g_flex_pct = v[SIG_FLEX];   g_flex_has_data = true;  gauge_config_mark_signal_active(SIG_FLEX);
   g_tps = v[SIG_TPS];         g_tps_has_data = true;   gauge_config_mark_signal_active(SIG_TPS);
   g_battv = v[SIG_BATTV];     g_battv_has_data = true; gauge_config_mark_signal_active(SIG_BATTV);
+
+  uint16_t bits = 0;
+  for (int i = 0; i < SIG_FLAG_COUNT; i++) {
+    if (v[SIG_FIRST_FLAG + i] > 0.5f) bits |= (uint16_t)(1u << i);
+    gauge_config_mark_signal_active((SignalId)(SIG_FIRST_FLAG + i));
+  }
+  g_flag_bits = bits;
+  g_flag_seen = (uint16_t)((1u << SIG_FLAG_COUNT) - 1u);
 }
 
 void sim_start(bool manual) {
@@ -111,6 +131,7 @@ void sim_stop(const char *why) {
   // Back to "never seen", so the gauges return to "--" instead of holding fake values.
   g_rpm_has_data = g_clt_has_data = g_boost_has_data = g_afr_has_data = g_oilp_has_data = false;
   g_oilt_has_data = g_fuelp_has_data = g_flex_has_data = g_tps_has_data = g_battv_has_data = false;
+  g_flag_seen = 0;
   strncpy(s_stopReason, why ? why : "stopped", sizeof(s_stopReason) - 1);
   s_stopReason[sizeof(s_stopReason) - 1] = '\0';
   Serial.printf("Simulator OFF: %s\n", s_stopReason);

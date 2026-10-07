@@ -14,12 +14,14 @@ volatile float g_afr, g_clt_f, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
               g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data;
 volatile int g_requested_page = -1, g_page_nav_delta = 0;
+volatile uint16_t g_flag_bits = 0, g_flag_seen = 0;
 static int marks[SIG_COUNT];
 void gauge_config_mark_signal_active(SignalId s) { marks[s]++; }
 
 static int pass = 0, fail = 0;
 #define CHECK(c, m) do { if (c) pass++; else { fail++; printf("  FAIL: %s (line %d)\n", m, __LINE__); } } while (0)
-static bool allFlags(bool v) { return g_rpm_has_data == v && g_clt_has_data == v && g_boost_has_data == v && g_afr_has_data == v && g_oilp_has_data == v &&
+static const int NSIG = SIG_COUNT - 1;      // every real signal: the ten analog ones plus the nine on/off flags
+static bool allFlags(bool v) { return (v ? g_flag_seen == (uint16_t)((1u << SIG_FLAG_COUNT) - 1) : g_flag_seen == 0) && g_rpm_has_data == v && g_clt_has_data == v && g_boost_has_data == v && g_afr_has_data == v && g_oilp_has_data == v &&
                                       g_oilt_has_data == v && g_fuelp_has_data == v && g_flex_has_data == v && g_tps_has_data == v && g_battv_has_data == v; }
 static int totalMarks() { int n = 0; for (int i = 0; i < SIG_COUNT; i++) n += marks[i]; return n; }
 static void run(uint32_t ms) { for (uint32_t t = 0; t < ms; t += 10) { g_fake_millis += 10; sim_loop(); } }
@@ -56,16 +58,16 @@ int main() {
   CHECK(sim_is_active() && !sim_is_manual(), "active, demo mode");
   CHECK(sim_seconds_left() >= 599 && sim_seconds_left() <= 600, "10-minute countdown");
   sim_loop();
-  CHECK(allFlags(true), "all ten 'has data' flags set");
+  CHECK(allFlags(true), "every signal (ten analog + nine flags) has data");
   CHECK(g_rpm > 800 && g_rpm < 900, "RPM written");
   for (int s = 1; s < SIG_COUNT; s++) if (marks[s] != 1) { CHECK(false, "each signal marked active once on the first tick"); break; }
   int m0 = totalMarks();
   g_fake_millis += 20; sim_loop();
   CHECK(totalMarks() == m0, "no extra write within 50ms (about 20 updates a second)");
   g_fake_millis += 40; sim_loop();
-  CHECK(totalMarks() == m0 + 10, "next tick after 50ms");
+  CHECK(totalMarks() == m0 + NSIG, "next tick after 50ms");
   run(1000);
-  CHECK(totalMarks() >= m0 + 10 * 18 && totalMarks() <= m0 + 10 * 22, "about 20 ticks in one second");
+  CHECK(totalMarks() >= m0 + NSIG * 18 && totalMarks() <= m0 + NSIG * 22, "about 20 ticks in one second");
 
   printf("4. a real CAN frame ends it\n");
   sim_notify_real_frame();
@@ -115,6 +117,36 @@ int main() {
   printf("8. slider ranges\n");
   bool ok = true; for (int s = 1; s < SIG_COUNT; s++) { SimRange r = sim_range(s); if (!(r.max > r.min && r.step > 0)) ok = false; }
   CHECK(ok, "every signal has min < max and a positive step");
+
+  printf("9. the on/off flags\n");
+  {
+    bool everRev = false, everFan = false, everFan2 = false, everBrake = false, everEgo = false, wrong = false;
+    for (float t = 0; t < 600.0f; t += 0.1f) {
+      float d[SIG_COUNT]; sim_demo_values(t, d);
+      for (int f = SIG_FIRST_FLAG; f < SIG_COUNT; f++) if (d[f] != 0.0f && d[f] != 1.0f) wrong = true;
+      if (d[SIG_REVLIM] == 1.0f) { everRev = true; if (d[SIG_RPM] < 6150.0f) wrong = true; } else if (d[SIG_RPM] >= 6150.0f) wrong = true;
+      if (d[SIG_CEL] != 0.0f || d[SIG_LAMBDAPROT] != 0.0f) wrong = true;                  // these never come on by themselves
+      if (d[SIG_MAINRELAY] != 1.0f || d[SIG_FUELPUMP] != 1.0f) wrong = true;
+      if ((d[SIG_FAN] == 1.0f) != (d[SIG_CLT] >= 195.0f)) wrong = true;
+      if ((d[SIG_FAN2] == 1.0f) != (d[SIG_CLT] >= 200.0f)) wrong = true;
+      if ((d[SIG_BRAKE] == 1.0f) != (fmodf(t, 10.0f) >= 8.5f)) wrong = true;
+      if ((d[SIG_EGOHEAT] == 1.0f) != (t < 20.0f)) wrong = true;
+      everFan |= d[SIG_FAN] == 1.0f; everFan2 |= d[SIG_FAN2] == 1.0f; everBrake |= d[SIG_BRAKE] == 1.0f; everEgo |= d[SIG_EGOHEAT] == 1.0f;
+    }
+    CHECK(!wrong, "demo flags: 0 or 1 only; rev limiter only at the top of the rev cycle; fans follow coolant; check engine / lambda protect never; relay and pump always");
+    CHECK(everRev && everFan && everFan2 && everBrake && everEgo, "and the demo does switch rev limiter, both fans, brake and O2 heater on at some point");
+    sim_stop("t"); sim_start(false); g_fake_millis += 60; sim_loop();
+    CHECK((g_flag_bits & (1u << (SIG_MAINRELAY - SIG_FIRST_FLAG))) && (g_flag_bits & (1u << (SIG_FUELPUMP - SIG_FIRST_FLAG))) && !(g_flag_bits & (1u << (SIG_CEL - SIG_FIRST_FLAG))), "demo start: relay and pump on, check engine off, in g_flag_bits");
+    sim_stop("t"); sim_start(true); run(100);
+    CHECK(sim_set_manual(SIG_CEL, 1) && (run(100), (g_flag_bits >> (SIG_CEL - SIG_FIRST_FLAG)) & 1u), "manual: switch the check engine light on");
+    CHECK(sim_set_manual(SIG_CEL, 0.2f) && (run(100), !((g_flag_bits >> (SIG_CEL - SIG_FIRST_FLAG)) & 1u)), "manual: 0.2 is off (a flag is on above 0.5)");
+    CHECK(sim_set_manual(SIG_FAN, 7) && sim_value(SIG_FAN) == 1.0f, "manual: a flag value is clamped to 1");
+    CHECK(sim_set_manual(SIG_BRAKE, -3) && sim_value(SIG_BRAKE) == 0.0f, "manual: ... and to 0");
+    SimRange fr = sim_range(SIG_FAN2);
+    CHECK(fr.min == 0 && fr.max == 1 && fr.step == 1, "a flag's slider runs 0..1 in steps of 1");
+    sim_stop("t");
+    CHECK(g_flag_seen == 0, "stopping clears the 'seen' bits so the lamps go back to no-data");
+  }
 
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;

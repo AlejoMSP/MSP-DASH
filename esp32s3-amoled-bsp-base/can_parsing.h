@@ -34,6 +34,7 @@
 #include "gauge_config.h"
 #include "web_monitor.h"
 #include "simulator.h"
+#include "can_flags.h"
 
 // ---- rusEFI CAN IDs ----
 #define RUSEFI_BASE1 0x201
@@ -201,6 +202,7 @@ static void canReceiveTask(void *arg) {
       sim_notify_real_frame(); // real traffic always wins: it switches the bench simulator off
       web_monitor_track_can_frame(message.identifier, message.data, message.data_length_code);
       handleRusefiFrame(message.identifier, message.data);
+      can_apply_status_flags(message.identifier, message.data, message.data_length_code);   // fan, check engine ... (see can_flags.h)
       handleSecondaryEcuFrame(message.identifier, message.data);
     }
 

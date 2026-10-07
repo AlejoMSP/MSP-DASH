@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { makeServer } = require(path.join(here, 'mock_board.js'));
+const { makeServer, WEB_PAGES, WS_VALUES } = require(path.join(here, 'mock_board.js'));
 async function chromePath() {
   if (process.env.CHROME_PATH) return { exe: process.env.CHROME_PATH, args: [] };
   const mod = (await import('@sparticuz/chromium')).default;
@@ -51,16 +51,27 @@ for (const prof of PROFILES) {
     });
     // The front page's numbers must honour each cell's Value Text Size (1.25 x the size in px) but never be wider than the cell:
     // the font is capped at 26% of the cell's width. Measured on all three web dashboard pages of the mock board.
-    m.valPages = [];
+    m.valPages = []; m.lampPages = [];
     if (route === '/') {
-      for (let i = 0; i < 3; i++) {
+      await page.waitForFunction(() => Object.keys(signalValues).length > 0, { timeout: 8000 });   // wait for the first live message
+      const nPages = await page.evaluate(() => webPages.length);
+      for (let i = 0; i < nPages; i++) {
         if (i) await page.evaluate(() => changeWebPage(1));
-        m.valPages.push(await page.evaluate(() => [...document.querySelectorAll('.dcell .val')].map(v => { const cell = v.closest('.dcell');
-          return { size: +v.dataset.size, px: parseFloat(getComputedStyle(v).fontSize), cellW: cell.clientWidth, fits: v.scrollWidth <= cell.clientWidth + 1 }; })));
-        if (i === 2 && prof.phone === false) await page.screenshot({ path: `${outDir}/${prof.name}_front_bigtext.png` });
+        const info = await page.evaluate(() => {
+          const po = document.querySelector('.phone-outer').getBoundingClientRect();
+          return { kind: webPages[currentWebPage].kind || 0,
+            vals: [...document.querySelectorAll('.dcell .val')].map(v => { const cell = v.closest('.dcell');
+              return { size: +v.dataset.size, px: parseFloat(getComputedStyle(v).fontSize), cellW: cell.clientWidth, fits: v.scrollWidth <= cell.clientWidth + 1 }; }),
+            lamps: [...document.querySelectorAll('.lamp')].map(l => { const r = l.getBoundingClientRect();
+              return { on: l.dataset.on, bg: getComputedStyle(l).backgroundColor, text: l.textContent, w: r.width, h: r.height, inside: r.left >= po.left - 1 && r.right <= po.right + 1 }; }) };
+        });
+        if (info.kind === 1) { m.lampPages.push(info.lamps); if (!prof.phone) await page.screenshot({ path: `${outDir}/${prof.name}_front_indicators.png` }); }
+        else { m.valPages.push(info.vals); if (m.valPages.length === 3 && prof.phone === false) await page.screenshot({ path: `${outDir}/${prof.name}_front_bigtext.png` }); }
       }
-      await page.evaluate(() => changeWebPage(1));   // back to the first page for the screenshot below
+      await page.evaluate(() => changeWebPage(1));   // one more step wraps back to the first page for the screenshot below
     }
+    m.lampCards = await page.evaluate(() => document.querySelectorAll('.lamp-card').length);
+    m.chips = await page.evaluate(() => document.querySelectorAll('.lamp-card .chip').length);
     await page.screenshot({ path: `${outDir}/${prof.name}_${label}.png`, fullPage: prof.phone });
     checked++;
     const bad = (why) => problems.push(`${prof.name} ${label}: ${why}`);
@@ -85,6 +96,22 @@ for (const prof of PROFILES) {
       else if (Math.abs(v.px - want) > 1.5) bad(`front page ${pi + 1} cell ${ci + 1}: size ${v.size} should draw at ${want.toFixed(1)}px (1.25 x the size, at most 26% of the ${v.cellW}px cell) but draws at ${v.px}px`);
       if (!v.fits) bad(`front page ${pi + 1} cell ${ci + 1}: the number is wider than its cell`);
     }));
+    // The indicators page of the mock board: what the BROWSER draws must match what the mock's live data says should be lit.
+    const mockLamps = WEB_PAGES[WEB_PAGES.length - 1].indicators, rgb = n => `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+    m.lampPages.forEach(lamps => {
+      if (lamps.length !== mockLamps.length) bad(`front page indicators: ${mockLamps.length} lamps expected, ${lamps.length} drawn`);
+      lamps.forEach((d, i) => {
+        const l = mockLamps[i], v = WS_VALUES[l.signal];
+        const on = v !== undefined && (l.op === 1 ? v < l.threshold : v > l.threshold);
+        const flashingOnLook = on && l.blink;   // a flashing lamp may be showing either look at this instant
+        if (!flashingOnLook && d.bg !== rgb(on ? l.on_color : l.off_color)) bad(`front page lamp ${i + 1} (${l.on_text}): should be ${on ? 'ON' : 'OFF'} (${rgb(on ? l.on_color : l.off_color)}) but is ${d.bg}`);
+        if (!flashingOnLook && d.text !== (on ? l.on_text : l.off_text)) bad(`front page lamp ${i + 1}: text should be "${on ? l.on_text : l.off_text}" but shows "${d.text}"`);
+        if (!d.inside) bad(`front page lamp ${i + 1} sticks out of the page column`);
+        if (d.w < 60 || Math.abs(d.w / d.h - 1.6) > 0.12) bad(`front page lamp ${i + 1} is the wrong size or shape (${d.w.toFixed(0)} x ${d.h.toFixed(0)})`);
+      });
+    });
+    if ((route === '/gauges' || route === '/web-config') && m.lampCards !== mockLamps.length) bad(`the editor should show ${mockLamps.length} lamp cards, shows ${m.lampCards}`);
+    if ((route === '/gauges' || route === '/web-config') && m.chips !== 2 * mockLamps.length) bad(`each lamp card should have an ON and an OFF preview chip (${2 * mockLamps.length} expected, ${m.chips} found)`);
     if (!m.nav) bad('missing the shared header / menu');
     if (errors.length) bad('script error: ' + errors.join('; '));
   }
