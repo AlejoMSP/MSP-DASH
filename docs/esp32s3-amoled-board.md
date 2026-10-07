@@ -1763,3 +1763,43 @@ simulator + config + display with the default layout), simulator page 20, front 
 31, editor save 5, config storage 71, board-side type-check on 6 files; every new
 safety behavior was broken on purpose and caught. Screenshots reviewed (demo graph,
 simulated alert, state after a real frame). NOT yet run on the board.
+
+## Whole site in the iPhone frame (build 105)
+
+Request: every web page should fit an iPhone screen like the front page, look like an iPhone
+when opened on a desktop, and show NO borders when opened on an actual iPhone.
+
+**How it works.** New web_theme.h holds ONE definition of the look; every page in web_monitor.cpp
+is `PH_HEAD "<title>" PH_STYLE <page css> PH_OPEN <content> PH_CLOSE <script>`, joined by the
+compiler (no extra web request, nothing to drift). It gives every page: a column at most 430 CSS px
+wide (iPhone 15 Pro Max), a shared header (MSP-DASH link + hamburger) with the full menu (Monitor,
+Display Gauge Config, Web Dashboard Config, Log Channels, Bench Simulator, Raw CAN Monitor, SD Card,
+Firmware Update), and the old per-page "Back to monitor" links are gone.
+
+**Desktop vs phone is decided by the device, not the window width.** The bezel + notch appears only
+for `(hover:hover) and (pointer:fine) and (min-width:500px)` - i.e. a mouse and a wide window. The
+old front-page rule was width-only, so an iPhone turned sideways (932px wide) got the bezel. Phones
+and tablets (touch only) get the plain column.
+
+**iPhone specifics.** Safe-area insets keep content clear of the notch and home bar; form fields are
+16px so Safari does not zoom in when one is tapped; viewport-fit=cover plus the apple-mobile-web-app
+meta tags let "Add to Home Screen" open it full-screen like an app; `100dvh` for the page height.
+
+**Problems found while photographing the old pages in a real browser (headless Chrome):** only the
+front page had the frame (the other 7 were full-width); the SD page was 570px wide on a 430px phone
+(sideways scrolling); and the front page showed the bezel on a sideways iPhone. Also fixed: the
+editors' "enabled" checkboxes were stretched full width above their labels, an empty gap sat under
+each editor's title (two empty status lines), SD sizes split across lines ("153092 / 2"), and the
+CAN table is now compact enough for 430px (header "Last seen (ms ago)" is now "Age (ms)").
+
+**Verified.** headless Chrome (a Chromium shipped inside an npm package) launched twice - once with a
+mouse (pointer:fine), once touch-only (pointer:coarse) - over all 8 pages x desktop / iPhone portrait /
+iPhone sideways = 24 page views: bezel only on desktop (430px), none on any phone view, no page wider
+than the screen, no form field under 16px, menu on every page, no script errors. Five deliberate
+breakages (width-based frame rule, small form fields, unwrappable SD names, missing menu, no desktop
+bezel) were each caught with a clear message. The real C++ compiler and the test page-extractor
+produce byte-identical pages (all 8), the board-side type-check passes, and the three page-script
+test suites (31 + 5 + 20) still pass. Screenshots reviewed. NOT yet seen on a real iPhone or the board.
+
+New tools in tests/host: extract_page.js, mock_board.js, layout_check.mjs (needs `npm install` there),
+check_pages_match_compiler.sh, dump_pages.cpp, package.json.

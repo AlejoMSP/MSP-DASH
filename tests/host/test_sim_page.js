@@ -1,8 +1,6 @@
 // Drives the /simulator page's script (pulled straight out of web_monitor.cpp) with a fake board.
 const fs = require('fs');
-const cpp = fs.readFileSync(process.env.WEB_MONITOR_CPP || (__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp'), 'utf8');
-const page = cpp.match(/static const char SIM_HTML\[\] PROGMEM = R"rawliteral\(([\s\S]*?)\)rawliteral";/)[1];
-const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = require('./extract_page.js').pageScript('SIM_HTML');   // honours WEB_MONITOR_CPP for the break-it-on-purpose checks
 
 // ---- fake browser ----
 const timers = [];

@@ -37,6 +37,7 @@
 #include "build_info.h"
 #include "gauge_config_json.h"
 #include "simulator.h"
+#include "web_theme.h"
 #include <math.h> // NAN
 
 static const char FW_COMPILED[] = __DATE__ " " __TIME__; // when THIS file was compiled - changes on every rebuild
@@ -98,66 +99,21 @@ static void applyConfigBody(const char *body, size_t total, bool isWeb) {
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
 
-static const char INDEX_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { background:#222; color:#fff; font-family: sans-serif; margin:0; padding:0; display:flex; justify-content:center; }
-
-    .phone-outer { width:100%; max-width:430px; min-height:100vh; background:#000; position:relative; }
-
-    /* Phone-frame mockup - only applied on screens wide enough that
-       we're clearly not actually viewing this on a phone. iPhone 15 Pro
-       Max's CSS viewport (430x932) is the sizing target throughout. */
-    @media (min-width: 500px) {
-      body { padding:40px 0; align-items:flex-start; }
-      .phone-outer {
-        min-height:932px;
-        border-radius:48px;
-        border:10px solid #111;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-        overflow:hidden;
-      }
-      .phone-outer::before {
-        content:"";
-        position:absolute;
-        top:14px; left:50%; transform:translateX(-50%);
-        width:120px; height:28px;
-        background:#111;
-        border-radius:16px;
-        z-index:10;
-      }
-    }
-
-    .topbar { display:flex; align-items:center; justify-content:space-between; padding:16px; }
-    .topbar h1 { font-size:1.1em; }
-    .hamburger { background:none; border:1px solid #444; color:#fff; font-size:1.3em; padding:2px 10px; border-radius:6px; }
-    .navmenu { display:none; flex-direction:column; background:#111; border-radius:8px; padding:10px; margin:0 16px 10px; }
-    .navmenu.open { display:flex; }
-    .navmenu a { color:#4dd0e1; padding:8px; text-decoration:none; }
-
+static const char INDEX_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH</title>" PH_STYLE
+R"rawliteral(<style>
     .dash-nav { display:flex; justify-content:space-between; padding:0 16px; margin-bottom:10px; }
     .dash-nav button { background:#4dd0e1; color:#000; border:none; border-radius:6px; padding:8px 14px; }
-
     .cellgrid { display:grid; gap:3px; padding:0 3px 3px; min-height:600px; }
     .layout-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
     .layout-2up { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
     .layout-3up { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
     .layout-3up .c0 { grid-column: 1 / 3; }
     .layout-2x2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-
     .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; }
     .dcell .cap { font-size:0.85em; color:#4dd0e1; }
     .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; }
     .dcell .warn { color:#ff4444; }
     .empty-msg { padding:20px; text-align:center; color:#888; }
-    .titleblock h1 { margin:0; }
-    .build { font-size:0.68em; color:#777; margin-top:2px; }
     .statusline { display:flex; align-items:center; gap:8px; padding:0 16px 8px; font-size:0.78em; color:#aaa; }
     #dot { width:10px; height:10px; border-radius:50%; background:#666; flex:none; }
     #dot.st-ok { background:#2ecc71; }
@@ -165,26 +121,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     #dot.st-bad { background:#e74c3c; }
     .simbar { display:none; background:#f5a623; color:#000; font-weight:bold; text-align:center; padding:6px; margin:0 3px 6px; border-radius:6px; font-size:0.85em; }
     .simbar.on { display:block; }
-  </style>
-</head>
-<body>
-  <div class="phone-outer">
-    <div class="topbar">
-      <div class="titleblock">
-        <h1>MSP-DASH</h1>
-        <div class="build" id="build">build ...</div>
-      </div>
-      <button class="hamburger" onclick="document.getElementById('navmenu').classList.toggle('open')">&#9776;</button>
-    </div>
-    <div class="navmenu" id="navmenu">
-      <a href="/can">Raw CAN Monitor &rarr;</a>
-      <a href="/update">Firmware Update &rarr;</a>
-      <a href="/gauges">Display Gauge Config &rarr;</a>
-      <a href="/web-config">Web Dashboard Config &rarr;</a>
-      <a href="/log-channels">Log Channels &rarr;</a>
-      <a href="/simulator">Bench Simulator &rarr;</a>
-      <a href="/sd">SD Card &rarr;</a>
-    </div>
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(
     <div class="dash-nav">
       <button onclick="changeWebPage(-1)">&larr; Prev</button>
       <button onclick="changeWebPage(1)">Next &rarr;</button>
@@ -192,9 +130,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="statusline"><span id="dot"></span><span id="stext">Connecting...</span></div>
     <div class="simbar" id="simbar">SIMULATED DATA - not from the ECU</div>
     <div class="cellgrid" id="cellgrid"></div>
-  </div>
-
-  <script>
+)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
+    document.getElementById("build").textContent = "build ...";
     // NOTE: cells currently render as plain text (caption + live
     // number) regardless of configured gauge_type (needle/half-moon/
     // number) - true graphical needle rendering for the web view is
@@ -326,29 +265,25 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </body>
 </html>
 )rawliteral";
-static const char CAN_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Raw CAN Monitor</title>
-  <style>
-    body { background:#000; color:#fff; font-family: monospace; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; font-family: sans-serif; }
-    table { width:100%; border-collapse: collapse; margin-top:16px; }
-    th, td { text-align:left; padding:6px 10px; border-bottom:1px solid #333; }
-    th { color:#4dd0e1; font-family: sans-serif; }
-  </style>
-</head>
-<body>
+static const char CAN_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Raw CAN Monitor</title>" PH_STYLE
+R"rawliteral(<style>
+    .tablewrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; font-family:monospace; font-size:0.72em; }
+    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #333; }
+    th { color:#4dd0e1; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Raw CAN Monitor</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div class="tablewrap">
   <table>
-    <thead><tr><th>ID (hex)</th><th>DLC</th><th>Data (hex)</th><th>Hz</th><th>Last seen (ms ago)</th></tr></thead>
+    <thead><tr><th>ID (hex)</th><th>DLC</th><th>Data (hex)</th><th>Hz</th><th>Age (ms)</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <script>
+  </div>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     async function refresh() {
       const res = await fetch("/can.json");
       const rows = await res.json();
@@ -365,33 +300,25 @@ static const char CAN_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Gauge Config</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
+static const char GAUGES_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Gauge Config</title>" PH_STYLE
+R"rawliteral(<style>
     h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
     .page-card { background:#0a0a0a; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:14px; }
     .page-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
     .cell { background:#111; border-radius:8px; padding:10px; margin-top:10px; }
     .cell label { display:block; font-size:0.78em; color:#4dd0e1; margin-top:5px; }
     .cell input, .cell select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
+    .cell input[type=checkbox] { width:auto; margin:0 6px 0 0; }
     .row2 { display:flex; gap:8px; }
     .row2 > div { flex:1; }
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
     .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
-  </style>
-</head>
-<body>
+    #status:empty, #boot:empty { display:none; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Gauge Configuration</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <div id="status"></div>
   <div id="boot">Page script has not started yet...</div>
 
@@ -409,7 +336,10 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
 
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
     document.getElementById("boot").textContent = "";
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
@@ -601,33 +531,25 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Web Dashboard Config</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
+static const char WEBCFG_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Web Dashboard Config</title>" PH_STYLE
+R"rawliteral(<style>
     h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
     .page-card { background:#0a0a0a; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:14px; }
     .page-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
     .cell { background:#111; border-radius:8px; padding:10px; margin-top:10px; }
     .cell label { display:block; font-size:0.78em; color:#4dd0e1; margin-top:5px; }
     .cell input, .cell select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
+    .cell input[type=checkbox] { width:auto; margin:0 6px 0 0; }
     .row2 { display:flex; gap:8px; }
     .row2 > div { flex:1; }
     button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
     button.danger { background:#F44336; color:#fff; }
     .bulk { background:#111; border-radius:8px; padding:12px; margin-bottom:14px; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
-  </style>
-</head>
-<body>
+    #status:empty, #boot:empty { display:none; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Web Dashboard Configuration</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <div id="status"></div>
   <div id="boot">Page script has not started yet...</div>
 
@@ -645,7 +567,10 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
   <div id="pages"></div>
   <button onclick="save()">Save (reboot required to apply)</button>
 
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
     document.getElementById("boot").textContent = "";
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
@@ -822,37 +747,34 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
 </body>
 </html>
 )rawliteral";
-static const char SD_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH SD Card</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
-    table { width:100%; border-collapse: collapse; margin-top:16px; }
-    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #333; }
+static const char SD_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH SD Card</title>" PH_STYLE
+R"rawliteral(<style>
+    .tablewrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; font-size:0.85em; }
+    th, td { text-align:left; padding:8px 6px; border-bottom:1px solid #333; }
     th { color:#4dd0e1; }
+    td:first-child { word-break:break-all; }
+    td:nth-child(2), td:nth-child(3) { white-space:nowrap; }
     a.dl { color:#4dd0e1; text-decoration:none; }
     #uploadForm { margin-top:20px; background:#111; padding:16px; border-radius:8px; }
-    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
-  </style>
-</head>
-<body>
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>SD Card Files</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <div class="tablewrap">
   <table>
     <thead><tr><th>File</th><th>Size</th><th></th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
+  </div>
   <form id="uploadForm">
     <input type="file" id="fileInput">
     <button type="submit">Upload to SD Card</button>
     <div id="uploadStatus"></div>
   </form>
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     async function refresh() {
       const res = await fetch("/sd/list");
       const files = await res.json();
@@ -878,32 +800,21 @@ static const char SD_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static const char SIM_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Bench Simulator</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; max-width:520px; margin:0 auto; }
-    h1 { font-size: 1.2em; text-align:center; }
+static const char SIM_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Bench Simulator</title>" PH_STYLE
+R"rawliteral(<style>
     .warnbox { background:#2a1f00; border:1px solid #f5a623; border-radius:8px; padding:10px; font-size:0.85em; color:#f5c26b; }
     .statebox { margin:12px 0; padding:10px; border-radius:8px; background:#111; text-align:center; }
     .statebox.on { background:#f5a623; color:#000; font-weight:bold; }
     .btnrow { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
     button { padding:10px 14px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
-    button.danger { background:#F44336; color:#fff; }
     #msg { text-align:center; margin:10px 0; min-height:1.2em; color:#4dd0e1; }
     #msg.bad { color:#ff6b6b; }
     .sl { margin:10px 0; }
     .sl label { display:flex; justify-content:space-between; font-size:0.85em; color:#4dd0e1; }
     .sl input { width:100%; }
-  </style>
-</head>
-<body>
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Bench Simulator</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <div class="warnbox"><strong>This feeds FAKE values</strong> to the gauges, graphs and alerts so you can test with no ECU connected. It switches itself off after 10 minutes without a change, at every reboot, and the moment a real CAN frame arrives. SD logging is paused while it runs, and the round screen and the front page both say SIMULATED.</div>
   <div id="state" class="statebox">Loading...</div>
   <div class="btnrow">
@@ -913,7 +824,10 @@ static const char SIM_HTML[] PROGMEM = R"rawliteral(
   </div>
   <div id="msg"></div>
   <div id="sliders"></div>
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     let info = null;
     let building = "";
     let sending = false;
@@ -1006,30 +920,24 @@ static const char SIM_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Log Channels</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
+static const char LOGCHANS_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Log Channels</title>" PH_STYLE
+R"rawliteral(<style>
     label { display:flex; align-items:center; gap:10px; padding:10px; background:#111; border-radius:6px; margin-bottom:6px; }
-    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin-top:10px; }
+    button { margin-top:10px; }
     #status, #boot { text-align:center; margin-top:10px; color:#4dd0e1; min-height:1.2em; }
-  </style>
-</head>
-<body>
+    #status:empty, #boot:empty { display:none; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Log Channels</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <p style="text-align:center; color:#888; font-size:0.9em;">Choose which signals get written to the SD card log - independent of what's shown on any display. Logging only writes rows once RPM exceeds 800.</p>
   <div id="channels"></div>
   <button onclick="save()">Save</button>
   <div id="status"></div>
   <div id="boot">Page script has not started yet...</div>
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
     document.getElementById("boot").textContent = "";
     let loaded = false;
@@ -1066,26 +974,15 @@ static const char LOGCHANS_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static const char OTA_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MSP-DASH Firmware Update</title>
-  <style>
-    body { background:#000; color:#fff; font-family: sans-serif; margin:0; padding:20px; }
-    h1 { font-size: 1.2em; text-align:center; }
+static const char OTA_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Firmware Update</title>" PH_STYLE
+R"rawliteral(<style>
     #updateForm { margin-top:20px; background:#111; padding:16px; border-radius:8px; }
-    button { padding:10px 16px; background:#4dd0e1; color:#000; border:none; border-radius:6px; }
     #bar { width:100%; background:#222; border-radius:6px; margin-top:10px; height:20px; overflow:hidden; }
     #barFill { height:100%; width:0%; background:#4dd0e1; }
     .warn { color:#ff8800; }
-  </style>
-</head>
-<body>
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
   <h1>Firmware Update (OTA)</h1>
-  <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
   <p id="buildinfo" style="text-align:center;color:#4dd0e1;margin:4px 0">Running build ...</p>
   <p class="warn">Upload the .ino.bin file from your build output. The board reboots automatically on success - do not close this page or power off the board during upload.</p>
   <form id="updateForm">
@@ -1094,7 +991,10 @@ static const char OTA_HTML[] PROGMEM = R"rawliteral(
     <div id="bar"><div id="barFill"></div></div>
     <div id="status"></div>
   </form>
-  <script>
+  
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
     fetch("/status.json").then(r => r.json()).then(st => {
       document.getElementById("buildinfo").textContent = "Running build " + st.build + " (compiled " + st.compiled + ")";
     }).catch(() => { document.getElementById("buildinfo").textContent = ""; });

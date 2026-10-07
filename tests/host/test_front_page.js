@@ -1,8 +1,6 @@
 const fs = require('fs');
-// pull the front page's <script> straight out of the sketch, so this tests exactly what the board serves
-const cpp = fs.readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp', 'utf8');
-const page = cpp.match(/static const char INDEX_HTML\[\] PROGMEM = R"rawliteral\(([\s\S]*?)\)rawliteral";/)[1];
-const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
+// the front page's <script>, exactly as the board serves it
+const script = require('./extract_page.js').pageScript('INDEX_HTML');
 
 // ---- controllable clock and timers ----
 let now = 1000000; const timers = [];

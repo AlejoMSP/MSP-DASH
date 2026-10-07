@@ -1,0 +1,10 @@
+{
+  "name": "msp-dash-host-tests",
+  "private": true,
+  "description": "Dev tools for looking at the board's web pages in a real browser on a PC. Run: npm install, then node layout_check.mjs",
+  "devDependencies": {
+    "@sparticuz/chromium": "*",
+    "puppeteer-core": "*",
+    "ws": "*"
+  }
+}

@@ -77,3 +77,23 @@ for each page, and that a failed save shows the board's own explanation.
   default page layout: demo shows a rev cycle and never alarms, manual oil pressure 20 raises
   the full-screen alert under the SIMULATED banner, and a real CAN frame returns everything to
   "no data". Link `gauge_app.o`, `gauge_config.o`, `simulator.o`, the test and the LVGL objects.
+
+## Looking at the web pages in a real browser
+
+Every page is built from `web_theme.h` (the iPhone-shaped column, header and menu, shared by all pages)
+plus its own content in `web_monitor.cpp`. The compiler joins the pieces, so nothing extra is requested
+over WiFi.
+
+- `extract_page.js` assembles a page exactly as the board serves it
+  (`node extract_page.js SD_HTML > sd.html`). The page tests use it. `SKETCH_DIR=<copy>` points it at a
+  modified copy of the sketch folder.
+- `check_pages_match_compiler.sh` compiles `web_monitor.cpp` with the stand-in libraries, makes the real
+  compiler print each page, and checks `extract_page.js` produced the same bytes.
+- `mock_board.js` is a stand-in for the board's web server with believable data, including the live
+  WebSocket. `node mock_board.js 8080`, then open http://localhost:8080/ (needs `npm install` here first).
+- `layout_check.mjs` opens every page in headless Chrome as a DESKTOP (mouse: `pointer:fine`) and as an
+  iPHONE (touch only: `pointer:coarse`, portrait and sideways), saves screenshots, and fails if: desktop does
+  not show the 430px bezel; a phone shows a bezel at all; anything is wider than the screen; a form field is
+  under 16px (Safari zooms in on it); the shared header/menu is missing; or a script errors. Needs
+  `npm install` in this folder (puppeteer-core, ws, and @sparticuz/chromium, which ships its own headless
+  Chromium; or set CHROME_PATH). Run it with `node layout_check.mjs [screenshot-folder]`.

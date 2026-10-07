@@ -1,10 +1,7 @@
 const fs = require('fs');
 async function load(file, postStatus, postText) {
-  // pull the editor's <script> straight out of the sketch
-  const cpp = fs.readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp', 'utf8');
-  const name = file.includes('GAUGES') ? 'GAUGES_HTML' : 'WEBCFG_HTML';
-  const page = cpp.match(new RegExp('static const char ' + name + '\\[\\] PROGMEM = R"rawliteral\\(([\\s\\S]*?)\\)rawliteral";'))[1];
-  const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
+  // the editor's <script>, exactly as the board serves it
+  const script = require('./extract_page.js').pageScript(file.includes('GAUGES') ? 'GAUGES_HTML' : 'WEBCFG_HTML');
   const els = {}; const posts = [];
   const getEl = id => els[id] || (els[id] = {id, innerHTML:"", textContent:"", value:"#ffffff"});
   global.document = { getElementById: getEl }; global.window = global; global.confirm = () => true;
