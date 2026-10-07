@@ -1649,3 +1649,71 @@ typecheck.sh type-checks the .ino, web_monitor.cpp, sd_logging.cpp and
 ecu_config.cpp against stand-in libraries - the first time those files (including
 the CAN task and /status.json) have been checked before reaching the board; it
 is not a real compile. NOT yet run on the board.
+
+## ROOT CAUSE of "settings don't save": config moved from NVS to flash files (2026-10-06, build 103)
+
+Symptom: /web-config "not saving changes"; earlier, deleted pages on /gauges
+reappeared after a reboot (blamed then on a POST buffer - that was NOT the cause).
+
+**Cause.** Both configurations were stored as ONE string in NVS via
+Preferences::putString(). ESP-IDF's NVS rejects any string longer than
+CHUNK_MAX_SIZE = 32 x (126-1) = 4000 bytes (nvs_page.cpp: ESP_ERR_NVS_VALUE_TOO_LONG).
+gauge_config_save() wrote ALL 8 pages x 4 cells whether used or not - about
+12,000 bytes - so every save was rejected. Arduino's putString only logs an
+error and returns 0, and our code ignored the return value, so the web page
+said "Saved" while nothing was stored; every edit reverted to the defaults on
+reboot. This has been broken since the page/cell redesign (Stage A). Reproduced
+on a PC with a fake NVS that enforces the 4000-byte limit: both configs lost
+their edit after "reboot" (12,255 and 12,149 bytes). The old host test missed it
+because its fake storage had no size limit.
+
+**Fix.**
+- Each config is a JSON file on the board's FAT flash partition (/ffat/
+  cfg_display.json, cfg_web.json). The partition scheme already has a ~9.9MB
+  "ffat" partition that nothing used. Mounted on first use with FFat.begin(true),
+  which formats a blank partition (first boot only, a few seconds). Writes go to
+  "<file>.tmp" then swap into place (FAT cannot rename over a file, so the old
+  one is removed first); the loader falls back to the .tmp if a save was
+  interrupted, and to the defaults if both are unreadable.
+- Only enabled pages and the cells their layout uses are written (default
+  display config 3,013 bytes, default web config 1,600, worst case 13,795).
+- gauge_config_save()/web_save() now return bool and gauge_config_last_error()
+  says why. The POST endpoints answer 200 only if the data was really written,
+  otherwise 500 with the reason ("NOT saved to flash: ... The change is active
+  until the next reboot."), and the editors show that text. /status.json has a
+  "storage" section (mounted, last_error, saved sizes, flash_free).
+- The web editor's success message is now accurate: /web-config needs no reboot
+  (the front page reads the in-memory config), /gauges still needs one for the
+  round display.
+- Small log-channel flags, the ECU choice and the SD session counter stay in NVS
+  (tiny values, never near the limit).
+
+**Also fixed in this change.**
+- JSON <-> config conversion now lives in ONE place (gauge_config_json.h,
+  gauge_config.cpp). The four copies of the cell field list in web_monitor.cpp
+  (two GET, two POST) are gone (about 240 lines removed), so a new setting can no
+  longer be added to some places and forgotten in others. Replacing a config also
+  now clears everything not in the new JSON (stale cells used to survive).
+- Input is sanitized on load: a zero value divisor, a max not above min, zero
+  tick count or major-tick spacing, zero refresh rate, out-of-range signal /
+  gauge type / layout, and colors beyond 24 bits are repaired. This matters now
+  that saves really persist: a bad value that crashed LVGL would otherwise
+  reload at every boot (a boot loop until the flash is erased).
+- Out-of-range enum values are range-checked before being stored in an enum
+  (found by UBSan; storing one is undefined behavior in C++).
+
+**Verified (PC):** 63 + 5 + 3 config checks (normal, partition-won't-mount,
+unwritable folder) under ASan/UBSan, 5 editor-save checks, front page 28; five
+deliberate breakages of the storage code each caught. Board-side type-check now
+includes gauge_config.cpp. FFat.begin's signature (bool, const char*, uint8_t,
+const char*) and freeBytes() were checked against arduino-esp32 3.3.x source.
+
+**Not verified:** nothing has run on the board. One assumption I could not check
+from here: that the Arduino core's prebuilt sdkconfig allows 2 FAT drives
+(CONFIG_FATFS_VOLUME_COUNT, ESP-IDF default 2), which FFat + the SD card need
+together. Check with:
+  Select-String -Path "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp32-arduino-libs\*\esp32s3\sdkconfig" -Pattern "FATFS_VOLUME_COUNT"
+If SD logging stops mounting after this build, that is the first thing to look at.
+
+NOTE: any settings the user believed were saved before this build were never
+saved. After flashing, configure once more.

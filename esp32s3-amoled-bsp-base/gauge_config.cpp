@@ -7,20 +7,24 @@
   essentially the full per-gauge config from before this redesign, now
   scoped per-cell instead of per-page).
 
-  NVS persistence via ArduinoJson, same pattern as before - the whole
-  page/cell array serialized as one JSON string under a single
-  Preferences key.
+  Persistence: each configuration (display, web dashboard) is one JSON file
+  on the board's FAT flash partition - see the Persistence section below for
+  why this is NOT stored in NVS.
 */
 
 #include "gauge_config.h"
+#include "gauge_config_json.h"
 #include "gauge_app.h"
-#include <Preferences.h>
+#include <Preferences.h>   // still used for the small log-channel flags
+#include <FFat.h>
 #include <ArduinoJson.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <cmath>
 #include <Arduino.h>
+#include "esp_heap_caps.h"
 
-static Preferences prefs;
-static Preferences webPrefs;
 static Preferences logPrefs;
 static PageConfig s_pages[MAX_PAGES];
 static PageConfig s_webPages[MAX_PAGES];
@@ -112,7 +116,7 @@ static void applyWebDefaults(void) {
   s_webPages[0].cells[3] = makeCell(true, SIG_AFR, GAUGE_TYPE_NUMBER, 10, 20, 10, "AFR", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 15, true);
 }
 
-static void serializeCell(JsonObject o, CellConfig *c) {
+static void serializeCell(JsonObject o, const CellConfig *c) {
   o["enabled"] = c->enabled;
   o["signal"] = (int)c->signal;
   o["gauge_type"] = (int)c->gauge_type;
@@ -140,8 +144,14 @@ static void serializeCell(JsonObject o, CellConfig *c) {
 
 static void deserializeCell(JsonObject o, CellConfig *c) {
   c->enabled = o["enabled"] | false;
-  c->signal = (SignalId)(int)(o["signal"] | 0);
-  c->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
+  // Read as plain ints and range-check BEFORE converting to the enum types
+  // (storing an out-of-range value in an enum is undefined behavior).
+  int sig = o["signal"] | 0;
+  if (sig < 0 || sig >= SIG_COUNT) sig = SIG_NONE;
+  c->signal = (SignalId)sig;
+  int gtype = o["gauge_type"] | 0;
+  if (gtype < 0 || gtype >= GAUGE_TYPE_COUNT) gtype = GAUGE_TYPE_NEEDLE;
+  c->gauge_type = (GaugeType)gtype;
   c->min_val = o["min"] | 0;
   c->max_val = o["max"] | 100;
   c->rest_val = o["rest"] | 0;
@@ -162,117 +172,209 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->history_sec = o["history_sec"] | 30;
   c->ref_enabled = o["ref_enabled"] | false;
   c->ref_value = o["ref_value"] | 0.0f;
+
+  // Sanitize. The web editor lets anyone type anything, and a config that is
+  // now really saved to flash would otherwise be loaded at EVERY boot: a zero
+  // divisor gives inf/NaN readings, a max not above min or a zero major-tick
+  // spacing would divide by zero inside LVGL - a boot loop until the flash is
+  // erased. Clamp to values the display code can always handle.
+  if (!std::isfinite(c->value_divisor) || c->value_divisor == 0.0f) c->value_divisor = 1.0f;
+  if (c->max_val <= c->min_val) c->max_val = c->min_val + 1;
+  if (c->tick_count < 2) c->tick_count = 2;
+  if (c->tick_count > 200) c->tick_count = 200;
+  if (c->major_nth < 1) c->major_nth = 1;
+  if (c->refresh_hz < 1) c->refresh_hz = 1;
+  if (c->history_sec < 2) c->history_sec = 2;
+  if (c->history_sec > 600) c->history_sec = 600;
+  if (!std::isfinite(c->warning_threshold)) c->warning_threshold = 0.0f;
+  if (!std::isfinite(c->ref_value)) c->ref_value = 0.0f;
+  c->needle_color &= 0xFFFFFF;
+  c->tick_color &= 0xFFFFFF;
+  c->bg_color &= 0xFFFFFF;
 }
 
-void gauge_config_init(void) {
-  prefs.begin("gaugecfg2", false); // new key namespace - old flat-slot format isn't compatible with this nested structure
-  String json = prefs.getString("pages", "");
-
-  if (json.length() == 0) {
-    applyDefaults();
-    return;
+// ---------------------------------------------------------------------------
+// JSON <-> pages (shared by the flash files and the web endpoints)
+// ---------------------------------------------------------------------------
+void gauge_config_pages_to_json(const PageConfig *pages, JsonDocument &doc) {
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < MAX_PAGES; i++) {
+    if (!pages[i].enabled) continue; // disabled pages are not written - the editors already compact the list
+    JsonObject pageObj = arr.add<JsonObject>();
+    pageObj["enabled"] = true;
+    pageObj["layout"] = (int)pages[i].layout;
+    JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
+    int n = gauge_config_cells_for_layout(pages[i].layout);
+    for (int j = 0; j < n; j++) serializeCell(cellsArr.add<JsonObject>(), &pages[i].cells[j]);
   }
+}
 
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, json);
-  if (err) {
-    applyDefaults();
-    return;
-  }
-
-  JsonArray pagesArr = doc.as<JsonArray>();
+void gauge_config_pages_from_json(JsonArray arr, PageConfig *pages) {
+  memset(pages, 0, sizeof(PageConfig) * MAX_PAGES);
   int i = 0;
-  for (JsonObject pageObj : pagesArr) {
+  for (JsonObject pageObj : arr) {
     if (i >= MAX_PAGES) break;
-    s_pages[i].enabled = pageObj["enabled"] | false;
-    s_pages[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
+    pages[i].enabled = pageObj["enabled"] | false;
+    int layout = pageObj["layout"] | 0;
+    if (layout < 0 || layout >= LAYOUT_COUNT) layout = LAYOUT_1CELL;
+    pages[i].layout = (LayoutType)layout;
     JsonArray cellsArr = pageObj["cells"];
     int j = 0;
     for (JsonObject cellObj : cellsArr) {
       if (j >= MAX_CELLS_PER_PAGE) break;
-      deserializeCell(cellObj, &s_pages[i].cells[j]);
+      deserializeCell(cellObj, &pages[i].cells[j]);
       j++;
     }
     i++;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Persistence
+//
+// Each configuration is saved as a JSON FILE on the board's FAT flash
+// partition ("ffat", ~9.9MB, already part of the partition scheme), NOT in
+// NVS. NVS refuses any stored string over 4000 bytes, and a full config is
+// far larger: an earlier version saved all 8 pages x 4 cells (about 12KB) as
+// one NVS string, every save failed silently (Preferences::putString just
+// logs and returns 0, and the return value was ignored), and every edit was
+// lost on reboot. Files have no such limit, and only the pages/cells in use
+// are written. Every save now reports whether it really worked.
+// ---------------------------------------------------------------------------
+#ifndef GAUGE_CFG_DIR
+#define GAUGE_CFG_DIR "/ffat" // the host tests point this at a temp folder
+#endif
+#define CFG_DISPLAY_FILE GAUGE_CFG_DIR "/cfg_display.json"
+#define CFG_WEB_FILE     GAUGE_CFG_DIR "/cfg_web.json"
+#define CFG_MAX_BYTES    65536
+
+static bool s_fsTried = false;
+static bool s_fsOk = false;
+static char s_lastError[96] = "";
+static size_t s_savedBytes[2] = {0, 0};
+
+static void setError(const char *msg) {
+  strlcpy(s_lastError, msg, sizeof(s_lastError));
+  Serial.printf("Config storage: %s\n", msg);
+}
+
+static bool fsEnsure(void) {
+  if (s_fsTried) return s_fsOk;
+  s_fsTried = true;
+  // true = format the partition if it has never been formatted (first boot only; takes a few seconds)
+  s_fsOk = FFat.begin(true, GAUGE_CFG_DIR);
+  if (!s_fsOk) setError("flash filesystem (ffat) failed to mount");
+  return s_fsOk;
+}
+
+// Large temporary buffers go in PSRAM - internal RAM is tight.
+static char *bigAlloc(size_t n) {
+  char *p = (char *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!p) p = (char *)malloc(n);
+  return p;
+}
+
+// Writes data to "<path>.tmp", then swaps it into place. FAT cannot rename over
+// an existing file, so the old file is removed first; if power is lost between
+// those two steps the loader recovers from the .tmp copy.
+static bool writeFileAtomic(const char *path, const char *data, size_t len) {
+  char tmp[80];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE *f = fopen(tmp, "wb");
+  if (!f) { setError("could not create the settings file"); return false; }
+  size_t written = fwrite(data, 1, len, f);
+  bool ok = (written == len) && (fflush(f) == 0);
+  if (fclose(f) != 0) ok = false;
+  if (!ok) { remove(tmp); setError("writing the settings file failed (flash full?)"); return false; }
+  remove(path);
+  if (rename(tmp, path) != 0) { setError("could not move the settings file into place"); return false; }
+  return true;
+}
+
+// Reads a whole file into a PSRAM buffer (caller frees). NULL if missing, empty or implausibly big.
+static char *readWholeFile(const char *path, size_t *outLen) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return NULL;
+  fseek(f, 0, SEEK_END);
+  long n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (n <= 0 || n > CFG_MAX_BYTES) { fclose(f); return NULL; }
+  char *buf = bigAlloc((size_t)n + 1);
+  if (!buf) { fclose(f); return NULL; }
+  size_t got = fread(buf, 1, (size_t)n, f);
+  fclose(f);
+  if (got != (size_t)n) { free(buf); return NULL; }
+  buf[n] = '\0';
+  *outLen = (size_t)n;
+  return buf;
+}
+
+// Loads the first readable, valid copy: the file itself, else the ".tmp" left
+// by an interrupted save. Returns false (and leaves `pages` untouched) if
+// neither exists or parses - the caller then uses defaults.
+static bool loadConfig(const char *path, PageConfig *pages) {
+  if (!fsEnsure()) return false;
+  char tmp[80];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  const char *candidates[2] = { path, tmp };
+  for (int c = 0; c < 2; c++) {
+    size_t len = 0;
+    char *buf = readWholeFile(candidates[c], &len);
+    if (!buf) continue;
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, buf, len);
+    free(buf);
+    if (err || !doc.is<JsonArray>()) {
+      Serial.printf("Config storage: %s is not valid (%s), skipping it\n", candidates[c], err ? err.c_str() : "not a list");
+      continue;
+    }
+    gauge_config_pages_from_json(doc.as<JsonArray>(), pages);
+    return true;
+  }
+  return false;
+}
+
+static bool saveConfig(const char *path, const PageConfig *pages, int slot) {
+  if (!fsEnsure()) return false;
+  JsonDocument doc;
+  gauge_config_pages_to_json(pages, doc);
+  size_t need = measureJson(doc);
+  char *buf = bigAlloc(need + 1);
+  if (!buf) { setError("out of memory while saving"); return false; }
+  serializeJson(doc, buf, need + 1);
+  bool ok = writeFileAtomic(path, buf, need);
+  free(buf);
+  if (ok) { s_savedBytes[slot] = need; s_lastError[0] = '\0'; }
+  return ok;
+}
+
+void gauge_config_init(void) {
+  if (!loadConfig(CFG_DISPLAY_FILE, s_pages)) applyDefaults();
 }
 
 PageConfig *gauge_config_get_pages(void) {
   return s_pages;
 }
 
-void gauge_config_save(void) {
-  JsonDocument doc;
-  JsonArray pagesArr = doc.to<JsonArray>();
-  for (int i = 0; i < MAX_PAGES; i++) {
-    JsonObject pageObj = pagesArr.add<JsonObject>();
-    pageObj["enabled"] = s_pages[i].enabled;
-    pageObj["layout"] = (int)s_pages[i].layout;
-    JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
-    for (int j = 0; j < MAX_CELLS_PER_PAGE; j++) {
-      JsonObject cellObj = cellsArr.add<JsonObject>();
-      serializeCell(cellObj, &s_pages[i].cells[j]);
-    }
-  }
-  String out;
-  serializeJson(doc, out);
-  prefs.putString("pages", out);
+bool gauge_config_save(void) {
+  return saveConfig(CFG_DISPLAY_FILE, s_pages, 0);
 }
 
 void gauge_config_web_init(void) {
-  webPrefs.begin("webcfg2", false);
-  String json = webPrefs.getString("pages", "");
-
-  if (json.length() == 0) {
-    applyWebDefaults();
-    return;
-  }
-
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, json);
-  if (err) {
-    applyWebDefaults();
-    return;
-  }
-
-  JsonArray pagesArr = doc.as<JsonArray>();
-  int i = 0;
-  for (JsonObject pageObj : pagesArr) {
-    if (i >= MAX_PAGES) break;
-    s_webPages[i].enabled = pageObj["enabled"] | false;
-    s_webPages[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
-    JsonArray cellsArr = pageObj["cells"];
-    int j = 0;
-    for (JsonObject cellObj : cellsArr) {
-      if (j >= MAX_CELLS_PER_PAGE) break;
-      deserializeCell(cellObj, &s_webPages[i].cells[j]);
-      j++;
-    }
-    i++;
-  }
+  if (!loadConfig(CFG_WEB_FILE, s_webPages)) applyWebDefaults();
 }
 
 PageConfig *gauge_config_get_web_pages(void) {
   return s_webPages;
 }
 
-void gauge_config_web_save(void) {
-  JsonDocument doc;
-  JsonArray pagesArr = doc.to<JsonArray>();
-  for (int i = 0; i < MAX_PAGES; i++) {
-    JsonObject pageObj = pagesArr.add<JsonObject>();
-    pageObj["enabled"] = s_webPages[i].enabled;
-    pageObj["layout"] = (int)s_webPages[i].layout;
-    JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
-    for (int j = 0; j < MAX_CELLS_PER_PAGE; j++) {
-      JsonObject cellObj = cellsArr.add<JsonObject>();
-      serializeCell(cellObj, &s_webPages[i].cells[j]);
-    }
-  }
-  String out;
-  serializeJson(doc, out);
-  webPrefs.putString("pages", out);
+bool gauge_config_web_save(void) {
+  return saveConfig(CFG_WEB_FILE, s_webPages, 1);
 }
+
+bool gauge_config_storage_ok(void) { return s_fsOk; }
+const char *gauge_config_last_error(void) { return s_lastError; }
+size_t gauge_config_saved_bytes(int which) { return (which == 0 || which == 1) ? s_savedBytes[which] : 0; }
 
 const char *gauge_config_signal_name(SignalId sig) {
   switch (sig) {

@@ -1,15 +1,21 @@
 #pragma once
 #include <string>
 #include <map>
+#include <cstdio>
 #include <cstdint>
+// Fake NVS. It enforces the REAL ESP-IDF rule - a stored string may not exceed 4000 bytes - and, like
+// Arduino's Preferences::putString, reports a rejected write by returning 0. Nothing large belongs here.
 class Preferences {
   static std::map<std::string, std::string> &store() { static std::map<std::string, std::string> m; return m; }
   std::string ns;
 public:
   bool begin(const char *n, bool = false) { ns = n; return true; }
   std::string getString(const char *k, const char *def = "") { auto it = store().find(ns + "/" + k); return it == store().end() ? std::string(def) : it->second; }
-  size_t putString(const char *k, const std::string &v) { store()[ns + "/" + k] = v; return v.size(); }
-  bool getBool(const char *k, bool def) { return def; } size_t putBool(const char *, bool) { return 1; }
+  size_t putString(const char *k, const std::string &v) {
+    if (v.size() > 4000) { printf("   [NVS] putString(%s) REJECTED: %zu bytes > 4000\n", k, v.size()); return 0; }
+    store()[ns + "/" + k] = v; return v.size(); }
+  bool getBool(const char *k, bool def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : it->second == "1"; }
+  size_t putBool(const char *k, bool v) { store()[ns + "/" + k] = v ? "1" : "0"; return 1; }
   uint8_t getUChar(const char *, uint8_t def) { return def; } size_t putUChar(const char *, uint8_t) { return 1; }
   int getInt(const char *, int def) { return def; } size_t putInt(const char *, int) { return 1; }
 };

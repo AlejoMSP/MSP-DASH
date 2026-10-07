@@ -33,7 +33,9 @@
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 #include "esp_heap_caps.h"
 #include "driver/twai.h"
+#include <FFat.h>
 #include "build_info.h"
+#include "gauge_config_json.h"
 
 static const char FW_COMPILED[] = __DATE__ " " __TIME__; // when THIS file was compiled - changes on every rebuild
 
@@ -47,6 +49,46 @@ static char *allocPostBuf(size_t n) {
   char *p = (char *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!p) p = (char *)malloc(n); // no PSRAM available - fall back to the normal heap
   return p;
+}
+
+// ---- Saving settings posted by the /gauges and /web-config editors ----
+// The answer to the browser is the REAL outcome: 200 only if the settings
+// were written to flash, otherwise 500 with the reason, which the page shows.
+// (The page used to say "Saved" no matter what happened.)
+#define CONFIG_POST_MAX 24576  // 8 pages x 4 cells of settings is ~16KB of JSON
+
+struct SaveResult { bool ok; char msg[128]; };
+static SaveResult s_displaySave = { true, "" };
+static SaveResult s_webSave = { true, "" };
+
+static void applyConfigBody(const char *body, size_t total, bool isWeb) {
+  SaveResult &res = isWeb ? s_webSave : s_displaySave;
+  res.ok = false;
+  Serial.printf("%s config POST: %u bytes\n", isWeb ? "Web dashboard" : "Display", (unsigned)total);
+  if (total >= CONFIG_POST_MAX) {
+    snprintf(res.msg, sizeof(res.msg), "Settings too large (%u bytes, limit %u)", (unsigned)total, (unsigned)CONFIG_POST_MAX);
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body, total);
+  if (err) {
+    snprintf(res.msg, sizeof(res.msg), "The board could not read the settings (%s)", err.c_str());
+    Serial.println(res.msg);
+    return;
+  }
+  if (!doc.is<JsonArray>()) {
+    strlcpy(res.msg, "The settings were not a list of pages", sizeof(res.msg));
+    return;
+  }
+  gauge_config_pages_from_json(doc.as<JsonArray>(), isWeb ? gauge_config_get_web_pages() : gauge_config_get_pages());
+  bool saved = isWeb ? gauge_config_web_save() : gauge_config_save();
+  if (saved) {
+    res.ok = true;
+    res.msg[0] = '\0';
+  } else {
+    snprintf(res.msg, sizeof(res.msg), "NOT saved to flash: %s. The change is active until the next reboot.", gauge_config_last_error());
+    Serial.println(res.msg);
+  }
 }
 
 #define SD_MOUNT_POINT "/sd_card"
@@ -525,8 +567,8 @@ static const char GAUGES_HTML[] PROGMEM = R"rawliteral(
       document.getElementById("status").textContent = "Saving...";
       try {
         const r = await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
-        if (!r.ok) throw new Error("board returned " + r.status);
-        document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+        if (!r.ok) throw new Error((await r.text()) || ("board returned " + r.status));
+        document.getElementById("status").textContent = "Saved to the board's flash. Reboot the board to apply it to the round display.";
       } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
 
@@ -747,8 +789,8 @@ static const char WEBCFG_HTML[] PROGMEM = R"rawliteral(
       document.getElementById("status").textContent = "Saving...";
       try {
         const r = await fetch("/web-pages", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
-        if (!r.ok) throw new Error("board returned " + r.status);
-        document.getElementById("status").textContent = "Saved. Reboot the board to apply changes.";
+        if (!r.ok) throw new Error((await r.text()) || ("board returned " + r.status));
+        document.getElementById("status").textContent = "Saved to the board's flash. Open the front page to see it - no reboot needed.";
       } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
 
@@ -1137,6 +1179,13 @@ void web_monitor_init(void) {
       can["state"] = "driver not installed";
     }
 
+    JsonObject store = doc["storage"].to<JsonObject>();
+    store["mounted"] = gauge_config_storage_ok();
+    store["last_error"] = gauge_config_last_error();
+    store["display_cfg_bytes"] = (uint32_t)gauge_config_saved_bytes(0);
+    store["web_cfg_bytes"] = (uint32_t)gauge_config_saved_bytes(1);
+    store["flash_free"] = (uint32_t)FFat.freeBytes();
+
     JsonArray sigs = doc["signals"].to<JsonArray>();
     for (int sig = 1; sig < SIG_COUNT; sig++) {
       JsonObject o = sigs.add<JsonObject>();
@@ -1166,44 +1215,8 @@ void web_monitor_init(void) {
   });
 
   server.on("/web-pages.json", HTTP_GET, [](AsyncWebServerRequest *request) {
-    PageConfig *pageConfigs = gauge_config_get_web_pages();
     JsonDocument doc;
-    JsonArray pagesArr = doc.to<JsonArray>();
-    for (int i = 0; i < MAX_PAGES; i++) {
-      if (!pageConfigs[i].enabled) continue;
-      JsonObject pageObj = pagesArr.add<JsonObject>();
-      pageObj["enabled"] = pageConfigs[i].enabled;
-      pageObj["layout"] = (int)pageConfigs[i].layout;
-      JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
-      int numCells = gauge_config_cells_for_layout(pageConfigs[i].layout);
-      for (int c = 0; c < numCells; c++) {
-        CellConfig *cell = &pageConfigs[i].cells[c];
-        JsonObject o = cellsArr.add<JsonObject>();
-        o["enabled"] = cell->enabled;
-        o["signal"] = (int)cell->signal;
-        o["gauge_type"] = (int)cell->gauge_type;
-        o["min"] = cell->min_val;
-        o["max"] = cell->max_val;
-        o["rest"] = cell->rest_val;
-        o["caption"] = cell->caption;
-        o["needle_color"] = cell->needle_color;
-        o["tick_color"] = cell->tick_color;
-        o["bg_color"] = cell->bg_color;
-        o["value_divisor"] = cell->value_divisor;
-        o["tick_count"] = cell->tick_count;
-        o["major_nth"] = cell->major_nth;
-        o["refresh_hz"] = cell->refresh_hz;
-        o["show_value"] = cell->show_value;
-        o["value_font_size"] = cell->value_font_size;
-        o["has_warning"] = cell->has_warning;
-        o["warning_threshold"] = cell->warning_threshold;
-        o["warning_above"] = cell->warning_above;
-        o["alert_fullscreen"] = cell->alert_fullscreen;
-        o["history_sec"] = cell->history_sec;
-        o["ref_enabled"] = cell->ref_enabled;
-        o["ref_value"] = cell->ref_value;
-      }
-    }
+    gauge_config_pages_to_json(gauge_config_get_web_pages(), doc);
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
@@ -1211,73 +1224,23 @@ void web_monitor_init(void) {
 
   server.on("/web-pages", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      request->send(200, "text/plain", "OK");
+      // Runs after the whole body has been received and handled below, so the
+      // answer can say whether the settings were REALLY saved.
+      request->send(s_webSave.ok ? 200 : 500, "text/plain", s_webSave.ok ? "OK" : s_webSave.msg);
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static const size_t webBodyBufSize = 24576;
-      static char *webBodyBuf = NULL;
-      if (!webBodyBuf) webBodyBuf = allocPostBuf(webBodyBufSize);
-      if (!webBodyBuf) return; // out of memory - drop this save rather than crash
-      if (index == 0) memset(webBodyBuf, 0, webBodyBufSize);
-      if (index + len < webBodyBufSize) {
-        memcpy(webBodyBuf + index, data, len);
+      static char *buf = NULL;
+      if (!buf) buf = allocPostBuf(CONFIG_POST_MAX);
+      if (index == 0) {
+        s_webSave.ok = false;
+        strlcpy(s_webSave.msg, "The board did not finish receiving the settings", sizeof(s_webSave.msg));
       }
+      if (!buf) { strlcpy(s_webSave.msg, "Out of memory on the board", sizeof(s_webSave.msg)); return; }
+      if (index + len < CONFIG_POST_MAX) memcpy(buf + index, data, len);
       if (index + len == total) {
-        Serial.printf("Web dashboard config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)webBodyBufSize);
-        if (total >= webBodyBufSize) {
-          Serial.println("WARNING: POST body may have been truncated - buffer too small!");
-        }
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, webBodyBuf);
-        if (err) {
-          Serial.printf("Web dashboard config JSON parse FAILED: %s\n", err.c_str());
-        }
-        if (!err) {
-          PageConfig *pageConfigs = gauge_config_get_web_pages();
-          JsonArray pagesArr = doc.as<JsonArray>();
-          int i = 0;
-          for (JsonObject pageObj : pagesArr) {
-            if (i >= MAX_PAGES) break;
-            pageConfigs[i].enabled = pageObj["enabled"] | false;
-            pageConfigs[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
-            JsonArray cellsArr = pageObj["cells"];
-            int c = 0;
-            for (JsonObject o : cellsArr) {
-              if (c >= MAX_CELLS_PER_PAGE) break;
-              CellConfig *cell = &pageConfigs[i].cells[c];
-              cell->enabled = o["enabled"] | false;
-              cell->signal = (SignalId)(int)(o["signal"] | 0);
-              cell->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
-              cell->min_val = o["min"] | 0;
-              cell->max_val = o["max"] | 100;
-              cell->rest_val = o["rest"] | 0;
-              strlcpy(cell->caption, (o["caption"] | ""), GAUGE_CAPTION_MAXLEN);
-              cell->needle_color = (uint32_t)(long)(o["needle_color"] | 0xFFFFFF);
-              cell->tick_color = (uint32_t)(long)(o["tick_color"] | 0xFFFFFF);
-              cell->bg_color = (uint32_t)(long)(o["bg_color"] | 0x000000);
-              cell->value_divisor = o["value_divisor"] | 1.0f;
-              cell->tick_count = o["tick_count"] | 26;
-              cell->major_nth = o["major_nth"] | 5;
-              cell->refresh_hz = o["refresh_hz"] | 10;
-              cell->show_value = o["show_value"] | false;
-              cell->value_font_size = o["value_font_size"] | 28;
-              cell->has_warning = o["has_warning"] | false;
-              cell->warning_threshold = o["warning_threshold"] | 0.0f;
-              cell->warning_above = o["warning_above"] | false;
-              cell->alert_fullscreen = o["alert_fullscreen"] | false;
-              cell->history_sec = o["history_sec"] | 30;
-              cell->ref_enabled = o["ref_enabled"] | false;
-              cell->ref_value = o["ref_value"] | 0.0f;
-              c++;
-            }
-            i++;
-          }
-          for (; i < MAX_PAGES; i++) {
-            pageConfigs[i].enabled = false;
-          }
-          gauge_config_web_save();
-        }
+        if (total < CONFIG_POST_MAX) buf[total] = '\0';
+        applyConfigBody(buf, total, true);
       }
     }
   );
@@ -1298,44 +1261,8 @@ void web_monitor_init(void) {
   });
 
   server.on("/gauges.json", HTTP_GET, [](AsyncWebServerRequest *request) {
-    PageConfig *pageConfigs = gauge_config_get_pages();
     JsonDocument doc;
-    JsonArray pagesArr = doc.to<JsonArray>();
-    for (int i = 0; i < MAX_PAGES; i++) {
-      if (!pageConfigs[i].enabled) continue;
-      JsonObject pageObj = pagesArr.add<JsonObject>();
-      pageObj["enabled"] = pageConfigs[i].enabled;
-      pageObj["layout"] = (int)pageConfigs[i].layout;
-      JsonArray cellsArr = pageObj["cells"].to<JsonArray>();
-      int numCells = gauge_config_cells_for_layout(pageConfigs[i].layout);
-      for (int c = 0; c < numCells; c++) {
-        CellConfig *cell = &pageConfigs[i].cells[c];
-        JsonObject o = cellsArr.add<JsonObject>();
-        o["enabled"] = cell->enabled;
-        o["signal"] = (int)cell->signal;
-        o["gauge_type"] = (int)cell->gauge_type;
-        o["min"] = cell->min_val;
-        o["max"] = cell->max_val;
-        o["rest"] = cell->rest_val;
-        o["caption"] = cell->caption;
-        o["needle_color"] = cell->needle_color;
-        o["tick_color"] = cell->tick_color;
-        o["bg_color"] = cell->bg_color;
-        o["value_divisor"] = cell->value_divisor;
-        o["tick_count"] = cell->tick_count;
-        o["major_nth"] = cell->major_nth;
-        o["refresh_hz"] = cell->refresh_hz;
-        o["show_value"] = cell->show_value;
-        o["value_font_size"] = cell->value_font_size;
-        o["has_warning"] = cell->has_warning;
-        o["warning_threshold"] = cell->warning_threshold;
-        o["warning_above"] = cell->warning_above;
-        o["alert_fullscreen"] = cell->alert_fullscreen;
-        o["history_sec"] = cell->history_sec;
-        o["ref_enabled"] = cell->ref_enabled;
-        o["ref_value"] = cell->ref_value;
-      }
-    }
+    gauge_config_pages_to_json(gauge_config_get_pages(), doc);
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
@@ -1347,81 +1274,23 @@ void web_monitor_init(void) {
   // cells x ~250 bytes/cell is comfortably under 8KB.
   server.on("/gauges", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      request->send(200, "text/plain", "OK - reboot to apply");
+      // Runs after the whole body has been received and handled below, so the
+      // answer can say whether the settings were REALLY saved.
+      request->send(s_displaySave.ok ? 200 : 500, "text/plain", s_displaySave.ok ? "OK" : s_displaySave.msg);
     },
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      // Sized generously: 8 pages x 4 cells x ~18 fields/cell can
-      // genuinely exceed 8KB once multi-cell layouts (2x2 etc) are in
-      // use - the old 8192 buffer silently truncated larger payloads,
-      // causing deserializeJson() to fail and the whole save to be
-      // silently dropped (looked like "nothing happened", including
-      // deletes never actually persisting).
-      static const size_t bodyBufSize = 24576;
-      static char *bodyBuf = NULL;
-      if (!bodyBuf) bodyBuf = allocPostBuf(bodyBufSize);
-      if (!bodyBuf) return; // out of memory - drop this save rather than crash
-      if (index == 0) memset(bodyBuf, 0, bodyBufSize);
-      if (index + len < bodyBufSize) {
-        memcpy(bodyBuf + index, data, len);
+      static char *buf = NULL;
+      if (!buf) buf = allocPostBuf(CONFIG_POST_MAX);
+      if (index == 0) {
+        s_displaySave.ok = false;
+        strlcpy(s_displaySave.msg, "The board did not finish receiving the settings", sizeof(s_displaySave.msg));
       }
+      if (!buf) { strlcpy(s_displaySave.msg, "Out of memory on the board", sizeof(s_displaySave.msg)); return; }
+      if (index + len < CONFIG_POST_MAX) memcpy(buf + index, data, len);
       if (index + len == total) {
-        Serial.printf("Gauge config POST: total body size %u bytes (buffer is %u)\n", (unsigned)total, (unsigned)bodyBufSize);
-        if (total >= bodyBufSize) {
-          Serial.println("WARNING: POST body may have been truncated - buffer too small!");
-        }
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, bodyBuf);
-        if (err) {
-          Serial.printf("Gauge config JSON parse FAILED: %s\n", err.c_str());
-        }
-        if (!err) {
-          PageConfig *pageConfigs = gauge_config_get_pages();
-          JsonArray pagesArr = doc.as<JsonArray>();
-          int i = 0;
-          for (JsonObject pageObj : pagesArr) {
-            if (i >= MAX_PAGES) break;
-            pageConfigs[i].enabled = pageObj["enabled"] | false;
-            pageConfigs[i].layout = (LayoutType)(int)(pageObj["layout"] | 0);
-            JsonArray cellsArr = pageObj["cells"];
-            int c = 0;
-            for (JsonObject o : cellsArr) {
-              if (c >= MAX_CELLS_PER_PAGE) break;
-              CellConfig *cell = &pageConfigs[i].cells[c];
-              cell->enabled = o["enabled"] | false;
-              cell->signal = (SignalId)(int)(o["signal"] | 0);
-              cell->gauge_type = (GaugeType)(int)(o["gauge_type"] | 0);
-              cell->min_val = o["min"] | 0;
-              cell->max_val = o["max"] | 100;
-              cell->rest_val = o["rest"] | 0;
-              strlcpy(cell->caption, (o["caption"] | ""), GAUGE_CAPTION_MAXLEN);
-              cell->needle_color = (uint32_t)(long)(o["needle_color"] | 0xFFFFFF);
-              cell->tick_color = (uint32_t)(long)(o["tick_color"] | 0xFFFFFF);
-              cell->bg_color = (uint32_t)(long)(o["bg_color"] | 0x000000);
-              cell->value_divisor = o["value_divisor"] | 1.0f;
-              cell->tick_count = o["tick_count"] | 26;
-              cell->major_nth = o["major_nth"] | 5;
-              cell->refresh_hz = o["refresh_hz"] | 10;
-              cell->show_value = o["show_value"] | false;
-              cell->value_font_size = o["value_font_size"] | 28;
-              cell->has_warning = o["has_warning"] | false;
-              cell->warning_threshold = o["warning_threshold"] | 0.0f;
-              cell->warning_above = o["warning_above"] | false;
-              cell->alert_fullscreen = o["alert_fullscreen"] | false;
-              cell->history_sec = o["history_sec"] | 30;
-              cell->ref_enabled = o["ref_enabled"] | false;
-              cell->ref_value = o["ref_value"] | 0.0f;
-              c++;
-            }
-            i++;
-          }
-          // Any remaining page slots beyond what was POSTed are disabled -
-          // handles the case where pages were deleted in the UI.
-          for (; i < MAX_PAGES; i++) {
-            pageConfigs[i].enabled = false;
-          }
-          gauge_config_save();
-        }
+        if (total < CONFIG_POST_MAX) buf[total] = '\0';
+        applyConfigBody(buf, total, false);
       }
     }
   );

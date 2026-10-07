@@ -10,16 +10,24 @@ caught real mistakes while the full-screen alert was being written.
   with LV_COLOR_16_SWAP=1, LV_MEM_CUSTOM=1, Montserrat 14/28/36/48 enabled) and
   stubs for the 6 functions gauge_app.c expects from other files (they are
   defined at the top of the test).
-- `test_gauge_config.cpp`: signal staleness timeout and persistence of the
-  per-cell settings, using the real ArduinoJson (v7) and the fake
-  `Arduino.h` / `Preferences.h` here.
+- `test_gauge_config.cpp`: the real `gauge_config.cpp` with a fake clock, a temp
+  folder standing in for the flash filesystem, and a fake NVS (`stubs/Preferences.h`)
+  that enforces ESP-IDF's real rule that a stored string may not exceed 4000 bytes.
+  Covers saving/reloading (default and worst-case 8x4 configs), crash recovery between
+  the steps of a save, corrupt files, hostile values, and storage that will not mount.
+  It exists because an earlier version stored the config as one NVS string, every save
+  failed silently on the board, and an unlimited fake in the old test let it pass.
 
 Build lines used (AddressSanitizer + UBSan on):
 
     gcc -O1 -g -fsanitize=address,undefined -I<lvgl> -I<sketch> \
         <sketch>/gauge_app.c test_gauge_app.c <lvgl objects> -o t -lm
-    g++ -std=c++17 -O1 -g -fsanitize=address,undefined -I. -I<ArduinoJson>/src \
-        -I<sketch> <sketch>/gauge_config.cpp test_gauge_config.cpp -o t2
+    mkdir /tmp/cfgtest
+    g++ -std=c++17 -O1 -g -fsanitize=address,undefined -Istubs -I<ArduinoJson>/src \
+        -I<sketch> -DGAUGE_CFG_DIR='"/tmp/cfgtest"' <sketch>/gauge_config.cpp \
+        test_gauge_config.cpp -o t2
+    # failure paths: build again with -DGAUGE_CFG_DIR='"/nonexistent/dir"' and run
+    #   ./t2_bad mountfail   and   ./t2_bad baddir
 
 ## Seeing what LVGL draws
 
@@ -47,3 +55,6 @@ TWAI field name, a helper's arguments and the CAN task were each caught.
 `test_front_page.js` (run with `node`) pulls the front page's script straight out
 of `web_monitor.cpp` and drives it with a fake WebSocket and a controllable clock:
 status messages, reconnect backoff, the silence watchdog, recovery.
+
+`test_editor_save.js` checks the /gauges and /web-config Save buttons: success wording
+for each page, and that a failed save shows the board's own explanation.

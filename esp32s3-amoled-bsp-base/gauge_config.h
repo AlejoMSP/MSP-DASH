@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,17 +107,33 @@ PageConfig *gauge_config_get_pages(void);
 // cluster. ----
 void gauge_config_web_init(void);
 PageConfig *gauge_config_get_web_pages(void);
-void gauge_config_web_save(void);
+bool gauge_config_web_save(void);
 
 // How many cells a given layout actually uses (1/2/3/4).
 int gauge_config_cells_for_layout(LayoutType layout);
 
-// Saves the current in-memory page/cell array to NVS. Note: page
-// add/delete/empty/copy for BOTH configs is handled entirely
-// client-side in the /gauges and /web-config editors (the whole
-// array is just re-POSTed on Save) - there's no server-side
-// per-action API for this.
-void gauge_config_save(void);
+// Saves the current in-memory page/cell array to flash. Returns true only
+// if the data was really written; on failure gauge_config_last_error()
+// says why. Note: page add/delete/empty/copy for BOTH configs is handled
+// entirely client-side in the /gauges and /web-config editors (the whole
+// array is just re-POSTed on Save) - there's no server-side per-action API
+// for this.
+//
+// Where it is stored: JSON files on the board's FAT flash partition
+// ("ffat", ~9.9MB), NOT in NVS. NVS refuses any stored string over 4000
+// bytes, and a full config is several times that - an earlier version
+// saved everything as one NVS string, every save failed silently, and
+// every edit was lost on reboot.
+bool gauge_config_save(void);
+
+// True once the flash filesystem has mounted (it is mounted on first use).
+bool gauge_config_storage_ok(void);
+
+// Why the last load/save failed ("" if the last operation succeeded).
+const char *gauge_config_last_error(void);
+
+// Size in bytes of the last successful save: 0 = display config, 1 = web config.
+size_t gauge_config_saved_bytes(int which);
 
 // Human-readable signal name, for the web UI's sensor picker.
 const char *gauge_config_signal_name(SignalId sig);
