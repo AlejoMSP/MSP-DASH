@@ -45,6 +45,7 @@
 #include "sd_logging.h"
 #include "can_parsing.h"
 #include "page_button.h"
+#include "build_info.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available).
 // These are this board's dedicated UART0 pins, which Serial defaults
@@ -57,6 +58,7 @@
 void setup()
 {
   Serial.begin(115200);
+  Serial.printf("\nMSP-DASH build %d, compiled %s %s\n", FW_BUILD_NUMBER, __DATE__, __TIME__);
   pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
 
   ecu_config_init();

@@ -32,6 +32,10 @@
 #include <Update.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 #include "esp_heap_caps.h"
+#include "driver/twai.h"
+#include "build_info.h"
+
+static const char FW_COMPILED[] = __DATE__ " " __TIME__; // when THIS file was compiled - changes on every rebuild
 
 // POST body buffers live in PSRAM, allocated once on first use. They used
 // to be static arrays - 51KB of internal RAM held permanently, on top of
@@ -87,7 +91,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
 
     .topbar { display:flex; align-items:center; justify-content:space-between; padding:16px; }
-    .topbar h1 { font-size:1.1em; margin:0; }
+    .topbar h1 { font-size:1.1em; }
     .hamburger { background:none; border:1px solid #444; color:#fff; font-size:1.3em; padding:2px 10px; border-radius:6px; }
     .navmenu { display:none; flex-direction:column; background:#111; border-radius:8px; padding:10px; margin:0 16px 10px; }
     .navmenu.open { display:flex; }
@@ -108,12 +112,22 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; }
     .dcell .warn { color:#ff4444; }
     .empty-msg { padding:20px; text-align:center; color:#888; }
+    .titleblock h1 { margin:0; }
+    .build { font-size:0.68em; color:#777; margin-top:2px; }
+    .statusline { display:flex; align-items:center; gap:8px; padding:0 16px 8px; font-size:0.78em; color:#aaa; }
+    #dot { width:10px; height:10px; border-radius:50%; background:#666; flex:none; }
+    #dot.st-ok { background:#2ecc71; }
+    #dot.st-warn { background:#f5a623; }
+    #dot.st-bad { background:#e74c3c; }
   </style>
 </head>
 <body>
   <div class="phone-outer">
     <div class="topbar">
-      <h1>MSP-DASH</h1>
+      <div class="titleblock">
+        <h1>MSP-DASH</h1>
+        <div class="build" id="build">build ...</div>
+      </div>
       <button class="hamburger" onclick="document.getElementById('navmenu').classList.toggle('open')">&#9776;</button>
     </div>
     <div class="navmenu" id="navmenu">
@@ -128,6 +142,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <button onclick="changeWebPage(-1)">&larr; Prev</button>
       <button onclick="changeWebPage(1)">Next &rarr;</button>
     </div>
+    <div class="statusline"><span id="dot"></span><span id="stext">Connecting...</span></div>
     <div class="cellgrid" id="cellgrid"></div>
   </div>
 
@@ -139,7 +154,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const LAYOUT_CLASSES = ["layout-1", "layout-2up", "layout-3up", "layout-2x2"];
     let webPages = [];
     let currentWebPage = 0;
-    let signalValues = {};
+    let signalValues = {};      // signals that currently have live data, keyed by signal id
+    let live = { fps: 0, ids: 0 };
+    let ws = null;
+    let lastMsg = 0;            // when the last message arrived (0 = none since this connection opened)
+    let retryMs = 1000;
 
     function render() {
       const grid = document.getElementById("cellgrid");
@@ -166,18 +185,92 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
       render();
     }
 
-    async function loadPages() {
-      const res = await fetch("/web-pages.json");
-      webPages = await res.json();
-      render();
+    // The status line says WHY the numbers are or aren't updating, instead of
+    // leaving "--" to mean five different things.
+    function setStatus(cls, text) {
+      document.getElementById("dot").className = cls;
+      document.getElementById("stext").textContent = text;
     }
 
-    const ws = new WebSocket("ws://" + location.host + "/ws");
-    ws.onmessage = (event) => {
-      signalValues = JSON.parse(event.data);
-      render();
-    };
+    function updateStatus() {
+      if (!ws || ws.readyState === 3 || ws.readyState === 2) { setStatus("st-bad", "Disconnected - retrying..."); return; }
+      if (ws.readyState === 0) { setStatus("st-warn", "Connecting..."); return; }
+      if (lastMsg === 0) { setStatus("st-warn", "Connected - waiting for the first update..."); return; }
+      const age = Date.now() - lastMsg;
+      if (age > 3000) { setStatus("st-warn", "No updates from the board for " + Math.round(age / 1000) + "s"); return; }
+      const n = Object.keys(signalValues).length;
+      if (n > 0) setStatus("st-ok", "Live - " + n + " signal" + (n === 1 ? "" : "s") + " - CAN " + live.fps + " frames/s");
+      else if (live.fps === 0) setStatus("st-warn", "Connected, but no CAN frames are arriving (check CAN wiring and ECU power)");
+      else setStatus("st-warn", "CAN frames arriving (" + live.fps + "/s) but none decoded - check the ECU type");
+    }
 
+    // Opens the live connection, and reopens it whenever it drops. It used
+    // to open once and never retry, so one dropped connection left the page
+    // on "--" forever with no sign anything was wrong.
+    function connect() {
+      if (ws && ws.readyState <= 1) return;           // already connecting or open
+      const sock = new WebSocket("ws://" + location.host + "/ws");
+      ws = sock;
+      lastMsg = 0;
+      sock.onopen = () => { retryMs = 1000; updateStatus(); };
+      sock.onmessage = (event) => {
+        let m;
+        try { m = JSON.parse(event.data); } catch (e) { return; }
+        lastMsg = Date.now();
+        signalValues = m.v || {};
+        live.fps = m.fps || 0;
+        live.ids = m.ids || 0;
+        render();
+        updateStatus();
+      };
+      sock.onclose = () => {
+        if (ws === sock) ws = null;
+        signalValues = {};          // no connection means we don't know the values: show "--", not frozen numbers
+        render();
+        updateStatus();
+        setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 2, 5000);
+      };
+      sock.onerror = () => { try { sock.close(); } catch (e) {} };
+      updateStatus();
+    }
+
+    // Once a second: refresh the status text, and drop a connection that is
+    // "open" but has gone silent (the board broadcasts every 500ms).
+    setInterval(() => {
+      if (ws && ws.readyState === 1 && lastMsg !== 0 && Date.now() - lastMsg > 8000) { try { ws.close(); } catch (e) {} }
+      updateStatus();
+    }, 1000);
+
+    // A phone that was asleep or in another app comes back with a dead connection.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
+
+    // The two requests run one after the other, not together - this board
+    // handles one at a time much more reliably.
+    async function loadPages() {
+      try {
+        const res = await fetch("/web-pages.json");
+        webPages = await res.json();
+        render();
+      } catch (e) {
+        document.getElementById("cellgrid").innerHTML = "<p class='empty-msg'>Could not load the page layout - retrying...</p>";
+        setTimeout(loadPages, 3000);
+        return;
+      }
+      loadBuild();
+    }
+
+    async function loadBuild() {
+      try {
+        const res = await fetch("/status.json");
+        const st = await res.json();
+        document.getElementById("build").textContent = "build " + st.build + " - " + st.compiled;
+      } catch (e) {
+        setTimeout(loadBuild, 5000);
+      }
+    }
+
+    connect();
     loadPages();
   </script>
 </body>
@@ -815,6 +908,7 @@ static const char OTA_HTML[] PROGMEM = R"rawliteral(
 <body>
   <h1>Firmware Update (OTA)</h1>
   <p style="text-align:center"><a href="/" style="color:#4dd0e1">&larr; Back to monitor</a></p>
+  <p id="buildinfo" style="text-align:center;color:#4dd0e1;margin:4px 0">Running build ...</p>
   <p class="warn">Upload the .ino.bin file from your build output. The board reboots automatically on success - do not close this page or power off the board during upload.</p>
   <form id="updateForm">
     <input type="file" id="fileInput" accept=".bin">
@@ -823,6 +917,9 @@ static const char OTA_HTML[] PROGMEM = R"rawliteral(
     <div id="status"></div>
   </form>
   <script>
+    fetch("/status.json").then(r => r.json()).then(st => {
+      document.getElementById("buildinfo").textContent = "Running build " + st.build + " (compiled " + st.compiled + ")";
+    }).catch(() => { document.getElementById("buildinfo").textContent = ""; });
     document.getElementById("updateForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const file = document.getElementById("fileInput").files[0];
@@ -912,6 +1009,18 @@ void web_monitor_track_can_frame(uint32_t id, uint8_t *data, uint8_t dlc) {
   // diagnostic tool, not a requirement for correctness elsewhere.
 }
 
+// Total CAN frames/second across every ID seen, and how many distinct IDs -
+// lets the web page tell "no CAN traffic at all" apart from "traffic is
+// arriving but nothing was decoded".
+static void canTableTotals(uint32_t *fps, int *ids) {
+  uint32_t total = 0;
+  portENTER_CRITICAL(&s_canTableMux);
+  for (int i = 0; i < s_canTableCount; i++) total += s_canTable[i].hz;
+  *ids = s_canTableCount;
+  portEXIT_CRITICAL(&s_canTableMux);
+  *fps = total;
+}
+
 static void recomputeCanHz() {
   portENTER_CRITICAL(&s_canTableMux);
   for (int i = 0; i < s_canTableCount; i++) {
@@ -993,6 +1102,51 @@ void web_monitor_init(void) {
       ecu_config_set((EcuSelection)val);
     }
     request->send(200, "text/plain", "OK");
+  });
+
+  // Everything needed to answer "is the board running what I think, and is
+  // CAN actually flowing?" - build number, uptime, memory, WiFi, CAN driver
+  // health, and per-signal data status.
+  server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["build"] = FW_BUILD_NUMBER;
+    doc["compiled"] = FW_COMPILED;
+    doc["uptime_s"] = (uint32_t)(millis() / 1000);
+    doc["heap_internal_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    doc["heap_internal_lowest"] = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    doc["wifi_rssi"] = WiFi.RSSI();
+    doc["ws_clients"] = ws.count();
+
+    JsonObject can = doc["can"].to<JsonObject>();
+    uint32_t fps; int ids;
+    canTableTotals(&fps, &ids);
+    can["frames_per_s"] = fps;
+    can["ids_seen"] = ids;
+    twai_status_info_t st;
+    if (twai_get_status_info(&st) == ESP_OK) {
+      const char *stateName = st.state == TWAI_STATE_RUNNING ? "running"
+                            : st.state == TWAI_STATE_BUS_OFF ? "bus-off"
+                            : st.state == TWAI_STATE_RECOVERING ? "recovering" : "stopped";
+      can["state"] = stateName;
+      can["rx_queue"] = st.msgs_to_rx;
+      can["rx_missed"] = st.rx_missed_count;
+      can["rx_overrun"] = st.rx_overrun_count;
+      can["bus_errors"] = st.bus_error_count;
+    } else {
+      can["state"] = "driver not installed";
+    }
+
+    JsonArray sigs = doc["signals"].to<JsonArray>();
+    for (int sig = 1; sig < SIG_COUNT; sig++) {
+      JsonObject o = sigs.add<JsonObject>();
+      o["name"] = gauge_config_signal_name((SignalId)sig);
+      o["has_data"] = gauge_config_signal_has_data((SignalId)sig);
+      o["age_ms"] = gauge_config_signal_age_ms((SignalId)sig);
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
   });
 
   server.on("/page-nav", HTTP_POST, [](AsyncWebServerRequest *request) {
@@ -1465,7 +1619,8 @@ void web_monitor_loop(void) {
   static unsigned long s_lastHeapLog = 0;
   if (now - s_lastHeapLog >= 10000) {
     s_lastHeapLog = now;
-    Serial.printf("Heap: internal free=%u largest=%u lowest-ever=%u | PSRAM free=%u\n",
+    Serial.printf("Build %d | Heap: internal free=%u largest=%u lowest-ever=%u | PSRAM free=%u\n",
+      FW_BUILD_NUMBER,
       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
       (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
@@ -1489,15 +1644,26 @@ void web_monitor_loop(void) {
   // (clt/map/afr/etc), since the web dashboard's cells can now be
   // configured to show ANY signal in ANY arrangement, independent of
   // the physical display's own configuration.
+  // Message shape: {"v":{"<signal id>":value,...},"fps":<CAN frames/s>,"ids":<distinct CAN IDs>}
+  // "v" only holds signals that currently have live data; the page shows
+  // "--" for the rest. fps/ids let the page say WHY there is no data
+  // (no CAN traffic at all vs traffic that isn't being decoded). The
+  // message goes out every 500ms even when "v" is empty, so it doubles as
+  // the page's heartbeat.
   JsonDocument doc;
+  JsonObject values = doc["v"].to<JsonObject>();
   for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE (0)
     // No live data (never seen, or the bus went quiet): omit it, and the
     // page shows "--" instead of 0.0 or a frozen last reading.
     if (!gauge_config_signal_has_data((SignalId)sig)) continue;
     char key[4];
     snprintf(key, sizeof(key), "%d", sig);
-    doc[key] = gauge_config_signal_value((SignalId)sig);
+    values[key] = gauge_config_signal_value((SignalId)sig);
   }
+  uint32_t canFps; int canIds;
+  canTableTotals(&canFps, &canIds);
+  doc["fps"] = canFps;
+  doc["ids"] = canIds;
   String json;
   serializeJson(doc, json);
   ws.textAll(json);

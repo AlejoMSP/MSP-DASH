@@ -1603,3 +1603,49 @@ Seen while rendering, not fixed: in small cells (2-up, quadrants) needle-gauge
 tick labels at the default 28px size overlap each other and the needle. The
 tick font shares the "Value Text Size" setting - choosing Small (14px) fixes
 it per cell.
+
+## Front page: build number, honest status line, auto-reconnect (2026-10-06)
+
+Report: the front page showed "--" on every gauge and "won't update, no
+matter what I do", and there was no way to tell which firmware was running.
+
+**Build number.** New build_info.h: FW_BUILD_NUMBER = the git commit count of
+the commit that contains it (`git rev-list --count HEAD`), bumped on every
+push - so the number on the page can be checked against the PC. Shown on the
+front page (top bar, next to the compile date/time from __DATE__/__TIME__),
+on the /update page ("Running build N"), at boot on Serial, and at the start
+of the 10s "Build N | Heap:" Serial line. Build 102 is this commit.
+
+**What was actually wrong (two things, neither a broadcast bug):**
+- The page opened its WebSocket once and never retried. One dropped
+  connection (WiFi hiccup, phone asleep, board busy) left it on "--" forever.
+  It now reconnects with backoff (1s, 2s, 4s, then every 5s), reopens when a
+  phone tab becomes visible again, and drops a connection that is "open" but
+  silent for 8s (the board sends every 500ms).
+- "--" meant five different things. Since the lost-signal change, "no CAN
+  data" also shows "--" (it used to show 0.0). The page now has a status line:
+  green "Live - N signals - CAN X frames/s"; orange "Connected, but no CAN
+  frames are arriving (check CAN wiring and ECU power)"; orange "CAN frames
+  arriving (X/s) but none decoded - check the ECU type"; orange "No updates
+  from the board for Ns"; red "Disconnected - retrying...". On disconnect the
+  values go back to "--" instead of freezing on the last numbers.
+- The broadcast message is now {"v":{signal values},"fps":N,"ids":M} - fps/ids
+  are total CAN frames per second and distinct IDs (from the /can table), so
+  the page can tell "no traffic" from "traffic not decoded". Sent every 500ms
+  even when "v" is empty, so it is also the heartbeat.
+- The page's two requests (/web-pages.json, then /status.json) now run one
+  after the other, with retries if either fails.
+
+**/status.json** (new): build, compile time, uptime, internal/PSRAM heap, WiFi
+RSSI, WebSocket clients, CAN driver state (running / bus-off / recovering),
+rx_queue, rx_missed, rx_overrun, bus_errors, frames/s, IDs seen, and
+has_data + age for every signal. Open http://<board-ip>/status.json to see it.
+
+**Verified (on a PC):** 28 checks of the page's script with a fake WebSocket
+and a controllable clock; four deliberate breakages (no reconnect, no
+watchdog, frozen values kept, build never retried) each caught. The real
+ArduinoJson 7 produces the expected broadcast JSON. New tests/host/
+typecheck.sh type-checks the .ino, web_monitor.cpp, sd_logging.cpp and
+ecu_config.cpp against stand-in libraries - the first time those files (including
+the CAN task and /status.json) have been checked before reaching the board; it
+is not a real compile. NOT yet run on the board.

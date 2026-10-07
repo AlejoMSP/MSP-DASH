@@ -32,3 +32,18 @@ RGB files (466x466x3). Convert with Pillow:
 Build it like the gauge_app test, adding `-DHAVE_HISTORY`. It was used to look at
 the alert overlay and the trend graph layouts, which found a caption clipped by
 the round bezel that the numeric tests alone would not have shown.
+
+## Type-checking the board-only code
+
+`typecheck.sh` runs `g++ -fsyntax-only` over the `.ino`, `web_monitor.cpp`,
+`sd_logging.cpp` and `ecu_config.cpp` against small stand-ins for the Arduino /
+WiFi / AsyncWebServer / TWAI APIs (`stubs/`). It is not a real compile, but it
+catches typos, wrong argument counts and misspelled fields in code that is
+otherwise only compiled on the board. Deliberate typos in the build macro, a
+TWAI field name, a helper's arguments and the CAN task were each caught.
+
+    ARDUINOJSON=/path/to/ArduinoJson/src ./tests/host/typecheck.sh
+
+`test_front_page.js` (run with `node`) pulls the front page's script straight out
+of `web_monitor.cpp` and drives it with a fake WebSocket and a controllable clock:
+status messages, reconnect backoff, the silence watchdog, recovery.
