@@ -14,6 +14,7 @@
 
 #include "gauge_config.h"
 #include "gauge_config_json.h"
+#include "gauge_style.h"
 #include "gauge_app.h"
 #include <Preferences.h>   // still used for the small log-channel flags
 #include <FFat.h>
@@ -62,6 +63,8 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.refresh_hz = refreshHz;
   c.show_value = false;
   c.value_font_size = 28;
+  c.tick_font_size = 28;
+  gauge_dial_defaults(0, &c.start_deg, &c.end_deg);
   c.has_warning = hasWarning;
   c.warning_threshold = warnThresh;
   c.warning_above = warnAbove;
@@ -133,6 +136,9 @@ static void serializeCell(JsonObject o, const CellConfig *c) {
   o["refresh_hz"] = c->refresh_hz;
   o["show_value"] = c->show_value;
   o["value_font_size"] = c->value_font_size;
+  o["tick_font_size"] = c->tick_font_size;
+  o["start_deg"] = c->start_deg;
+  o["end_deg"] = c->end_deg;
   o["has_warning"] = c->has_warning;
   o["warning_threshold"] = c->warning_threshold;
   o["warning_above"] = c->warning_above;
@@ -164,7 +170,16 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->major_nth = o["major_nth"] | 5;
   c->refresh_hz = o["refresh_hz"] | 10;
   c->show_value = o["show_value"] | false;
-  c->value_font_size = o["value_font_size"] | 28;
+  c->value_font_size = gauge_snap_value_size(o["value_font_size"] | 28);
+  // A config saved before these three settings existed has no keys for them: the dial numbers then
+  // follow the readout size (as they always did) and the dial is the standard one for its type.
+  c->tick_font_size = gauge_resolve_tick_size(o["tick_font_size"] | 0, c->value_font_size);
+  {
+    int isHalf = (c->gauge_type == GAUGE_TYPE_HALFMOON);
+    int32_t defStart, defEnd, sweep;
+    gauge_dial_defaults(isHalf, &defStart, &defEnd);
+    gauge_dial_resolve(isHalf, o["start_deg"] | defStart, o["end_deg"] | defEnd, &c->start_deg, &c->end_deg, &sweep);
+  }
   c->has_warning = o["has_warning"] | false;
   c->warning_threshold = o["warning_threshold"] | 0.0f;
   c->warning_above = o["warning_above"] | false;

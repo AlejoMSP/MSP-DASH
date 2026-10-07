@@ -15,6 +15,7 @@ public:
   AsyncWebServerResponse *beginResponse(const char *, size_t, std::function<size_t(uint8_t *, size_t, size_t)>) { return nullptr; }
   AsyncWebServerResponse *beginResponse(int, const String &, const String &) { return nullptr; }
   bool hasParam(const char *, bool = false) const { return false; }
+  bool hasHeader(const char *) const { return false; }   // real library: ESPAsyncWebServer.h, both forks
   bool hasParam(const String &, bool = false) const { return false; }
   AsyncWebParameter *getParam(const char *, bool = false) const { return nullptr; }
   AsyncWebParameter *getParam(const String &, bool = false) const { return nullptr; }

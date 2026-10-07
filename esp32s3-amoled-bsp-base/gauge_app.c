@@ -26,6 +26,8 @@
 #include "gauge_config.h"
 #include "sd_logging.h"
 #include "simulator.h"
+#include "gauge_style.h"
+#include "gauge_fonts.h"
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -179,10 +181,69 @@ static void alert_click_cb(lv_event_t *e) {
   alert_dismiss(lv_tick_get());
 }
 
-static const lv_font_t *get_font_for_size(int32_t size) {
+static const lv_font_t *get_font_for_size(int32_t size) {   // 14/28/36 only: the numbers around a dial
   if (size <= 14) return &lv_font_montserrat_14;
   if (size <= 28) return &lv_font_montserrat_28;
   return &lv_font_montserrat_36;
+}
+
+// ---- readout text: the biggest size that fits ----
+typedef struct { int32_t size; const lv_font_t *font; } SizedFont;
+static const SizedFont VALUE_FONTS[GAUGE_VALUE_SIZE_COUNT] = {   // same order as GAUGE_VALUE_SIZES in gauge_style.h
+  { 14, &lv_font_montserrat_14 }, { 28, &lv_font_montserrat_28 }, { 36, &lv_font_montserrat_36 },
+  { 48, &font_digits_48 }, { 64, &font_digits_64 }, { 80, &font_digits_80 }, { 96, &font_digits_96 }, { 120, &font_digits_120 },
+};
+
+#define PANEL_CENTRE 233.0f        // the AMOLED is 466x466 and round
+#define PANEL_FIT_RADIUS 228.0f    // a readout's corners must stay inside this circle, or the bezel cuts the digits off
+
+static bool box_in_panel(float cx, float cy, float w, float h) {
+  for (int sx = -1; sx <= 1; sx += 2) {
+    for (int sy = -1; sy <= 1; sy += 2) {
+      float x = cx + sx * w / 2.0f - PANEL_CENTRE, y = cy + sy * h / 2.0f - PANEL_CENTRE;
+      if (x * x + y * y > PANEL_FIT_RADIUS * PANEL_FIT_RADIUS) return false;
+    }
+  }
+  return true;
+}
+
+// The widest text this cell's readout can need: its lowest or highest value, formatted as it will be.
+static void readout_sample(const CellConfig *cfg, char *out, size_t n) {
+  char lo[24], hi[24];
+  snprintf(lo, sizeof(lo), "%.1f", (double)cfg->min_val);
+  snprintf(hi, sizeof(hi), "%.1f", (double)cfg->max_val);
+  snprintf(out, n, "%s", strlen(lo) > strlen(hi) ? lo : hi);
+}
+
+// Picks the largest size that is <= `requested` and fits: no wider than maxW, no taller than maxH,
+// and fully on the round glass. The box is centred on (cx, y), or - when anchorBottom - sits with its
+// bottom edge at y. Never goes below 14.
+static const lv_font_t *pick_value_font(int32_t requested, const char *sample, float cx, float y,
+                                        bool anchorBottom, float maxW, float maxH) {
+  int top = GAUGE_VALUE_SIZE_COUNT - 1;
+  while (top > 0 && VALUE_FONTS[top].size > requested) top--;
+  for (int i = top; i > 0; i--) {
+    lv_point_t sz;
+    lv_txt_get_size(&sz, sample, VALUE_FONTS[i].font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    float cy = anchorBottom ? y - sz.y / 2.0f : y;
+    if (sz.x <= maxW && sz.y <= maxH && box_in_panel(cx, cy, (float)sz.x, (float)sz.y)) return VALUE_FONTS[i].font;
+  }
+  return VALUE_FONTS[0].font;
+}
+
+// A dial that only occupies the top (or bottom) half of its circle is moved down (or up) so it sits in
+// the middle of its cell instead of leaving the other half of the cell empty. The standard 270 degree
+// dial and the standard half moon come out exactly as they always did.
+static int16_t dial_vertical_shift(int32_t start, int32_t sweep, int16_t meterSize) {
+  float hi = -2.0f, lo = 2.0f;                       // highest and lowest point of the arc: cos() is +1 straight up
+  for (int32_t a = 0; a <= sweep; a++) {
+    float c = cosf((float)(start + a) * 0.01745329f);
+    if (c > hi) hi = c;
+    if (c < lo) lo = c;
+  }
+  if (lo >= -0.05f) return (int16_t)(meterSize / 6);     // never dips below the centre line
+  if (hi <= 0.05f) return (int16_t)(-(meterSize / 6));   // never rises above it
+  return 0;
 }
 
 static void gesture_event_cb(lv_event_t *e);
@@ -277,12 +338,17 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   lv_color_t needleColor = lv_color_hex(cfg->needle_color);
   lv_color_t tickColor = lv_color_hex(cfg->tick_color);
   int16_t minDim = rect.w < rect.h ? rect.w : rect.h;
-  const lv_font_t *tickFont = get_font_for_size(cfg->value_font_size);
+  int32_t tickSize = gauge_resolve_tick_size(cfg->tick_font_size, cfg->value_font_size);   // the numbers AROUND a dial (-1 = hidden)
+  const lv_font_t *tickFont = get_font_for_size(tickSize < 0 ? 14 : tickSize);
 
   if (cfg->gauge_type == GAUGE_TYPE_NUMBER) {
+    char sample[24];
+    readout_sample(cfg, sample, sizeof(sample));
+    const lv_font_t *numFont = pick_value_font(cfg->value_font_size, sample, rect.x + rect.w / 2.0f, rect.y + rect.h / 2.0f,
+                                               false, rect.w * 0.94f, rect.h * 0.6f);
     lv_obj_t *numLabel = lv_label_create(container);
     lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
-    lv_obj_set_style_text_font(numLabel, tickFont, 0);
+    lv_obj_set_style_text_font(numLabel, numFont, 0);
     lv_label_set_text(numLabel, "--");
     lv_obj_center(numLabel);
     rt->numberLabel = numLabel;
@@ -364,13 +430,17 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_align_to(capLabel, chart, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
   } else {
     // NEEDLE or HALFMOON
-    int32_t angleRange = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 270;
-    int32_t rotation = (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? 180 : 135;
+    // The dial runs clockwise from start_deg to end_deg, in compass degrees (0 = straight up). LVGL
+    // measures from 3 o'clock, which is 270 on our compass, hence the +270.
+    int32_t dialStart, dialEnd, dialSweep;
+    gauge_dial_resolve(cfg->gauge_type == GAUGE_TYPE_HALFMOON, cfg->start_deg, cfg->end_deg, &dialStart, &dialEnd, &dialSweep);
+    int32_t angleRange = dialSweep;
+    int32_t rotation = (dialStart + 270) % 360;
     int16_t meterSize = (int16_t)(minDim * 0.88f);
 
     lv_obj_t *meter = lv_meter_create(container);
     lv_obj_set_size(meter, meterSize, meterSize);
-    lv_obj_align(meter, LV_ALIGN_CENTER, 0, (cfg->gauge_type == GAUGE_TYPE_HALFMOON) ? (meterSize / 6) : 0);
+    lv_obj_align(meter, LV_ALIGN_CENTER, 0, dial_vertical_shift(dialStart, dialSweep, meterSize));
     lv_obj_set_style_bg_color(meter, lv_color_hex(cfg->bg_color), 0);
     lv_obj_set_style_border_width(meter, 0, 0);
 
@@ -380,6 +450,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, angleRange, rotation);
     lv_obj_set_style_text_font(meter, tickFont, LV_PART_TICKS);
     lv_obj_set_style_text_color(meter, tickColor, LV_PART_TICKS);
+    if (tickSize < 0) lv_obj_set_style_text_opa(meter, LV_OPA_TRANSP, LV_PART_TICKS);   // dial numbers hidden; the tick marks stay
 
     lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 6, needleColor, -12);
     lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
@@ -392,9 +463,16 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     if (cfg->show_value) {
+      // The readout sits just above the caption at the bottom of the dial: the biggest size that fits there.
+      char sample[24];
+      readout_sample(cfg, sample, sizeof(sample));
+      float capH = (float)lv_font_get_line_height(lv_obj_get_style_text_font(capLabel, LV_PART_MAIN));
+      float readoutBottom = rect.y + rect.h - 8.0f - capH - 4.0f;
+      const lv_font_t *valFont = pick_value_font(cfg->value_font_size, sample, rect.x + rect.w / 2.0f, readoutBottom,
+                                                 true, meterSize * 0.55f, meterSize * 0.24f);
       lv_obj_t *valueLabel = lv_label_create(container);
       lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
-      lv_obj_set_style_text_font(valueLabel, get_font_for_size(cfg->value_font_size), 0);
+      lv_obj_set_style_text_font(valueLabel, valFont, 0);
       lv_label_set_text(valueLabel, "--");
       lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
       rt->numberLabel = valueLabel; // reuse the same field - only one of these two paths is active per cell
@@ -608,7 +686,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
       // No data (before the first frame, or the bus went quiet): show
       // dashes rather than 0.0 or a frozen last reading.
       char buf[16];
-      if (has_data) snprintf(buf, sizeof(buf), "%.1f", value);
+      if (has_data && isfinite(value)) snprintf(buf, sizeof(buf), "%.1f", value);   // the big fonts only have digits: never feed them "nan"/"inf"
       else snprintf(buf, sizeof(buf), "--");
 
       if (c->gauge_type == GAUGE_TYPE_NUMBER) {

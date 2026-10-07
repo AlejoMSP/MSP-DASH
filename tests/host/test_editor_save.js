@@ -19,7 +19,7 @@ async function load(file, postStatus, postText) {
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 (async () => {
   let r = await load('/tmp/GAUGES_HTML_0.js', 200, "OK");
-  check(r.posts[0] === "/gauges" && /^Saved to the board's flash\. Reboot the board/.test(r.status), "display editor success: " + r.status);
+  check(r.posts[0] === "/gauges" && /^Saved to the board's flash\. The round display shows it after a reboot/.test(r.status), "display editor success: " + r.status);
   r = await load('/tmp/WEBCFG_HTML_0.js', 200, "OK");
   check(r.posts[0] === "/web-pages" && /no reboot needed/.test(r.status) && !/Reboot the board/.test(r.status), "web editor success (no reboot wording): " + r.status);
   const boardMsg = "NOT saved to flash: flash filesystem (ffat) failed to mount. The change is active until the next reboot.";

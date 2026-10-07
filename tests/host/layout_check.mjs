@@ -49,6 +49,18 @@ for (const prof of PROFILES) {
       return { bulkInfo, has: !!po, border: cs && cs.borderTopWidth, radius: cs && cs.borderTopLeftRadius, w: po && Math.round(po.getBoundingClientRect().width),
                scrollW: document.documentElement.scrollWidth, vw, wide: [...new Set(wide)].slice(0, 4), nav: !!document.getElementById('navmenu') && !!document.querySelector('.brand'), smallInputs };
     });
+    // The front page's numbers must honour each cell's Value Text Size (1.25 x the size in px) but never be wider than the cell:
+    // the font is capped at 26% of the cell's width. Measured on all three web dashboard pages of the mock board.
+    m.valPages = [];
+    if (route === '/') {
+      for (let i = 0; i < 3; i++) {
+        if (i) await page.evaluate(() => changeWebPage(1));
+        m.valPages.push(await page.evaluate(() => [...document.querySelectorAll('.dcell .val')].map(v => { const cell = v.closest('.dcell');
+          return { size: +v.dataset.size, px: parseFloat(getComputedStyle(v).fontSize), cellW: cell.clientWidth, fits: v.scrollWidth <= cell.clientWidth + 1 }; })));
+        if (i === 2 && prof.phone === false) await page.screenshot({ path: `${outDir}/${prof.name}_front_bigtext.png` });
+      }
+      await page.evaluate(() => changeWebPage(1));   // back to the first page for the screenshot below
+    }
     await page.screenshot({ path: `${outDir}/${prof.name}_${label}.png`, fullPage: prof.phone });
     checked++;
     const bad = (why) => problems.push(`${prof.name} ${label}: ${why}`);
@@ -67,6 +79,12 @@ for (const prof of PROFILES) {
       if (m.bulkInfo.topSpread > 1) bad(`colour pickers are not on one row (${m.bulkInfo.topSpread.toFixed(0)}px apart vertically)`);
       if (m.bulkInfo.applyFill < 0.95) bad('the Apply to All button does not span the box');
     }
+    m.valPages.forEach((cells, pi) => cells.forEach((v, ci) => {
+      const want = Math.min(v.size * 1.25, v.cellW * 0.26);
+      if (!(v.size > 0)) bad(`front page ${pi + 1} cell ${ci + 1}: the number carries no text size`);
+      else if (Math.abs(v.px - want) > 1.5) bad(`front page ${pi + 1} cell ${ci + 1}: size ${v.size} should draw at ${want.toFixed(1)}px (1.25 x the size, at most 26% of the ${v.cellW}px cell) but draws at ${v.px}px`);
+      if (!v.fits) bad(`front page ${pi + 1} cell ${ci + 1}: the number is wider than its cell`);
+    }));
     if (!m.nav) bad('missing the shared header / menu');
     if (errors.length) bad('script error: ' + errors.join('; '));
   }

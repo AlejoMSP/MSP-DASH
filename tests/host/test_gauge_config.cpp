@@ -9,6 +9,7 @@
 #include "gauge_app.h"
 #include "gauge_config.h"
 #include "gauge_config_json.h"
+#include "gauge_style.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -51,7 +52,8 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.min_val = -50; c.max_val = 9000 + i * 10 + j; c.rest_val = 3;
       snprintf(c.caption, GAUGE_CAPTION_MAXLEN, "Caption %d-%d long text!!", i, j);
       c.needle_color = 0xFF8800 + j; c.tick_color = 0x123456; c.bg_color = 0x0A0B0C;
-      c.value_divisor = 1000.0f; c.tick_count = 40 + j; c.major_nth = 4; c.refresh_hz = 25; c.show_value = true; c.value_font_size = 36;
+      c.value_divisor = 1000.0f; c.tick_count = 40 + j; c.major_nth = 4; c.refresh_hz = 25; c.show_value = true; c.value_font_size = GAUGE_VALUE_SIZES[(i + j) % GAUGE_VALUE_SIZE_COUNT];
+      c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;
     }
@@ -147,7 +149,7 @@ int main(int argc, char **argv) {
   printf("S5 the web-format JSON round-trips (what the editors send and receive)\n");
   fillAll(p);
   std::string web = toJson(p);
-  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
+  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
     CHECK(web.find(std::string("\"") + key + "\":") != std::string::npos, (std::string("key present in the JSON: ") + key).c_str());
   PageConfig scratch[MAX_PAGES];
   { JsonDocument d; deserializeJson(d, web); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); }
@@ -200,6 +202,45 @@ int main(int argc, char **argv) {
   gauge_config_init(); p = gauge_config_get_pages();
   CHECK(p[0].cells[0].gauge_type == GAUGE_TYPE_HISTOGRAM && p[0].cells[0].history_sec == 30, "trend graph, 30s default history");
   CHECK(!p[0].cells[0].ref_enabled && !p[0].cells[0].alert_fullscreen, "no reference line, no full-screen alert");
+
+  printf("S9 the new text-size and dial-angle settings\n");
+  wipe(); gauge_config_init(); p = gauge_config_get_pages();
+  CHECK(p[0].cells[0].value_font_size == 28 && p[0].cells[0].tick_font_size == 28, "defaults: readout 28, dial numbers 28 (the look it always had)");
+  CHECK(p[0].cells[0].start_deg == 225 && p[0].cells[0].end_deg == 135, "defaults: the standard 270 degree dial, 225 -> 135");
+  p[0].cells[0].value_font_size = 96; p[0].cells[0].tick_font_size = -1; p[0].cells[0].start_deg = 200; p[0].cells[0].end_deg = 340;
+  CHECK(gauge_config_save(), "saves");
+  gauge_config_init(); p = gauge_config_get_pages();
+  CHECK(p[0].cells[0].value_font_size == 96 && p[0].cells[0].tick_font_size == -1 && p[0].cells[0].start_deg == 200 && p[0].cells[0].end_deg == 340, "all of them survive a reboot");
+
+  printf("S10 a config saved before these settings existed looks exactly as before\n");
+  auto load1 = [&](const std::string &cellJson) -> CellConfig {
+    std::string j = "[{\"enabled\":true,\"layout\":0,\"cells\":[" + cellJson + "]}]";
+    JsonDocument d; deserializeJson(d, j); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); return scratch[0].cells[0]; };
+  CellConfig c10;
+  c10 = load1("{\"enabled\":true,\"gauge_type\":0,\"value_font_size\":36}");
+  CHECK(c10.tick_font_size == 36 && c10.value_font_size == 36, "dial numbers followed the old text size (36)");
+  c10 = load1("{\"enabled\":true,\"gauge_type\":0,\"value_font_size\":14}");
+  CHECK(c10.tick_font_size == 14, "... 14");
+  c10 = load1("{\"enabled\":true,\"gauge_type\":0}");
+  CHECK(c10.tick_font_size == 28 && c10.value_font_size == 28, "... and 28 when the size was never set");
+  CHECK(c10.start_deg == 225 && c10.end_deg == 135, "a needle gauge without angles gets the 270 degree dial");
+  c10 = load1("{\"enabled\":true,\"gauge_type\":2}");
+  CHECK(c10.start_deg == 270 && c10.end_deg == 90, "a half moon without angles gets 270 -> 90 (flat side down)");
+
+  printf("S11 bad text sizes and angles are repaired, not stored\n");
+  c10 = load1("{\"enabled\":true,\"value_font_size\":50}");  CHECK(c10.value_font_size == 48, "50 snaps to 48");
+  c10 = load1("{\"enabled\":true,\"value_font_size\":1000}"); CHECK(c10.value_font_size == 120, "1000 snaps to the largest, 120");
+  c10 = load1("{\"enabled\":true,\"value_font_size\":-5}");   CHECK(c10.value_font_size == 14, "-5 snaps to the smallest, 14");
+  c10 = load1("{\"enabled\":true,\"value_font_size\":64,\"tick_font_size\":99}"); CHECK(c10.tick_font_size == 28, "an invalid dial-number size becomes 28 (64 is too big for dial numbers)");
+  c10 = load1("{\"enabled\":true,\"tick_font_size\":-1}");    CHECK(c10.tick_font_size == -1, "-1 (hide the dial numbers) is kept");
+  c10 = load1("{\"enabled\":true,\"start_deg\":-135,\"end_deg\":135}"); CHECK(c10.start_deg == 225 && c10.end_deg == 135, "-135 is the same direction as 225");
+  c10 = load1("{\"enabled\":true,\"start_deg\":400,\"end_deg\":-30}");  CHECK(c10.start_deg == 40 && c10.end_deg == 330, "400 and -30 wrap into 0..359");
+  c10 = load1("{\"enabled\":true,\"start_deg\":90,\"end_deg\":90}");    CHECK(c10.start_deg == 225 && c10.end_deg == 135, "start = end is not a dial: the standard one is used");
+  c10 = load1("{\"enabled\":true,\"start_deg\":100,\"end_deg\":105}");  CHECK(c10.start_deg == 225 && c10.end_deg == 135, "a 5 degree sliver is not a dial either");
+  c10 = load1("{\"enabled\":true,\"gauge_type\":2,\"start_deg\":5,\"end_deg\":5}"); CHECK(c10.start_deg == 270 && c10.end_deg == 90, "... and for a half moon the half-moon default");
+  c10 = load1("{\"enabled\":true,\"start_deg\":0,\"end_deg\":359}");    CHECK(c10.start_deg == 0 && c10.end_deg == 359, "a nearly full circle (359) is allowed");
+  c10 = load1("{\"enabled\":true,\"start_deg\":0,\"end_deg\":10}");     CHECK(c10.start_deg == 0 && c10.end_deg == 10, "the narrowest allowed dial (10) is kept");
+  CHECK(gauge_snap_value_size(36) == 36 && gauge_snap_value_size(42) == 36 && gauge_snap_value_size(43) == 48, "snapping goes to the NEAREST size");
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);

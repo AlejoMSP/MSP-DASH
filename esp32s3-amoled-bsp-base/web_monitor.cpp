@@ -60,6 +60,8 @@ static char *allocPostBuf(size_t n) {
 // (The page used to say "Saved" no matter what happened.)
 #define CONFIG_POST_MAX 24576  // 8 pages x 4 cells of settings is ~16KB of JSON
 
+static unsigned long s_rebootAtMs = 0;   // when the /reboot request asked the board to restart (0 = no request)
+
 struct SaveResult { bool ok; char msg[128]; };
 static SaveResult s_displaySave = { true, "" };
 static SaveResult s_webSave = { true, "" };
@@ -109,9 +111,12 @@ R"rawliteral(<style>
     .layout-3up { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
     .layout-3up .c0 { grid-column: 1 / 3; }
     .layout-2x2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-    .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+    .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; container-type:inline-size; }
     .dcell .cap { font-size:0.85em; color:#4dd0e1; }
-    .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; }
+    .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; white-space:nowrap; }
+    /* The cell's "Value Text Size" setting (--fs), but never wider than the cell: 26% of the cell's width per character-ish.
+       Browsers too old for cqw ignore this line and keep the fixed size above. */
+    .dcell .val { font-size:min(var(--fs, 2.2em), 26cqw); }
     .dcell .warn { color:#ff4444; }
     .empty-msg { padding:20px; text-align:center; color:#888; }
     .statusline { display:flex; align-items:center; gap:8px; padding:0 16px 8px; font-size:0.78em; color:#aaa; }
@@ -162,7 +167,8 @@ R"rawliteral(
         const value = (raw === undefined) ? "--" : (raw / c.value_divisor).toFixed(1);
         const displayVal = raw === undefined ? value : parseFloat(value);
         const isWarn = c.has_warning && raw !== undefined && (c.warning_above ? displayVal > c.warning_threshold : displayVal < c.warning_threshold);
-        return `<div class="dcell c${i}"><div class="cap">${c.caption}</div><div class="val ${isWarn?'warn':''}">${value}</div></div>`;
+        const size = c.value_font_size || 28;   // the editor's Value Text Size; 28 renders as the 35px these numbers always were
+        return `<div class="dcell c${i}"><div class="cap">${c.caption}</div><div class="val ${isWarn?'warn':''}" data-size="${size}" style="--fs:${Math.round(size * 1.25)}px">${value}</div></div>`;
       }).join("");
     }
 
@@ -320,6 +326,11 @@ R"rawliteral(<style>
     .bulk-colors label { display:flex; flex-direction:column; gap:5px; font-size:0.78em; color:#4dd0e1; }
     .bulk-colors input[type=color] { width:100%; height:38px; padding:2px; border:1px solid #333; border-radius:6px; background:#000; }
     .bulk-apply { width:100%; margin:0; }
+    .hint { font-size:0.75em; color:#888; margin:2px 0; }
+    .dialbox { display:flex; gap:12px; align-items:center; margin-top:6px; }
+    .dialform { flex:1; }
+    .dialprev { flex:none; width:96px; text-align:center; }
+    .dialcap { font-size:0.7em; color:#888; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
@@ -342,7 +353,9 @@ R"rawliteral(<div class="pad">
 
   <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
   <div id="pages"></div>
-  <button onclick="save()">Save (reboot required to apply)</button>
+  <button onclick="save()">Save</button>
+  <button onclick="saveAndReboot()">Save &amp; Reboot Board</button>
+  <p class="hint">The round display only picks up changes after the board restarts. Save &amp; Reboot does both.</p>
 
   
 </div>)rawliteral" PH_CLOSE
@@ -354,6 +367,8 @@ R"rawliteral(
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon", "Trend Graph"];
+    // Readout text sizes (px). Must match GAUGE_VALUE_SIZES in gauge_style.h. A size too big for its cell shrinks to the biggest that fits.
+    const VALUE_SIZES = [[14,"14 Small"],[28,"28 Medium"],[36,"36 Large"],[48,"48 XL"],[64,"64 2XL"],[80,"80 3XL"],[96,"96 4XL"],[120,"120 Max"]];
     let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
@@ -361,7 +376,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, start_deg:225, end_deg:135,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -386,7 +401,7 @@ R"rawliteral(
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
           ${!c.enabled ? "" : `
           <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
-          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value); renderPages();">
+          <label>Gauge Type <select onchange="changeGaugeType(${pIdx},${cIdx},parseInt(this.value))">
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
           <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
@@ -403,14 +418,30 @@ R"rawliteral(
           <div class="row2">
             <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
             <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
-            <div><label>Value Text Size
-              <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
-                <option value="14" ${c.value_font_size===14?"selected":""}>Small</option>
-                <option value="28" ${c.value_font_size===28?"selected":""}>Medium</option>
-                <option value="36" ${c.value_font_size===36?"selected":""}>Large</option>
+          </div>
+          <label>Value Text Size
+            <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
+              ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
+            </select>
+          </label>
+          <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
+          ${(c.gauge_type===0 || c.gauge_type===2) ? `
+          <div class="row2">
+            <div><label>Dial numbers
+              <select onchange="pages[${pIdx}].cells[${cIdx}].tick_font_size=parseInt(this.value)">
+                ${TICK_SIZES.map(([v,n])=>`<option value="${v}" ${(c.tick_font_size||28)===v?"selected":""}>${n}</option>`).join("")}
               </select>
             </label></div>
           </div>
+          <div class="dialbox">
+            <div class="dialform">
+              <label>Dial start (degrees) <input type="number" step="1" value="${c.start_deg}" oninput="setAngle(${pIdx},${cIdx},'start_deg',this.value)"></label>
+              <label>Dial end (degrees) <input type="number" step="1" value="${c.end_deg}" oninput="setAngle(${pIdx},${cIdx},'end_deg',this.value)"></label>
+            </div>
+            <div class="dialprev" id="dial_${pIdx}_${cIdx}">${dialSvg(c)}</div>
+          </div>
+          <p class="hint">0 is straight up and angles run clockwise (90 = 3 o'clock, 180 = straight down). The dial sweeps clockwise from start to end. Standard gauge: 225 to 135.</p>
+          ` : ""}
           ${c.gauge_type===3 ? `
           <div class="row2">
             <div><label>History (seconds, 2-600) <input type="number" min="2" max="600" value="${c.history_sec}" onchange="pages[${pIdx}].cells[${cIdx}].history_sec=parseInt(this.value)"></label></div>
@@ -436,6 +467,60 @@ R"rawliteral(
           `}
         </div>
       `;
+    }
+
+    // ---- dial start/end angles ----
+    // Dial numbers (the numbers around a needle dial): -1 hides them.
+    const TICK_SIZES = [[-1,"Hidden"],[14,"14 Small"],[28,"28 Medium"],[36,"36 Large"]];
+
+    // Mirrors gauge_dial_resolve() in gauge_style.h, so the preview shows what the round display will draw:
+    // angles are compass degrees (0 = straight up, clockwise); equal angles or a sliver under 10 degrees fall back to the standard dial.
+    function dialGeometry(c) {
+      const half = c.gauge_type === 2;
+      const norm = d => ((Math.round(d) % 360) + 360) % 360;
+      let s = norm(c.start_deg), e = norm(c.end_deg), sw = norm(e - s), standard = false;
+      if (!(sw >= 10)) { s = half ? 270 : 225; e = half ? 90 : 135; sw = norm(e - s); standard = true; }
+      return { start: s, end: e, sweep: sw, standard: standard };
+    }
+
+    // A small picture of the dial: the arc, its tick marks, a green dot where it starts and a red one where it ends.
+    function dialSvg(c) {
+      const g = dialGeometry(c), R = 40, cx = 48, cy = 48;
+      const pt = (deg, r) => [cx + r * Math.sin(deg * Math.PI / 180), cy - r * Math.cos(deg * Math.PI / 180)];
+      const f = v => v.toFixed(1);
+      const a0 = pt(g.start, R), a1 = pt(g.start + g.sweep, R);
+      const n = Math.max(2, Math.min(60, parseInt(c.tick_count) || 26)), major = Math.max(1, parseInt(c.major_nth) || 5);
+      let ticks = "";
+      for (let i = 0; i < n; i++) {
+        const a = g.start + g.sweep * i / (n - 1), len = (i % major === 0) ? 9 : 5;
+        const p0 = pt(a, R - 3), p1 = pt(a, R - 3 - len);
+        ticks += `<line x1="${f(p0[0])}" y1="${f(p0[1])}" x2="${f(p1[0])}" y2="${f(p1[1])}" stroke="#888" stroke-width="${i % major === 0 ? 1.6 : 1}"/>`;
+      }
+      return `<svg viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="dial preview">` +
+        `<circle cx="48" cy="48" r="${R}" fill="none" stroke="#222"/>` +
+        `<path d="M${f(a0[0])} ${f(a0[1])} A${R} ${R} 0 ${g.sweep > 180 ? 1 : 0} 1 ${f(a1[0])} ${f(a1[1])}" fill="none" stroke="#4dd0e1" stroke-width="3"/>` +
+        ticks +
+        `<circle cx="${f(a0[0])}" cy="${f(a0[1])}" r="3.5" fill="#2ecc71"/><circle cx="${f(a1[0])}" cy="${f(a1[1])}" r="3.5" fill="#e74c3c"/>` +
+        `<text x="48" y="7" font-size="8" fill="#666" text-anchor="middle">0</text></svg>` +
+        `<div class="dialcap">${g.sweep}&deg; sweep${g.standard ? " (standard dial)" : ""}</div>`;
+    }
+
+    // Typing in an angle box redraws just that picture, so the box keeps focus.
+    function setAngle(pIdx, cIdx, key, value) {
+      const c = pages[pIdx].cells[cIdx];
+      const n = parseInt(value);
+      if (!isNaN(n)) c[key] = n;
+      const el = document.getElementById("dial_" + pIdx + "_" + cIdx);
+      if (el) el.innerHTML = dialSvg(c);
+    }
+
+    // Switching between Needle and Half-Moon keeps that type's standard dial - unless the dial was customised.
+    function changeGaugeType(pIdx, cIdx, type) {
+      const c = pages[pIdx].cells[cIdx];
+      c.gauge_type = type;
+      if (type === 2 && c.start_deg === 225 && c.end_deg === 135) { c.start_deg = 270; c.end_deg = 90; }
+      else if (type === 0 && c.start_deg === 270 && c.end_deg === 90) { c.start_deg = 225; c.end_deg = 135; }
+      renderPages();
     }
 
     function changeLayout(pIdx, newLayout) {
@@ -508,14 +593,35 @@ R"rawliteral(
 
     async function save() {
       // Never save a list that failed to load - an empty array would wipe every page on the board.
-      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return; }
-      if (pages.length === 0 && !confirm("This will remove ALL pages. Save anyway?")) return;
+      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return false; }
+      if (pages.length === 0 && !confirm("This will remove ALL pages. Save anyway?")) return false;
       document.getElementById("status").textContent = "Saving...";
       try {
         const r = await fetch("/gauges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
         if (!r.ok) throw new Error((await r.text()) || ("board returned " + r.status));
-        document.getElementById("status").textContent = "Saved to the board's flash. Reboot the board to apply it to the round display.";
-      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
+        document.getElementById("status").textContent = "Saved to the board's flash. The round display shows it after a reboot - press Save & Reboot Board.";
+        return true;
+      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; return false; }
+    }
+
+    // Save, restart the board so the round display rebuilds its pages, and wait for it to come back.
+    async function saveAndReboot() {
+      if (!(await save())) return;
+      const st = document.getElementById("status");
+      try { await fetch("/reboot", { method: "POST", headers: {"X-MSP": "1"} }); }
+      catch (e) { st.textContent = "Saved, but the reboot request failed: " + e.message; return; }
+      st.textContent = "Saved. The board is restarting...";
+      const deadline = Date.now() + 45000;
+      let wentDown = false;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const r = await fetch("/status.json", { cache: "no-store" });
+          if (r.ok && wentDown) { const j = await r.json(); st.textContent = "Board restarted (build " + j.build + "). The round display now shows your changes."; return; }
+        } catch (e) { wentDown = true; }
+      }
+      st.textContent = wentDown ? "Saved, but the board has not come back after 45 seconds. Check its power, then reload this page."
+                                : "Saved, but the board never restarted. Press Save & Reboot Board again, or restart it by hand.";
     }
 
     async function applyColorsToAll() {
@@ -559,6 +665,7 @@ R"rawliteral(<style>
     .bulk-colors label { display:flex; flex-direction:column; gap:5px; font-size:0.78em; color:#4dd0e1; }
     .bulk-colors input[type=color] { width:100%; height:38px; padding:2px; border:1px solid #333; border-radius:6px; background:#000; }
     .bulk-apply { width:100%; margin:0; }
+    .hint { font-size:0.75em; color:#888; margin:2px 0; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
@@ -593,6 +700,8 @@ R"rawliteral(
     const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon", "Trend Graph"];
+    // Readout text sizes (px). Must match GAUGE_VALUE_SIZES in gauge_style.h. A size too big for its cell shrinks to the biggest that fits.
+    const VALUE_SIZES = [[14,"14 Small"],[28,"28 Medium"],[36,"36 Large"],[48,"48 XL"],[64,"64 2XL"],[80,"80 3XL"],[96,"96 4XL"],[120,"120 Max"]];
     let loaded = false;
     let pages = [];
     let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
@@ -600,7 +709,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, start_deg:225, end_deg:135,
         has_warning:false, warning_threshold:0, warning_above:false };
     }
 
@@ -642,14 +751,13 @@ R"rawliteral(
           <div class="row2">
             <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
             <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
-            <div><label>Value Text Size
-              <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
-                <option value="14" ${c.value_font_size===14?"selected":""}>Small</option>
-                <option value="28" ${c.value_font_size===28?"selected":""}>Medium</option>
-                <option value="36" ${c.value_font_size===36?"selected":""}>Large</option>
-              </select>
-            </label></div>
           </div>
+          <label>Value Text Size
+            <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
+              ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
+            </select>
+          </label>
+          <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
           <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
           <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
@@ -1308,6 +1416,16 @@ void web_monitor_init(void) {
     }
   });
 
+  // Restart the board (so the round display rebuilds its pages from the saved config). Needs a custom
+  // header: a web page on another site cannot add one to a request without the browser asking this
+  // board's permission first (which it never grants), so nobody can reboot the board from a random page.
+  server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!request->hasHeader("X-MSP")) { request->send(403, "text/plain", "Forbidden"); return; }
+    s_rebootAtMs = millis() + 800;   // let this reply go out first
+    if (s_rebootAtMs == 0) s_rebootAtMs = 1;
+    request->send(200, "text/plain", "Rebooting");
+  });
+
   server.on("/page-nav", HTTP_POST, [](AsyncWebServerRequest *request) {
     if (request->hasParam("delta", true)) {
       int delta = request->getParam("delta", true)->value().toInt();
@@ -1591,6 +1709,12 @@ void web_monitor_init(void) {
 
 void web_monitor_loop(void) {
   unsigned long now = millis();
+
+  if (s_rebootAtMs != 0 && (long)(now - s_rebootAtMs) >= 0) {
+    Serial.println("Rebooting (requested from the web page)");
+    delay(50);
+    ESP.restart();
+  }
 
   // Heap readout every 10s - lets us see whether free internal RAM
   // (and the largest single free block) is getting dangerously low

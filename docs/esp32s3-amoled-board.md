@@ -1813,3 +1813,53 @@ above its swatch, a full-width Apply to All button, and a full-width dashed "+ A
 gained a rule (3 pickers, same width, same row, button spans the box) and was shown to fail when the grid
 rule is removed. Checked in headless Chrome at 350px and 430px; Apply to All still reaches the first and
 last cell.
+
+
+## Text sizes, dial angles, Save & Reboot (build 107)
+
+Request: (1) "display text size won't change, too small", (2) set the degrees where the gauge starts and ends.
+
+**Why the text size seemed to do nothing - three causes.**
+1. The FRONT PAGE (web dashboard) never read value_font_size at all: its numbers were a fixed 2.2em. The
+   "Value Text Size" dropdown in Web Dashboard Config has been inert since it was written.
+2. On the round display the setting only offered 14 / 28 / 36 px (a 466px panel), and on needle gauges it also
+   resized the numbers AROUND the dial, which is why it was confusing (and why tick labels overlapped in small cells).
+3. The display only applies a saved config after a reboot, and the page just said so in small print.
+
+**What changed**
+- Sizes are now 14, 28, 36, 48, 64, 80, 96, 120 px. 14/28/36 are LVGL's Montserrat; 48 and up are digit-only
+  copies (font_digits_*.c, made by tools/gen_fonts.sh from LVGL's own Montserrat-Medium.ttf with lv_font_conv).
+  They live in the sketch, so lv_conf.h does not have to be edited. They hold only space + - . and 0-9, so
+  the readout code never feeds them "nan"/"inf" (shows "--" instead). Flash cost about 74 KB.
+- A readout too big for its cell shrinks to the biggest size that fits: at most 94% of the cell width and 60%
+  of its height, and all four corners of the worst-case text (the lowest/highest value formatted, e.g. "250.0")
+  inside a 228px radius of the panel centre (the glass is round). A 1-cell page honours every size; a 2x2
+  quadrant cannot hold 120 (it gets 48). Needle-dial readouts must fit the dial's lower area.
+- New cell field tick_font_size (numbers around a needle dial): -1 hidden, 14, 28, 36; 0 (never set) follows the
+  readout size, so configs saved before this look exactly as before.
+- Front page: --fs = 1.25 x size px, capped at 26cqw (container query units) so it never overflows its cell;
+  Medium (28) = 35px = the old look. Browsers without cqw keep the old fixed size.
+- Display editor: size list, dial-number size, hint text, and a "Save & Reboot Board" button (saves, POSTs
+  /reboot, waits for the board to go down and come back). POST /reboot requires an X-MSP header, so a page on
+  another site cannot reboot the board (a cross-origin request with a custom header needs a CORS preflight,
+  which the board never allows). The board restarts 800ms after answering.
+
+**Dial angles.** New cell fields start_deg / end_deg, COMPASS degrees (0 = straight up, clockwise): the dial
+sweeps clockwise from start to end. Standard needle 225 -> 135 (270 sweep), half moon 270 -> 90, e.g. 300 -> 60
+is a 120 degree arc across the top. Maps to LVGL as rotation = (start + 270) % 360, angle_range = sweep.
+Equal angles (also what an all-zero cell holds) or a sweep under 10 degrees fall back to the standard dial for
+the type; values wrap into 0-359 (-135 = 225). A dial that stays in the top (or bottom) half of its circle is
+moved down (up) by a sixth of its size so it sits in the middle of its cell; the standard dials come out exactly
+as before. The editor draws a live picture of the dial (green dot = start, red = end) using the same rules
+(dialGeometry mirrors gauge_dial_resolve in gauge_style.h; test_editor_dial.js checks the two agree).
+gauge_style.h holds the shared pure-C helpers so the config code, display code and tests cannot disagree.
+
+**Config:** unknown / bad values are repaired when loaded: value_font_size snaps to the nearest allowed size.
+
+**Verified (PC, sanitizers on).** config 88; existing display suite 76; new display scenarios (sizes in all four
+layouts, needle readout, dial numbers, 16 angle pairs x 2 gauge types, nan) all pass; each of 8 deliberate
+breakages caught; editor 68 (+5 breakages caught); front page 36; editor save 5; simulator page 20; browser
+layout check 24 page views incl. the front page's sizes; board-side type-check; compiler vs extractor identical.
+Screenshots reviewed: front page at several sizes, the editor's dial controls and live preview, and the real
+display code rendered in 8 configurations. NOT run on the board: the new fonts under the Arduino build, the
+Save & Reboot button and the /reboot endpoint.

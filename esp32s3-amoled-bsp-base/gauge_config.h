@@ -68,7 +68,10 @@ typedef struct {
   int32_t major_nth;
   int32_t refresh_hz;
   bool show_value;         // precise numeric readout alongside the needle (GAUGE_TYPE_NEEDLE/HALFMOON only - NUMBER type always shows a value by definition)
-  int32_t value_font_size; // 14/28/36 - must match a font actually enabled in lv_conf.h
+  int32_t value_font_size; // readout size: 14/28/36/48/64/80/96/120 (see gauge_style.h). Big readouts shrink to the biggest size that fits the cell.
+  int32_t tick_font_size;  // numbers around a needle/half-moon dial: 14/28/36, -1 = hidden, 0 = follow value_font_size (configs saved before this existed)
+  int32_t start_deg;       // needle/half-moon dial start, compass degrees (0 = straight up, clockwise). Standard gauge 225
+  int32_t end_deg;         // dial end, clockwise from the start. Standard gauge 135 (a 270 degree sweep); half moon 270 -> 90
   bool has_warning;
   float warning_threshold;
   bool warning_above;

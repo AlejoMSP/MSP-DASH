@@ -21,7 +21,7 @@ caught real mistakes while the full-screen alert was being written.
 Build lines used (AddressSanitizer + UBSan on):
 
     gcc -O1 -g -fsanitize=address,undefined -I<lvgl> -I<sketch> \
-        <sketch>/gauge_app.c test_gauge_app.c <lvgl objects> -o t -lm
+        <sketch>/gauge_app.c <sketch>/font_digits_*.c test_gauge_app.c <lvgl objects> -o t -lm
     mkdir /tmp/cfgtest
     g++ -std=c++17 -O1 -g -fsanitize=address,undefined -Istubs -I<ArduinoJson>/src \
         -I<sketch> -DGAUGE_CFG_DIR='"/tmp/cfgtest"' <sketch>/gauge_config.cpp \
@@ -76,7 +76,7 @@ for each page, and that a failed save shows the board's own explanation.
   2-second staleness) which feeds the real display code, for simulated minutes, with the
   default page layout: demo shows a rev cycle and never alarms, manual oil pressure 20 raises
   the full-screen alert under the SIMULATED banner, and a real CAN frame returns everything to
-  "no data". Link `gauge_app.o`, `gauge_config.o`, `simulator.o`, the test and the LVGL objects.
+  "no data". Link `gauge_app.o`, `gauge_config.o`, `simulator.o`, the font objects (`font_digits_*.c`), the test and the LVGL objects.
 
 ## Looking at the web pages in a real browser
 
@@ -97,3 +97,29 @@ over WiFi.
   under 16px (Safari zooms in on it); the shared header/menu is missing; or a script errors. Needs
   `npm install` in this folder (puppeteer-core, ws, and @sparticuz/chromium, which ships its own headless
   Chromium; or set CHROME_PATH). Run it with `node layout_check.mjs [screenshot-folder]`.
+
+## Text sizes, dial angles and Save & Reboot
+
+All of these need the big digit fonts linked in: add `<sketch>/font_digits_*.c` to the gcc line (the display
+code uses them for readouts of 48 px and up).
+
+- `test_dial_text.c`: the real `gauge_app.c` against LVGL, one scenario per run
+  (`./t num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan`).
+  Number readouts at all eight sizes in every layout: never bigger than asked, the worst-case reading
+  (`250.0`) lies fully inside the round glass and its cell, the biggest size that fits is the one used
+  (the next one up is checked to really not fit), a 1-cell page honours every size, the caption is not cut
+  off. Needle dials: the readout fits the dial's lower area; the dial numbers have their own size
+  (hidden / 14 / 28 / 36, and 0 = follow the readout as old configs do). Dial angles: sixteen start/end pairs
+  (including wrap-around, a 5 degree sliver, equal angles, negative and over-360 values) checked against a
+  hand-written table of the LVGL rotation, sweep and vertical shift; every pair is also drawn with moving
+  data (a bad angle must not crash LVGL). `nan`: a reading that is not a number shows `--`, never "nan"
+  (the digit-only fonts cannot draw letters).
+- `test_editor_dial.js`: the display editor's script: the dial-geometry table (the preview must equal the
+  display's rules), which controls appear for each gauge type, typing an angle redraws only the picture,
+  Needle/Half-Moon switching, and every path of Save & Reboot (save first and only then reboot, the
+  X-MSP header, waits for the board to go down AND come back, reports a failed save, a failed reboot request,
+  a board that never restarts, and one that never returns). Uses a fake clock, so it runs instantly.
+- `test_front_page.js` (section 12): the front page draws each number at 1.25 x its Value Text Size.
+- `layout_check.mjs` also measures the front page's numbers in a real browser (size honoured, capped at 26%
+  of the cell width, never wider than the cell) and the editors' colour box.
+- `tools/gen_fonts.sh` (repo root) regenerates `font_digits_*.c`.

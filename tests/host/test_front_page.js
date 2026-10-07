@@ -45,6 +45,8 @@ const open = (ws) => { ws.readyState = 1; ws.onopen(); };
 const send = (ws, o) => ws.onmessage({ data: JSON.stringify(o) });
 const status = () => `[${els.dot.className}] ${els.stext.textContent}`;
 const grid = () => els.cellgrid.innerHTML;
+// the number cells, read by meaning (class + text + attributes) rather than exact markup
+const vals = () => [...grid().matchAll(/<div class="val([^"]*)"([^>]*)>([^<]*)</g)].map(m => ({ warn: /\bwarn\b/.test(m[1]), attrs: m[2], text: m[3] }));
 let pass = 0, fail = 0;
 const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 
@@ -68,14 +70,14 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   check(/3000\.0/.test(grid()) && /185\.5/.test(grid()) && /120\.1/.test(grid()) && /14\.7/.test(grid()), "all four values on the page");
   check(els.dot.className === "st-ok" && /Live - 4 signals - CAN 412 frames\/s/.test(status()), "green Live status: " + status());
   send(ws, { v: { "1": 3000, "2": 230, "3": 120.1, "4": 14.7 }, fps: 412, ids: 38 });
-  check(/val warn">230\.0/.test(grid()), "coolant over its threshold is highlighted");
+  check(vals().some(v => v.warn && v.text === "230.0"), "coolant over its threshold is highlighted");
   advance(500); send(ws, { v: { "1": 3100 }, fps: 400, ids: 38 });
   check(/Live - 1 signal - CAN 400/.test(status()), "singular wording: " + status());
 
   console.log("4. connected but the bus is silent (bench, ECU off)");
   send(ws, { v: {}, fps: 0, ids: 0 });
   check(/^\[st-warn\].*no CAN frames are arriving/.test(status()), "explains no CAN traffic: " + status());
-  check((grid().match(/val ">--/g) || []).length === 4, "all four show --");
+  check(vals().filter(v => v.text === "--").length === 4, "all four show --");
 
   console.log("5. CAN traffic arrives but nothing is decoded");
   send(ws, { v: {}, fps: 350, ids: 25 });
@@ -88,7 +90,7 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   advance(5000);                                    // 9s of silence: the page gives up on that connection
   check(ws.readyState === 3, "watchdog closes the dead connection");
   check(/Disconnected/.test(status()) && els.dot.className === "st-bad", "shows disconnected: " + status());
-  check((grid().match(/val ">--/g) || []).length === 4, "values cleared to -- (not frozen numbers)");
+  check(vals().filter(v => v.text === "--").length === 4, "values cleared to -- (not frozen numbers)");
 
   console.log("7. reconnects by itself, with backoff");
   check(FakeWS.all.length === 1, "no reconnect yet before the delay");
@@ -133,6 +135,18 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   __next(1);
   check((grid().match(/class="dcell/g) || []).length === 1, "Next goes to the 1-cell page");
   __next(-1); check((grid().match(/class="dcell/g) || []).length === 4, "Prev comes back");
+  console.log("12. the cell's Value Text Size is honoured (it used to be ignored: every number was a fixed 35px)");
+  const sizeOf = v => (v.attrs.match(/--fs:(\d+)px/) || [])[1];
+  cells[0].value_font_size = 14; cells[1].value_font_size = 28; cells[2].value_font_size = 36; cells[3].value_font_size = 120;
+  __next(0);
+  check(vals().map(sizeOf).join(",") === "18,35,45,150", "sizes 14/28/36/120 become 18/35/45/150px: " + vals().map(sizeOf).join(","));
+  check(vals().map(v => (v.attrs.match(/data-size="(\d+)"/) || [])[1]).join(",") === "14,28,36,120", "the chosen size is recorded on each number");
+  check(sizeOf(vals()[1]) === "35", "Medium (28) is exactly the 35px these numbers always were, so existing dashboards look the same");
+  delete cells[0].value_font_size; __next(0);
+  check(sizeOf(vals()[0]) === "35", "a cell with no saved size falls back to Medium");
+  cells[0].value_font_size = 96; cells[1].value_font_size = 64; cells[2].value_font_size = 48; cells[3].value_font_size = 80; __next(0);
+  check(vals().map(sizeOf).join(",") === "120,80,60,100", "96/64/48/80 -> 120/80/60/100px: " + vals().map(sizeOf).join(","));
+
 
   console.log(`\n${pass} passed, ${fail} failed`);
 })();
