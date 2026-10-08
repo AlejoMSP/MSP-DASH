@@ -46,7 +46,7 @@ static void mk(CellConfig *c, GaugeType t, const char *cap) {
   memset(c, 0, sizeof(*c));
   c->enabled = true; c->signal = SIG_AFR; c->gauge_type = t; c->min_val = 0; c->max_val = 250; c->rest_val = 0;
   strncpy(c->caption, cap, GAUGE_CAPTION_MAXLEN - 1); c->needle_color = 0xFFFFFF; c->tick_color = 0xFFFFFF; c->bg_color = 0;
-  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->tick_font_size = 28; c->history_sec = 30;
+  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->decimals = 1; c->tick_font_size = 28; c->history_sec = 30;
   c->start_deg = t == GAUGE_TYPE_HALFMOON ? 270 : 225; c->end_deg = t == GAUGE_TYPE_HALFMOON ? 90 : 135;
 }
 static lv_area_t A(lv_obj_t *o) { lv_area_t a; lv_obj_get_coords(o, &a); return a; }

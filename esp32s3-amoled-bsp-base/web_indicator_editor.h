@@ -203,6 +203,9 @@ R"rawliteral(
     // Caption / units text sizes. 0 = "Normal": the display's default font, as captions always looked. A size too big for the cell shrinks to the largest that fits.
     const CAPTION_SIZES = [[0, "Normal"], [14, "14 Small"], [20, "20"], [28, "28 Medium"], [36, "36 Large"], [48, "48 XL"]];
     const VALIGNS = [[0, "Center"], [1, "Top"], [2, "Bottom"]];
+    const DECIMALS = [[0, "0  (14)"], [1, "1  (14.7)"], [2, "2  (14.70)"]];
+    // Digits after the point for a cell's readout; anything unset or unknown is 1, what readouts always showed.
+    function decimalsOf(c) { const d = Number(c && c.decimals); return (d === 0 || d === 1 || d === 2) ? d : 1; }
 
     // Choosing a signal also sets the scale to its usual range (AFR 10-20, temperatures 60-250, pressures 0-100), and the needle's
     // rest position to the bottom of it. Signals without a usual range keep whatever the cell has.
@@ -215,6 +218,10 @@ R"rawliteral(
     function setCellField(pIdx, cIdx, key, value) { pages[pIdx].cells[cIdx][key] = value; }
     function captionSizeOptions(selected) {
       return CAPTION_SIZES.map(([v, n]) => `<option value="${v}" ${(selected || 0) === v ? "selected" : ""}>${n}</option>`).join("");
+    }
+    function decimalsOptions(selected) {
+      const d = decimalsOf({ decimals: selected });
+      return DECIMALS.map(([v, n]) => `<option value="${v}" ${d === v ? "selected" : ""}>${n}</option>`).join("");
     }
     function valignOptions(selected) {
       return VALIGNS.map(([v, n]) => `<option value="${v}" ${(selected || 0) === v ? "selected" : ""}>${n}</option>`).join("");

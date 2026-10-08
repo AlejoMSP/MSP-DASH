@@ -215,8 +215,10 @@ function renderIndicators(page, pageIdx) {
       grid.innerHTML = page.cells.map((c, i) => {
         if (!c.enabled) return `<div class="dcell c${i}"></div>`;
         const raw = signalValues[c.signal];
-        const value = (raw === undefined) ? "--" : (raw / c.value_divisor).toFixed(1);
-        const displayVal = raw === undefined ? value : parseFloat(value);
+        const scaled = raw === undefined ? undefined : raw / c.value_divisor;
+        const dec = [0, 1, 2].includes(Number(c.decimals)) ? Number(c.decimals) : 1;   // the editor's Decimals, like the round display
+        const value = (raw === undefined) ? "--" : scaled.toFixed(dec);
+        const displayVal = raw === undefined ? value : scaled;
         const isWarn = c.has_warning && raw !== undefined && (c.warning_above ? displayVal > c.warning_threshold : displayVal < c.warning_threshold);
         const size = c.value_font_size || 28;   // the editor's Value Text Size; 28 renders as the 35px these numbers always were
         // The editor's Caption size (0 = the normal 0.85em; a big caption shrinks to the cell's width), the Units line under the number,
@@ -447,7 +449,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
         low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
@@ -503,6 +505,8 @@ R"rawliteral(
               ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
             </select>
           </label>
+          <label>Decimals
+            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
           <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
           ${(c.gauge_type===0 || c.gauge_type===2) ? `
           <div class="row2">
@@ -910,7 +914,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
         has_warning:false, warning_threshold:0, warning_above:false };
     }
 
@@ -964,6 +968,8 @@ R"rawliteral(
               ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
             </select>
           </label>
+          <label>Decimals
+            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
           <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
           <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>

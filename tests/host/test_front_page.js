@@ -171,6 +171,15 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
     reset(); cells[0].caption = '<img src=x onerror=alert(1)>'; __next(0);
     check(grid().includes("&lt;img src=x onerror=alert(1)&gt;") && !grid().includes("<img"), "a caption with HTML in it is shown as text, not run");
     reset(); __next(0); }
+  console.log("12c. Decimals: digits after the point, as the round display shows them");
+  { ws = FakeWS.all[FakeWS.all.length - 1]; if (ws.readyState !== 1) open(ws);
+    cells[0].decimals = 0; cells[1].decimals = 2; cells[2].decimals = 0; cells[3].decimals = 7; __next(0);
+    send(ws, { v: { "1": 3012.6, "2": 220.4, "3": 101.234, "4": 14.66 }, fps: 400, ids: 36 });
+    const t = vals().map(v => v.text);
+    check(t.join(",") === "3013,101.23,220,14.7", "0 / 2 / 0 decimals and an unknown value (7) shown as 1: " + t.join(","));
+    check(vals()[2].warn, "the warning compares the real reading (220.4 is over 220 even though it shows 220)");
+    cells.forEach(c => delete c.decimals); __next(0);
+    check(vals().map(v => v.text).join(",") === "3012.6,101.2,220.4,14.7", "a cell with no Decimals setting shows 1, as before: " + vals().map(v => v.text).join(",")); }
   console.log("13. indicator lamps: the same on/off rule as the round display");
   { // the SAME cases, with the SAME expected answers, as tests/host/test_indicators.c
     const N = (was, v, op, thr, hyst) => __ind(was, true, v, op, thr, hyst);

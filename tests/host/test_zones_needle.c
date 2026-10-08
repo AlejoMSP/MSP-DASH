@@ -40,7 +40,7 @@ static void mk(CellConfig *c, GaugeType t, uint32_t needleColor) {
   memset(c, 0, sizeof(*c));
   c->enabled = true; c->signal = SIG_AFR; c->gauge_type = t; c->min_val = 0; c->max_val = 250; c->rest_val = 0;
   strcpy(c->caption, "AFR"); c->needle_color = needleColor; c->tick_color = 0xFFFFFF; c->bg_color = 0;
-  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->tick_font_size = 28;
+  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->decimals = 1; c->tick_font_size = 28;
   c->start_deg = t == GAUGE_TYPE_HALFMOON ? 270 : 225; c->end_deg = t == GAUGE_TYPE_HALFMOON ? 90 : 135; c->history_sec = 30;
 }
 static lv_obj_t *s_pageScr[8]; static int s_nPage = 0;

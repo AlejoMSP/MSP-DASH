@@ -59,6 +59,10 @@ static inline int32_t gauge_snap_caption_size(int32_t v) {
 #define GAUGE_VALIGN_BOTTOM 2
 static inline int32_t gauge_resolve_valign(int32_t v) { return (v == GAUGE_VALIGN_TOP || v == GAUGE_VALIGN_BOTTOM) ? v : GAUGE_VALIGN_CENTER; }
 
+// ---- digits after the decimal point in a readout (the big number, the alert value) ----
+#define GAUGE_DECIMALS_DEFAULT 1   // what every readout showed before this setting existed
+static inline int32_t gauge_resolve_decimals(int32_t v) { return (v >= 0 && v <= 2) ? v : GAUGE_DECIMALS_DEFAULT; }
+
 // ---- readout text sizes ----
 #define GAUGE_VALUE_SIZE_COUNT 8
 static const int32_t GAUGE_VALUE_SIZES[GAUGE_VALUE_SIZE_COUNT] = { 14, 28, 36, 48, 64, 80, 96, 120 };

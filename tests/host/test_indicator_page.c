@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
     // pages: 6 lamps/2 cols, 12/3, 1/1, 5/4, empty, a gauge page, 12/4, 3/1
     static const int N[8] = { 6, 12, 1, 5, 0, -1, 12, 3 }, C[8] = { 2, 3, 1, 4, 2, 0, 4, 1 };
     for (int p = 0; p < 8; p++) {
-      if (N[p] < 0) { s_cfg[p].enabled = true; s_cfg[p].layout = LAYOUT_1CELL; s_cfg[p].cells[0].enabled = true; s_cfg[p].cells[0].gauge_type = GAUGE_TYPE_NUMBER; s_cfg[p].cells[0].signal = SIG_RPM; s_cfg[p].cells[0].max_val = 100; s_cfg[p].cells[0].value_divisor = 1; s_cfg[p].cells[0].value_font_size = 28; s_cfg[p].cells[0].refresh_hz = 10; continue; }
+      if (N[p] < 0) { s_cfg[p].enabled = true; s_cfg[p].layout = LAYOUT_1CELL; s_cfg[p].cells[0].enabled = true; s_cfg[p].cells[0].gauge_type = GAUGE_TYPE_NUMBER; s_cfg[p].cells[0].signal = SIG_RPM; s_cfg[p].cells[0].max_val = 100; s_cfg[p].cells[0].value_divisor = 1; s_cfg[p].cells[0].value_font_size = 28; s_cfg[p].cells[0].decimals = 1; s_cfg[p].cells[0].refresh_hz = 10; continue; }
       ipage(&s_cfg[p], C[p], N[p]);
       for (int i = 0; i < N[p]; i++) lamp(&s_cfg[p].indicators[i], SIG_OILP, GAUGE_IND_BELOW, 40, 0, i % 2 ? "CHECK ENG" : "OIL", i % 3 ? "ok" : "", 0xE53935, 0x2A2A2A, false);
     }
@@ -194,7 +194,7 @@ int main(int argc, char **argv) {
 
   if (!strcmp(mode, "nav")) {
     // page 0 gauge (with a full-screen alert), page 1 indicators, page 2 gauge
-    for (int p = 0; p < 3; p++) { s_cfg[p].enabled = true; s_cfg[p].layout = LAYOUT_1CELL; CellConfig *c = &s_cfg[p].cells[0]; c->enabled = true; c->gauge_type = GAUGE_TYPE_NUMBER; c->signal = SIG_OILP; c->max_val = 100; c->value_divisor = 1; c->value_font_size = 28; c->refresh_hz = 20; strcpy(c->caption, p ? "P2" : "OIL");
+    for (int p = 0; p < 3; p++) { s_cfg[p].enabled = true; s_cfg[p].layout = LAYOUT_1CELL; CellConfig *c = &s_cfg[p].cells[0]; c->enabled = true; c->gauge_type = GAUGE_TYPE_NUMBER; c->signal = SIG_OILP; c->max_val = 100; c->value_divisor = 1; c->value_font_size = 28; c->decimals = 1; c->refresh_hz = 20; strcpy(c->caption, p ? "P2" : "OIL");
       if (p == 0) { c->has_warning = true; c->warning_threshold = 40; c->warning_above = false; c->alert_fullscreen = true; } }
     ipage(&s_cfg[1], 2, 2); lamp(&s_cfg[1].indicators[0], SIG_FAN, GAUGE_IND_ABOVE, 0.5f, 0, "FAN", "fan", 0x1E88E5, 0x2A2A2A, false); lamp(&s_cfg[1].indicators[1], SIG_CEL, GAUGE_IND_ABOVE, 0.5f, 0, "CEL", "cel", 0xFDD835, 0x2A2A2A, false);
     build_gauge_app(); index_pages(); run_ms(300);

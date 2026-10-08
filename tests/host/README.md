@@ -104,7 +104,7 @@ All of these need the big digit fonts linked in: add `<sketch>/font_digits_*.c` 
 code uses them for readouts of 48 px and up).
 
 - `test_dial_text.c`: the real `gauge_app.c` against LVGL, one scenario per run
-  (`./t num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan`).
+  (`./t num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals`).
   Number readouts at all eight sizes in every layout: never bigger than asked, the worst-case reading
   (`250.0`) lies fully inside the round glass and its cell, the biggest size that fits is the one used
   (the next one up is checked to really not fit), a 1-cell page honours every size, the caption is not cut
@@ -113,7 +113,7 @@ code uses them for readouts of 48 px and up).
   (including wrap-around, a 5 degree sliver, equal angles, negative and over-360 values) checked against a
   hand-written table of the LVGL rotation, sweep and vertical shift; every pair is also drawn with moving
   data (a bad angle must not crash LVGL). `nan`: a reading that is not a number shows `--`, never "nan"
-  (the digit-only fonts cannot draw letters).
+  (the digit-only fonts cannot draw letters). `decimals`: 0 / 1 / 2 digits after the point (unknown = 1), and "250.00" still fits the glass.
 - `test_editor_dial.js`: the display editor's script: the dial-geometry table (the preview must equal the
   display's rules), which controls appear for each gauge type, typing an angle redraws only the picture,
   Needle/Half-Moon switching, and every path of Save & Reboot (save first and only then reboot, the

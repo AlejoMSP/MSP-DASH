@@ -92,7 +92,7 @@ static void cell(CellConfig *c, SignalId sig, GaugeType t, const char *cap, int 
   c->min_val = min; c->max_val = max; c->rest_val = min;
   strncpy(c->caption, cap, GAUGE_CAPTION_MAXLEN - 1);
   c->needle_color = 0xFFFFFF; c->tick_color = 0xFFFFFF; c->bg_color = 0x000000;
-  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28;
+  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->decimals = 1;
   c->has_warning = warn; c->warning_threshold = thr; c->warning_above = above; c->alert_fullscreen = alert;
   c->history_sec = 30;
 }

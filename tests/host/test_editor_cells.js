@@ -85,6 +85,9 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
       check((capSel.match(/<option /g) || []).length === 6 && capSel.includes('<option value="36" selected>36 Large</option>') && capSel.includes('>Normal</option>') && capSel.includes('>14 Small</option>') && capSel.includes('>48 XL</option>'), "caption size: Normal, 14, 20, 28, 36, 48 with the saved 36 selected");
       check(html({}).includes('<option value="0" selected>Normal</option>'), "an unset caption size shows as Normal");
       check(html({ v_align: 2 }).includes('<option value="2" selected>Bottom</option>') && html({ v_align: 1 }).includes('<option value="1" selected>Top</option>') && html({}).includes('<option value="0" selected>Center</option>'), "gauge position: Center / Top / Bottom with the saved one selected");
+      { const ds = h => (h.match(/'decimals',parseInt\(this\.value\)\)">([\s\S]*?)<\/select>/) || [])[1] || "";
+        check((ds(html({})).match(/<option /g) || []).length === 3 && ds(html({})).includes('<option value="1" selected>'), "decimals: 0 / 1 / 2, an unset one shows 1");
+        check(ds(html({ decimals: 0 })).includes('<option value="0" selected>') && ds(html({ decimals: 2 })).includes('<option value="2" selected>') && ds(html({ decimals: 9 })).includes('<option value="1" selected>'), "decimals: the saved 0 / 2 is selected, an unknown value shows 1"); }
       const faceOn = /<input type="checkbox" checked onchange="setCellField\(0,0,'caption_on_face',this\.checked\)">/.test(html({ gauge_type: 0, caption_on_face: true }));
       const faceOff = /<input type="checkbox"  onchange="setCellField\(0,0,'caption_on_face',this\.checked\)">/.test(html({ gauge_type: 0, caption_on_face: false }));
       check(display ? (faceOn && faceOff) : (!faceOn && !faceOff), display ? "the face checkbox is ticked when saved on, and not ticked when off" : "the web dashboard editor has no face checkbox (there is no dial there)"); }
@@ -93,7 +96,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
 
     console.log("3. new cells and saving");
     const e = R('emptyCell()');
-    check(e.caption_font_size === 0 && e.caption_on_face === false && e.units === "" && e.v_align === 0, "a new cell: Normal caption, not on the face, no units, centred");
+    check(e.caption_font_size === 0 && e.caption_on_face === false && e.units === "" && e.v_align === 0 && e.decimals === 1, "a new cell: Normal caption, not on the face, no units, centred, 1 decimal");
     R('setCellField(0, 0, "caption_font_size", 36); setCellField(0, 0, "units", "kPa"); setCellField(0, 0, "v_align", 2); setCellField(0, 0, "caption_on_face", true);');
     check(R('pages[0].cells[0].caption_font_size') === 36 && R('pages[0].cells[0].units') === "kPa" && R('pages[0].cells[0].v_align') === 2 && R('pages[0].cells[0].caption_on_face') === true, "the four settings are stored on the cell");
     R('save()'); await settle();

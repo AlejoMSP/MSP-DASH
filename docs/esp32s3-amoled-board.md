@@ -2031,3 +2031,15 @@ very big readout on a wide-sweep dial (300 degrees, 48 px) can touch the end of 
 checks; style helpers 13; config 182; editor cells 71; dashboard 87; browser layout check 24 views; 14 deliberate breakages of the
 display, 10 of the editors and 6 of the dashboard were caught (7 tests were strengthened after breakages first slipped through; a
 layout-check run also caught that cell padding changed the big-number sizes, which was fixed). NOT run on the board.
+
+## Decimals in the readout (build 112)
+
+Request: choose how many digits follow the point in a gauge's number (it was always one: "3000.0" RPM).
+
+**New cell field** `decimals` (display and web editors; JSON key the same): 0, 1 or 2. A config saved before this existed, or an
+unknown value, loads as 1, so existing gauges look exactly as before. It applies to the big number (number cells and needle /
+half-moon dials with Show value), the full-screen alert's value, and the web dashboard. The readout size is still picked for the
+widest text the cell can show, now formatted with its own decimals ("250.00" with 2), so a 2-decimal readout may come out one size
+smaller. Warnings compare the real reading, not the rounded one (on the web dashboard they used to compare the 1-decimal text).
+The dial numbers around a needle are not affected. Tests: `test_dial_text decimals`, `test_style_defaults` (4), `test_gauge_config`,
+`test_editor_cells.js`, `test_front_page.js` (12c). Host test cell builders now set `decimals = 1` like makeCell() does.

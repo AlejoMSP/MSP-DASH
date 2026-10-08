@@ -414,6 +414,16 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"caption_font_size\":22}"); CHECK(c10.caption_font_size == 20, "caption size 22 snaps to 20");
   c10 = load1("{\"enabled\":true,\"caption_font_size\":999}"); CHECK(c10.caption_font_size == 48, "999 snaps to 48");
   c10 = load1("{\"enabled\":true,\"caption_font_size\":-5}"); CHECK(c10.caption_font_size == 0, "a negative size means 'default'");
+  { wipe(); gauge_config_init(); p = gauge_config_get_pages();
+    bool allOne = true; for (int pg = 0; pg < MAX_PAGES; pg++) for (int ci = 0; ci < MAX_CELLS_PER_PAGE; ci++) if (p[pg].enabled && p[pg].cells[ci].enabled && p[pg].cells[ci].decimals != 1) allOne = false;
+    CHECK(allOne, "decimals: every default gauge shows 1 decimal, as before");
+    for (int want : {0, 2}) { p[0].cells[0].decimals = want; CHECK(gauge_config_save(), "saves");
+      gauge_config_init(); p = gauge_config_get_pages();
+      CHECK(p[0].cells[0].decimals == want, want ? "decimals 2 survives a reboot" : "decimals 0 survives a reboot"); } }
+  c10 = load1("{\"enabled\":true}"); CHECK(c10.decimals == 1, "a config saved before Decimals existed shows 1");
+  c10 = load1("{\"enabled\":true,\"decimals\":5}"); CHECK(c10.decimals == 1, "an unknown decimals value is 1");
+  c10 = load1("{\"enabled\":true,\"decimals\":-2}"); CHECK(c10.decimals == 1, "a negative decimals value is 1");
+  c10 = load1("{\"enabled\":true,\"decimals\":0}"); CHECK(c10.decimals == 0, "0 is kept");
   c10 = load1("{\"enabled\":true,\"v_align\":7}"); CHECK(c10.v_align == 0, "an unknown position is centre");
   c10 = load1("{\"enabled\":true,\"v_align\":1}"); CHECK(c10.v_align == 1, "top is kept");
   c10 = load1("{\"enabled\":true,\"units\":\"ABCDEFGHIJK\"}"); CHECK(strcmp(c10.units, "ABCDEFG") == 0, "units are cut to 7 characters");

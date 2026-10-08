@@ -114,6 +114,7 @@ typedef struct {
   uint32_t bg_color;
   bool has_warning;
   float warning_threshold;
+  int32_t decimals;        // readout digits after the point (0-2)
   bool warning_above;
   bool warning_active;
   bool alert_fullscreen;
@@ -234,8 +235,9 @@ static bool box_in_panel(float cx, float cy, float w, float h) {
 // The widest text this cell's readout can need: its lowest or highest value, formatted as it will be.
 static void readout_sample(const CellConfig *cfg, char *out, size_t n) {
   char lo[24], hi[24];
-  snprintf(lo, sizeof(lo), "%.1f", (double)cfg->min_val);
-  snprintf(hi, sizeof(hi), "%.1f", (double)cfg->max_val);
+  int d = (int)gauge_resolve_decimals(cfg->decimals);
+  snprintf(lo, sizeof(lo), "%.*f", d, (double)cfg->min_val);
+  snprintf(hi, sizeof(hi), "%.*f", d, (double)cfg->max_val);
   snprintf(out, n, "%s", strlen(lo) > strlen(hi) ? lo : hi);
 }
 
@@ -438,6 +440,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->bg_color = cfg->bg_color;
   rt->has_warning = cfg->has_warning;
   rt->warning_threshold = cfg->warning_threshold;
+  rt->decimals = gauge_resolve_decimals(cfg->decimals);
   rt->warning_above = cfg->warning_above;
   rt->warning_active = false;
   rt->alert_fullscreen = cfg->alert_fullscreen;
@@ -918,7 +921,7 @@ static void update_alert_overlay(uint32_t now) {
     const char *name = first->caption[0] ? first->caption : gauge_config_signal_name(first->signal);
     snprintf(buf, sizeof(buf), "%s %s", name, first->warning_above ? "HIGH" : "LOW");
     set_label_if_changed(s_alertTitle, buf);
-    snprintf(buf, sizeof(buf), "%.1f", firstValue);
+    snprintf(buf, sizeof(buf), "%.*f", (int)first->decimals, firstValue);
     set_label_if_changed(s_alertValue, buf);
     if (count > 1) snprintf(buf, sizeof(buf), "+%d more", count - 1);
     else buf[0] = '\0';
@@ -1009,7 +1012,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
       // No data (before the first frame, or the bus went quiet): show
       // dashes rather than 0.0 or a frozen last reading.
       char buf[16];
-      if (has_data && isfinite(value)) snprintf(buf, sizeof(buf), "%.1f", value);   // the big fonts only have digits: never feed them "nan"/"inf"
+      if (has_data && isfinite(value)) snprintf(buf, sizeof(buf), "%.*f", (int)c->decimals, value);   // the big fonts only have digits: never feed them "nan"/"inf"
       else snprintf(buf, sizeof(buf), "--");
 
       if (c->gauge_type == GAUGE_TYPE_NUMBER) {

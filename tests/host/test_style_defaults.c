@@ -32,6 +32,10 @@ int main(void) {
   CHECK(gauge_resolve_valign(0) == 0 && gauge_resolve_valign(1) == 1 && gauge_resolve_valign(2) == 2, "centre, top, bottom are kept");
   CHECK(gauge_resolve_valign(3) == 0 && gauge_resolve_valign(-1) == 0 && gauge_resolve_valign(99) == 0, "anything else is centre");
 
+  printf("4. decimals\n");
+  CHECK(gauge_resolve_decimals(0) == 0 && gauge_resolve_decimals(1) == 1 && gauge_resolve_decimals(2) == 2, "0, 1, 2 are kept");
+  CHECK(gauge_resolve_decimals(3) == 1 && gauge_resolve_decimals(-1) == 1 && gauge_resolve_decimals(99) == 1, "anything else is 1, what readouts always showed");
+
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -53,7 +53,7 @@ static void mkcell(CellConfig *c, GaugeType t, int valSize, int tickSize, int st
   c->enabled = true; c->signal = SIG_AFR; c->gauge_type = t; c->min_val = 0; c->max_val = 250; c->rest_val = 0;
   strcpy(c->caption, "AFR"); c->needle_color = 0xFFFFFF; c->tick_color = 0xFFFFFF; c->bg_color = 0;
   c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50;
-  c->show_value = showValue; c->value_font_size = valSize; c->tick_font_size = tickSize; c->start_deg = start; c->end_deg = end; c->history_sec = 30;
+  c->show_value = showValue; c->value_font_size = valSize; c->decimals = 1; c->tick_font_size = tickSize; c->start_deg = start; c->end_deg = end; c->history_sec = 30;
 }
 static bool inside_circle(const lv_area_t *a, float r) {
   float xs[2] = { (float)a->x1, (float)a->x2 + 1 }, ys[2] = { (float)a->y1, (float)a->y2 + 1 };
@@ -95,6 +95,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angles")) mkcell(cc, GAUGE_TYPE_NEEDLE, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
+      else if (!strcmp(mode, "decimals")) { mkcell(cc, p == 3 ? GAUGE_TYPE_NEEDLE : GAUGE_TYPE_NUMBER, 120, 28, 225, 135, true);
+        cc->decimals = (p == 4) ? 7 : (p == 3 ? 2 : p % 3); cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
       else { printf("unknown mode %s\n", mode); return 2; }
     }
   }
@@ -236,6 +238,28 @@ int main(int argc, char **argv) {
     CHECK(strcmp(lv_label_get_text(num), "--") == 0, "infinity shows -- too");
     s_val[SIG_AFR] = -3.25f; run_ms(100);
     CHECK(strcmp(lv_label_get_text(num), "-3.2") == 0 || strcmp(lv_label_get_text(num), "-3.3") == 0, "a negative reading shows its minus sign");
+  }
+
+  if (!strcmp(mode, "decimals")) {
+    printf("decimals: digits after the point in the readout\n");
+    s_has[SIG_AFR] = true; s_val[SIG_AFR] = 14.66f; run_ms(100);
+    static const char *WANT[5] = { "15", "14.7", "14.66", "14.66", "14.7" };   // 0, 1, 2, needle dial with 2, unknown (7) = 1
+    for (int p = 0; p < 5; p++) {
+      lv_obj_t *box = lv_obj_get_child(s_pageScr[p], 0), *lbl = NULL;
+      for (uint32_t i = 0; i < lv_obj_get_child_cnt(box) && !lbl; i++) { lv_obj_t *k = lv_obj_get_child(box, i);
+        if (lv_obj_check_type(k, &lv_label_class) && strchr("0123456789", lv_label_get_text(k)[0])) lbl = k; }
+      char m[120]; snprintf(m, sizeof(m), "page %d shows %s (got %s)", p, WANT[p], lbl ? lv_label_get_text(lbl) : "no label");
+      CHECK(lbl && strcmp(lv_label_get_text(lbl), WANT[p]) == 0, m);
+    }
+    // the size is picked for the WIDEST text it will show: with 2 decimals "250.00" must fit inside the round glass and the cell
+    for (int p = 0; p < 3; p++) {
+      lv_obj_update_layout(s_pageScr[p]);
+      lv_obj_t *box = lv_obj_get_child(s_pageScr[p], 0), *num = lv_obj_get_child(box, 0);
+      const char *worst = p == 0 ? "250" : (p == 1 ? "250.0" : "250.00");
+      lv_area_t a; lv_obj_get_coords(num, &a); lv_area_t w = box_around(&a, lv_obj_get_style_text_font(num, LV_PART_MAIN), worst);
+      char m[120]; snprintf(m, sizeof(m), "%d decimals: the worst case %s fits the round glass", p, worst);
+      CHECK(inside_circle(&w, 233.0f), m);
+    }
   }
 
   printf("\n%d passed, %d failed\n", g_pass, g_fail);

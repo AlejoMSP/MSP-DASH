@@ -36,7 +36,7 @@ static void cell(CellConfig *c, SignalId sig, GaugeType t, const char *cap, int 
   c->enabled = true; c->signal = sig; c->gauge_type = t; c->min_val = min; c->max_val = max; c->rest_val = min;
   strncpy(c->caption, cap, GAUGE_CAPTION_MAXLEN - 1);
   c->needle_color = 0x4DD0E1; c->tick_color = 0xAAAAAA; c->bg_color = 0x000000;
-  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28;
+  c->value_divisor = 1.0f; c->tick_count = 26; c->major_nth = 5; c->refresh_hz = 50; c->value_font_size = 28; c->decimals = 1;
   c->has_warning = warn; c->warning_threshold = thr; c->warning_above = above; c->alert_fullscreen = alert;
 #ifdef HAVE_HISTORY
   c->history_sec = 30;
