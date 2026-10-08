@@ -111,8 +111,9 @@ R"rawliteral(<style>
     .layout-3up { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
     .layout-3up .c0 { grid-column: 1 / 3; }
     .layout-2x2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-    .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; container-type:inline-size; }
+    .dcell { background:#0d1b2a; border:1px solid #223; display:flex; flex-direction:column; align-items:center; justify-content:center; container-type:inline-size; padding:8px 0; }
     .dcell .cap { font-size:0.85em; color:#4dd0e1; }
+    .dcell .units { font-size:0.85em; color:#a0a0a0; }
     .dcell .val { font-size:2.2em; font-weight:bold; margin-top:4px; white-space:nowrap; }
     /* The cell's "Value Text Size" setting (--fs), but never wider than the cell: 26% of the cell's width per character-ish.
        Browsers too old for cqw ignore this line and keep the fixed size above. */
@@ -218,7 +219,14 @@ function renderIndicators(page, pageIdx) {
         const displayVal = raw === undefined ? value : parseFloat(value);
         const isWarn = c.has_warning && raw !== undefined && (c.warning_above ? displayVal > c.warning_threshold : displayVal < c.warning_threshold);
         const size = c.value_font_size || 28;   // the editor's Value Text Size; 28 renders as the 35px these numbers always were
-        return `<div class="dcell c${i}"><div class="cap">${c.caption}</div><div class="val ${isWarn?'warn':''}" data-size="${size}" style="--fs:${Math.round(size * 1.25)}px">${value}</div></div>`;
+        // The editor's Caption size (0 = the normal 0.85em; a big caption shrinks to the cell's width), the Units line under the number,
+        // and Gauge position (Top / Bottom move the whole block; Center is as it always was).
+        const capPx = [14, 20, 28, 36, 48].includes(c.caption_font_size) ? c.caption_font_size : 0;
+        const capStyle = capPx ? ` style="font-size:${capPx}px;font-size:min(${capPx}px,14cqw)"` : "";
+        const unitsHtml = c.units ? `<div class="units"${capStyle}>${escHtml(c.units)}</div>` : "";
+        const justify = c.v_align === 1 ? "flex-start" : (c.v_align === 2 ? "flex-end" : "");
+        const cellStyle = justify ? ` style="justify-content:${justify}"` : "";
+        return `<div class="dcell c${i}"${cellStyle}><div class="cap"${capStyle}>${escHtml(c.caption)}</div><div class="val ${isWarn?'warn':''}" data-size="${size}" style="--fs:${Math.round(size * 1.25)}px">${value}</div>${unitsHtml}</div>`;
       }).join("");
     }
 
@@ -439,7 +447,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, start_deg:225, end_deg:135,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
         low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
@@ -464,11 +472,18 @@ R"rawliteral(
         <div class="cell">
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
           ${!c.enabled ? "" : `
-          <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
+          <label>Signal <select onchange="setCellSignal(${pIdx},${cIdx},parseInt(this.value))">${signalOptionsHtml(c.signal)}</select></label>
           <label>Gauge Type <select onchange="changeGaugeType(${pIdx},${cIdx},parseInt(this.value))">
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
-          <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
+            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. kPa" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
+          </div>
+          ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
+            <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
+          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<label><input type="checkbox" ${c.caption_on_face ? "checked" : ""} onchange="setCellField(${pIdx},${cIdx},'caption_on_face',this.checked)"> Show the caption on the dial face (above the hub)</label>` : ""}
           <div class="row2">
             <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
             <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>
@@ -895,7 +910,7 @@ R"rawliteral(
     function emptyCell() {
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, start_deg:225, end_deg:135,
+        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
         has_warning:false, warning_threshold:0, warning_above:false };
     }
 
@@ -919,11 +934,17 @@ R"rawliteral(
         <div class="cell">
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
           ${!c.enabled ? "" : `
-          <label>Signal <select onchange="pages[${pIdx}].cells[${cIdx}].signal=parseInt(this.value)">${signalOptionsHtml(c.signal)}</select></label>
+          <label>Signal <select onchange="setCellSignal(${pIdx},${cIdx},parseInt(this.value))">${signalOptionsHtml(c.signal)}</select></label>
           <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value)">
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
-          <label>Caption <input type="text" value="${c.caption}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
+            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. kPa" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
+          </div>
+          ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
+            <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
           <div class="row2">
             <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
             <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>

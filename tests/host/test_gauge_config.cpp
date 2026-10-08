@@ -58,6 +58,7 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
       c.low_crit_on = (j % 2) == 0; c.low_crit = 10 + i; c.low_warn_on = (i % 2) == 0; c.low_warn = 30 + j; c.high_warn_on = (i + j) % 2 == 1; c.high_warn = 150 + i; c.high_crit_on = (i + j) % 3 == 0; c.high_crit = 200 + j; c.zone_style = 1 + (i + j) % 3;
       c.needle_hub_pct = 5 + j; c.needle_tip_pct = 3 + i;
+      c.caption_font_size = GAUGE_CAPTION_SIZES[(i + j) % GAUGE_CAPTION_SIZE_COUNT]; c.caption_on_face = (i + j) % 2 == 0; snprintf(c.units, GAUGE_UNITS_MAXLEN, "u%d%d", i, j); c.v_align = (i + j) % 3;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;
     }
@@ -153,7 +154,7 @@ int main(int argc, char **argv) {
   printf("S5 the web-format JSON round-trips (what the editors send and receive)\n");
   fillAll(p);
   std::string web = toJson(p);
-  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","low_crit_on","low_crit","low_warn_on","low_warn","high_warn_on","high_warn","high_crit_on","high_crit","zone_style","needle_hub_pct","needle_tip_pct","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
+  for (const char *key : { "enabled","signal","gauge_type","min","max","rest","caption","needle_color","tick_color","bg_color","value_divisor","tick_count","major_nth","refresh_hz","show_value","value_font_size","tick_font_size","start_deg","end_deg","low_crit_on","low_crit","low_warn_on","low_warn","high_warn_on","high_warn","high_crit_on","high_crit","zone_style","needle_hub_pct","needle_tip_pct","caption_font_size","caption_on_face","units","v_align","has_warning","warning_threshold","warning_above","alert_fullscreen","history_sec","ref_enabled","ref_value" })
     CHECK(web.find(std::string("\"") + key + "\":") != std::string::npos, (std::string("key present in the JSON: ") + key).c_str());
   PageConfig scratch[MAX_PAGES];
   { JsonDocument d; deserializeJson(d, web); gauge_config_pages_from_json(d.as<JsonArray>(), scratch); }
@@ -399,6 +400,35 @@ int main(int argc, char **argv) {
     memset(p, 0, sizeof(PageConfig) * MAX_PAGES); gauge_config_init(); p = gauge_config_get_pages();
     CHECK(toJson(p) == before, "and reloads exactly as saved");
   }
+
+  printf("S19 caption size, caption on the dial face, units, gauge position, default scales\n");
+  wipe(); gauge_config_init(); p = gauge_config_get_pages();
+  { CellConfig &d = p[0].cells[0];
+    CHECK(d.caption_font_size == 0 && !d.caption_on_face && d.units[0] == 0 && d.v_align == 0, "defaults: caption in the display's default font, at the bottom, no units, centred"); }
+  { CellConfig &z = p[0].cells[0]; z.caption_font_size = 36; z.caption_on_face = true; strcpy(z.units, "kPa"); z.v_align = 2; }
+  CHECK(gauge_config_save(), "saves");
+  gauge_config_init(); p = gauge_config_get_pages();
+  { CellConfig &z = p[0].cells[0]; CHECK(z.caption_font_size == 36 && z.caption_on_face && strcmp(z.units, "kPa") == 0 && z.v_align == 2, "all four survive a reboot"); }
+  c10 = load1("{\"enabled\":true,\"gauge_type\":0}");
+  CHECK(c10.caption_font_size == 0 && !c10.caption_on_face && c10.units[0] == 0 && c10.v_align == 0, "a config saved before these existed looks exactly as before");
+  c10 = load1("{\"enabled\":true,\"caption_font_size\":22}"); CHECK(c10.caption_font_size == 20, "caption size 22 snaps to 20");
+  c10 = load1("{\"enabled\":true,\"caption_font_size\":999}"); CHECK(c10.caption_font_size == 48, "999 snaps to 48");
+  c10 = load1("{\"enabled\":true,\"caption_font_size\":-5}"); CHECK(c10.caption_font_size == 0, "a negative size means 'default'");
+  c10 = load1("{\"enabled\":true,\"v_align\":7}"); CHECK(c10.v_align == 0, "an unknown position is centre");
+  c10 = load1("{\"enabled\":true,\"v_align\":1}"); CHECK(c10.v_align == 1, "top is kept");
+  c10 = load1("{\"enabled\":true,\"units\":\"ABCDEFGHIJK\"}"); CHECK(strcmp(c10.units, "ABCDEFG") == 0, "units are cut to 7 characters");
+  c10 = load1("{\"enabled\":true,\"units\":\"\\u00b0F \\u0007kPa\"}"); CHECK(strcmp(c10.units, "F kPa") == 0, "the degree sign and control characters (which the fonts cannot draw) are dropped");
+  { wipe(); gauge_config_init(); p = gauge_config_get_pages();
+    auto first = [&](SignalId sig) -> const CellConfig * { for (int i = 0; i < MAX_PAGES; i++) if (p[i].enabled && p[i].kind == PAGE_GAUGES && p[i].cells[0].signal == sig) return &p[i].cells[0]; return nullptr; };
+    const CellConfig *clt = first(SIG_CLT), *oilt = first(SIG_OILT), *afr = first(SIG_AFR), *oilp = first(SIG_OILP), *fuelp = first(SIG_FUELP), *map = first(SIG_MAP);
+    CHECK(clt && clt->min_val == 60 && clt->max_val == 250 && clt->rest_val == 60, "the default coolant gauge is 60 to 250 (it was 65)");
+    CHECK(oilt && oilt->min_val == 60 && oilt->max_val == 250, "the default oil temperature gauge is 60 to 250");
+    CHECK(afr && afr->min_val == 10 && afr->max_val == 20, "the default AFR gauge is 10 to 20");
+    CHECK(oilp && oilp->min_val == 0 && oilp->max_val == 100 && fuelp && fuelp->min_val == 0 && fuelp->max_val == 100, "the default oil and fuel pressure gauges are 0 to 100");
+    CHECK(map && map->min_val == 0 && map->max_val == 250 && map->rest_val == 100, "the default MAP/boost gauge keeps 0 to 250 (boost reads above 100)");
+    PageConfig *w = gauge_config_get_web_pages(); gauge_config_web_init(); w = gauge_config_get_web_pages();
+    bool webClt = false; for (int i = 0; i < 4; i++) if (w[0].cells[i].signal == SIG_CLT) webClt = w[0].cells[i].min_val == 60;
+    CHECK(webClt, "the default web dashboard's coolant number uses 60 too"); }
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);

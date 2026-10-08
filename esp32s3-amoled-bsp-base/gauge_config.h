@@ -64,6 +64,7 @@ typedef enum {
 #define MAX_CELLS_PER_PAGE 4   // matches the largest fixed layout (2x2)
 #define MAX_INDICATORS_PER_PAGE 12
 #define IND_TEXT_MAXLEN 12     // 11 characters + the end marker
+#define GAUGE_UNITS_MAXLEN 8   // units text on a gauge: 7 characters + the end marker
 #define MAX_PAGES 8
 
 // Everything a single cell needs to render and behave - essentially
@@ -86,6 +87,10 @@ typedef struct {
   int32_t refresh_hz;
   bool show_value;         // precise numeric readout alongside the needle (GAUGE_TYPE_NEEDLE/HALFMOON only - NUMBER type always shows a value by definition)
   int32_t value_font_size; // readout size: 14/28/36/48/64/80/96/120 (see gauge_style.h). Big readouts shrink to the biggest size that fits the cell.
+  int32_t caption_font_size; // caption (and units) text: 14/20/28/36/48; 0 = never set, the display's default font. Big text shrinks to fit.
+  bool caption_on_face;    // needle/half-moon only: the caption is printed ON the dial face, above the hub, instead of at the bottom of the cell
+  char units[GAUGE_UNITS_MAXLEN]; // e.g. "F", "kPa": printed under the readout (needle dials with Show value, and number cells)
+  int32_t v_align;         // where the gauge stands in its cell: 0 centre, 1 top, 2 bottom (needle, half-moon and number cells)
   int32_t tick_font_size;  // numbers around a needle/half-moon dial: 14/28/36, -1 = hidden, 0 = follow value_font_size (configs saved before this existed)
   int32_t start_deg;       // needle/half-moon dial start, compass degrees (0 = straight up, clockwise). Standard gauge 225
   int32_t end_deg;         // dial end, clockwise from the start. Standard gauge 135 (a 270 degree sweep); half moon 270 -> 90

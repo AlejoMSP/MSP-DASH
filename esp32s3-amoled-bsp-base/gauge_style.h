@@ -16,6 +16,48 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "gauge_config.h"   // SignalId, for the default scales
+
+// ---- default scales ----
+// When a signal is chosen for a gauge, its scale starts at the usual range for that kind of reading:
+// AFR 10-20, temperatures 60-250, pressures 0-100. MAP/boost is a pressure too, but it reads above 100 kPa under boost,
+// so a 0-100 scale would peg it: it keeps its own 0-250. (The web editors keep the same table in JavaScript; a test
+// reads THIS list and checks they agree.)
+#define GAUGE_DEFAULT_RANGES(X) \
+  X(SIG_AFR,   10, 20) \
+  X(SIG_CLT,   60, 250) \
+  X(SIG_OILT,  60, 250) \
+  X(SIG_OILP,  0,  100) \
+  X(SIG_FUELP, 0,  100)
+
+static inline bool gauge_signal_default_range(int sig, int32_t *mn, int32_t *mx) {
+#define GAUGE_RANGE_CASE(S, A, B) if (sig == (S)) { *mn = (A); *mx = (B); return true; }
+  GAUGE_DEFAULT_RANGES(GAUGE_RANGE_CASE)
+#undef GAUGE_RANGE_CASE
+  return false;
+}
+
+// ---- caption text sizes ----
+// 14, 28 and 36 are LVGL's own fonts; 20 and 48 are font_text_*.c (letters and digits). 0 = never set: the display's
+// default font, exactly as captions always looked before this setting existed.
+#define GAUGE_CAPTION_SIZE_COUNT 5
+static const int32_t GAUGE_CAPTION_SIZES[GAUGE_CAPTION_SIZE_COUNT] = { 14, 20, 28, 36, 48 };
+
+static inline int32_t gauge_snap_caption_size(int32_t v) {
+  if (v <= 0) return 0;
+  int32_t best = 14, bestDiff = 0x7FFFFFFF;
+  for (int i = 0; i < GAUGE_CAPTION_SIZE_COUNT; i++) {
+    int32_t d = v > GAUGE_CAPTION_SIZES[i] ? v - GAUGE_CAPTION_SIZES[i] : GAUGE_CAPTION_SIZES[i] - v;
+    if (d < bestDiff) { bestDiff = d; best = GAUGE_CAPTION_SIZES[i]; }
+  }
+  return best;
+}
+
+// ---- where the gauge stands in its cell ----
+#define GAUGE_VALIGN_CENTER 0
+#define GAUGE_VALIGN_TOP    1
+#define GAUGE_VALIGN_BOTTOM 2
+static inline int32_t gauge_resolve_valign(int32_t v) { return (v == GAUGE_VALIGN_TOP || v == GAUGE_VALIGN_BOTTOM) ? v : GAUGE_VALIGN_CENTER; }
 
 // ---- readout text sizes ----
 #define GAUGE_VALUE_SIZE_COUNT 8

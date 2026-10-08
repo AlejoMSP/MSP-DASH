@@ -48,6 +48,7 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
                             int32_t tickCount, int32_t majorNth, int32_t refreshHz, bool hasWarning,
                             float warnThresh, bool warnAbove) {
   CellConfig c;
+  memset(&c, 0, sizeof(c));   // every field starts at 0 / empty: settings added later (units text, caption size, position ...) must not start as garbage
   c.enabled = enabled;
   c.signal = signal;
   c.gauge_type = type;
@@ -64,6 +65,8 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.refresh_hz = refreshHz;
   c.show_value = false;
   c.value_font_size = 28;
+  { int32_t dmin, dmax;       // AFR 10-20, temperatures 60-250, pressures 0-100 (gauge_style.h)
+    if (gauge_signal_default_range(signal, &dmin, &dmax)) { c.min_val = dmin; c.max_val = dmax; c.rest_val = dmin; } }
   c.tick_font_size = 28;
   gauge_dial_defaults(0, &c.start_deg, &c.end_deg);
   c.low_crit_on = c.low_warn_on = c.high_warn_on = c.high_crit_on = false;
@@ -124,6 +127,17 @@ static void applyWebDefaults(void) {
   s_webPages[0].cells[3] = makeCell(true, SIG_AFR, GAUGE_TYPE_NUMBER, 10, 20, 10, "AFR", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 15, true);
 }
 
+// Lamp text is drawn with the display's normal fonts, which cover printable ASCII: anything else (control
+// characters, emoji, other scripts) is dropped rather than shown as empty boxes.
+static void copyLampText(char *dst, size_t cap, const char *src) {
+  size_t n = 0;
+  for (const char *p = src ? src : ""; *p && n + 1 < cap; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c >= 0x20 && c <= 0x7E) dst[n++] = (char)c;
+  }
+  dst[n] = '\0';
+}
+
 static void serializeCell(JsonObject o, const CellConfig *c) {
   o["enabled"] = c->enabled;
   o["signal"] = (int)c->signal;
@@ -142,6 +156,10 @@ static void serializeCell(JsonObject o, const CellConfig *c) {
   o["show_value"] = c->show_value;
   o["value_font_size"] = c->value_font_size;
   o["tick_font_size"] = c->tick_font_size;
+  o["caption_font_size"] = c->caption_font_size;
+  o["caption_on_face"] = c->caption_on_face;
+  o["units"] = c->units;
+  o["v_align"] = c->v_align;
   o["start_deg"] = c->start_deg;
   o["end_deg"] = c->end_deg;
   o["low_crit_on"] = c->low_crit_on;
@@ -189,6 +207,10 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->value_font_size = gauge_snap_value_size(o["value_font_size"] | 28);
   // A config saved before these three settings existed has no keys for them: the dial numbers then
   // follow the readout size (as they always did) and the dial is the standard one for its type.
+  c->caption_font_size = gauge_snap_caption_size(o["caption_font_size"] | 0);   // 0 (never set) stays 0: the display's default font
+  c->caption_on_face = o["caption_on_face"] | false;
+  copyLampText(c->units, sizeof(c->units), o["units"] | "");
+  c->v_align = gauge_resolve_valign(o["v_align"] | 0);
   c->tick_font_size = gauge_resolve_tick_size(o["tick_font_size"] | 0, c->value_font_size);
   {
     int isHalf = (c->gauge_type == GAUGE_TYPE_HALFMOON);
@@ -261,17 +283,6 @@ static void serializeIndicator(JsonObject o, const IndicatorConfig *l) {
   o["on_text_color"] = l->on_text_color;
   o["off_text_color"] = l->off_text_color;
   o["blink"] = l->blink;
-}
-
-// Lamp text is drawn with the display's normal fonts, which cover printable ASCII: anything else (control
-// characters, emoji, other scripts) is dropped rather than shown as empty boxes.
-static void copyLampText(char *dst, size_t cap, const char *src) {
-  size_t n = 0;
-  for (const char *p = src ? src : ""; *p && n + 1 < cap; p++) {
-    unsigned char c = (unsigned char)*p;
-    if (c >= 0x20 && c <= 0x7E) dst[n++] = (char)c;
-  }
-  dst[n] = '\0';
 }
 
 static void deserializeIndicator(JsonObject o, IndicatorConfig *l) {

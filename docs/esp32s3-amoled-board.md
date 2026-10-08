@@ -1981,3 +1981,53 @@ through the same hand-written cases as the display's pixel test). Switching a th
 colours 132, rendered bands 17, needle trim 40; editor 139; each of 14 deliberate breakages of the display and the editor was
 caught (two weak tests were strengthened); earlier suites unchanged. Screenshots reviewed: eight dial configurations. NOT run on
 the board.
+
+
+## Caption size, units, caption on the dial face, gauge position, default scales (build 111)
+
+Requests: the title and units on the dial face (TunerStudio style); defaults of AFR 10-20, temperature 60-250, pressure 0-100;
+choose where the gauge stands in its cell (Center / Top / Bottom); and "still no ability to change the caption text size".
+
+**New cell fields** (display and web editors; JSON keys the same): `caption_font_size` (0 = never set, the display's default font,
+exactly as captions always looked; else 14/20/28/36/48, snapped to the nearest), `caption_on_face` (needle / half moon, display
+only), `units` (printable ASCII, 7 characters), `v_align` (0 centre, 1 top, 2 bottom). A config saved before these existed loads
+and looks exactly as before. makeCell() now zeroes the struct first (it did not, so fields added later would have started as garbage).
+
+**Fonts.** 14 / 28 / 36 are LVGL's; 20 and 48 are new full-ASCII fonts (`font_text_20.c`, `font_text_48.c`, about 50 KB of flash,
+made by tools/gen_fonts.sh). A caption bigger than its cell shrinks to the biggest size that fits: no wider than 94% of the cell,
+not too tall, and fully on the round glass (`pick_font_fit`, the same picker the readout uses, now with a top / bottom / centre anchor).
+If even 14 does not fit (a long caption in a bottom corner cell) it stays 14, as it always was.
+
+**Units.** A small grey line under the readout on a dial (only when Show value is on), and under the number on a number cell, in the
+caption's size. Order from the bottom of a dial cell: caption, units, readout.
+
+**Caption on the face.** The caption moves from the cell's bottom edge to the dial face, centred above the hub, 30% of the radius up,
+sized to fit inside the ticks. The bottom stack is then just units and readout. (It is drawn over the needle: a child of the cell.)
+
+**Gauge position.** For needle, half-moon and number cells (not trend graphs). Centre is exactly the old placement (existing dials do
+not move). For a dial, Top puts the highest point of its picture (arc and hub) at the top of the cell and Bottom puts its lowest point
+just above the caption / units / readout stack; a dial taller than the free space stays centred. So a half moon moves a lot (about
+110 px in a one-cell page) and a 270 degree dial only a little (about 40 px up, 20 down), because it fills most of its cell. For a
+number cell the whole block (caption, number, units) moves, and the number size is chosen for where it will stand. On the dashboard
+Top / Bottom is `justify-content: flex-start / flex-end`.
+
+**Trend graphs.** The caption size is applied; the graph leaves room for it (band = line height + 18, which is the old fixed 34 for
+the default font) and the biggest size whose caption lies on the glass AND inside its cell wins (a caption is centred under the
+graph, which is not always centred in a corner cell).
+
+**Default scales** (`GAUGE_DEFAULT_RANGES` in gauge_style.h, one list): AFR 10-20, coolant and oil temperature 60-250, oil and fuel
+pressure 0-100. They are used by the firmware's default pages (coolant and oil temperature were 65) and by both editors: choosing a
+signal for a cell sets Min / Max and puts Rest at Min, replacing a custom scale (the quantity changed). MAP/boost is a pressure but
+keeps 0-250: under boost it reads above 100 kPa and a 0-100 scale would peg. The editors keep the same table in JavaScript; a test
+reads the C list and checks they agree. Saved configs are NOT changed.
+
+**Dashboard.** The caption size (a fixed size with a fallback that shrinks it to the cell width), the units line, and Top / Bottom are
+drawn from the same fields, so the settings are not inert there. Captions on the dashboard and in the editors are now HTML-escaped.
+
+**Known limit (unchanged).** The readout is sized to fit the glass and the dial's width, not the gap between the dial's ends, so a
+very big readout on a wide-sweep dial (300 degrees, 48 px) can touch the end of a zone band; pick a smaller size.
+
+**Verified (PC, sanitizers on).** Every existing display suite is unchanged (defaults draw exactly as before); new display scenarios 388
+checks; style helpers 13; config 182; editor cells 71; dashboard 87; browser layout check 24 views; 14 deliberate breakages of the
+display, 10 of the editors and 6 of the dashboard were caught (7 tests were strengthened after breakages first slipped through; a
+layout-check run also caught that cell padding changed the big-number sizes, which was fixed). NOT run on the board.

@@ -194,6 +194,32 @@ R"rawliteral(
     function setLampText(pIdx, i, key, value) { pages[pIdx].indicators[i][key] = value; refreshChips(pIdx, i); }
     function setLampColor(pIdx, i, key, hex) { pages[pIdx].indicators[i][key] = parseInt(hex.substring(1), 16); refreshChips(pIdx, i); }
 
+    // =====================================================================================
+    // Settings every gauge cell has, shared by both editors
+    // =====================================================================================
+    // The usual scale for a signal: choosing the signal fills it in. The same list as GAUGE_DEFAULT_RANGES in gauge_style.h
+    // (tests/host/test_editor_cells.js reads that file and checks they agree). MAP/boost keeps its own range: it reads above 100 under boost.
+    const SIGNAL_DEFAULT_RANGES = { [SIG.AFR]: [10, 20], [SIG.CLT]: [60, 250], [SIG.OILT]: [60, 250], [SIG.OILP]: [0, 100], [SIG.FUELP]: [0, 100] };
+    // Caption / units text sizes. 0 = "Normal": the display's default font, as captions always looked. A size too big for the cell shrinks to the largest that fits.
+    const CAPTION_SIZES = [[0, "Normal"], [14, "14 Small"], [20, "20"], [28, "28 Medium"], [36, "36 Large"], [48, "48 XL"]];
+    const VALIGNS = [[0, "Center"], [1, "Top"], [2, "Bottom"]];
+
+    // Choosing a signal also sets the scale to its usual range (AFR 10-20, temperatures 60-250, pressures 0-100), and the needle's
+    // rest position to the bottom of it. Signals without a usual range keep whatever the cell has.
+    function setCellSignal(pIdx, cIdx, sig) {
+      const c = pages[pIdx].cells[cIdx];
+      c.signal = sig;
+      const r = SIGNAL_DEFAULT_RANGES[sig];
+      if (r) { c.min = r[0]; c.max = r[1]; c.rest = r[0]; renderPages(); }
+    }
+    function setCellField(pIdx, cIdx, key, value) { pages[pIdx].cells[cIdx][key] = value; }
+    function captionSizeOptions(selected) {
+      return CAPTION_SIZES.map(([v, n]) => `<option value="${v}" ${(selected || 0) === v ? "selected" : ""}>${n}</option>`).join("");
+    }
+    function valignOptions(selected) {
+      return VALIGNS.map(([v, n]) => `<option value="${v}" ${(selected || 0) === v ? "selected" : ""}>${n}</option>`).join("");
+    }
+
     (function addIndicatorStyles() {
       if (!document.createElement || !document.head) return;
       const st = document.createElement("style");

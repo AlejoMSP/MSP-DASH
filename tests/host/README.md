@@ -182,3 +182,22 @@ red), each switched on by itself, drawn as coloured arc BANDS behind the tick ma
 - `test_editor_dial.js` (sections 9-11): the preview colours the same ticks as `zonepix` (the same hand-written cases),
   draws bands in the right order and at the right angles, and the four threshold rows are each wired to their own threshold.
 - `test_gauge_config.cpp` (S12, S12b): the new fields, and conversion of build 108's one-sided yellow/red zones.
+
+## Caption size, units, title on the dial face, gauge position, default scales
+
+- `test_style_defaults.c`: the pure-C helpers in `gauge_style.h`: the default scale per signal (AFR 10-20, temperatures 60-250,
+  pressures 0-100; MAP/boost and everything else have none), caption sizes (snap to the nearest of 14/20/28/36/48, ties go
+  smaller, 0 = never set), and the vertical position (centre / top / bottom).
+- `test_caption_layout.c` (`./t capnum | capdial | caphist | units | face | valign | valignnum`): the real `gauge_app.c` against
+  LVGL. Caption sizes (no bigger than asked, the BIGGEST that fits, inside the cell and on the round glass, in 1-, 2- and 4-cell
+  pages, for number cells, dials and trend graphs, including a trend graph leaving room for a bigger caption); units under the
+  readout / under a number and not shown when the readout is off; the caption ON the dial face (centred over the hub, 30% of the
+  radius above it, inside the ticks, the readout then at the bottom); the dial's Top / Bottom placement measured from its real
+  position (Top: highest point at the top of the cell; Bottom: lowest point just above the caption/readout stack; an arc that
+  sits above its hub; a half moon moves a lot, a 270 degree dial a little) and number cells' Top / Bottom.
+- `test_editor_cells.js`: both editors. CONTRACT: the editor's default scales and caption sizes are read from `gauge_style.h` and
+  must match. Choosing a signal sets its scale (and not for MAP/RPM/ethanol/throttle/battery), the controls per gauge type, the
+  face checkbox only in the display editor, HTML escaping, new-cell defaults, saving.
+- `test_front_page.js` (12b): the dashboard's caption size (unknown sizes ignored), units line order and escaping, Top / Bottom.
+- `test_gauge_config.cpp` (S19): the four new fields, snapping and cutting of bad input, and the new default scales
+  (the default coolant gauge is 60-250, not 65).

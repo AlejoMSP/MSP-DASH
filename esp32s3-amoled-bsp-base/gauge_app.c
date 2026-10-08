@@ -239,21 +239,47 @@ static void readout_sample(const CellConfig *cfg, char *out, size_t n) {
   snprintf(out, n, "%s", strlen(lo) > strlen(hi) ? lo : hi);
 }
 
-// Picks the largest size that is <= `requested` and fits: no wider than maxW, no taller than maxH,
-// and fully on the round glass. The box is centred on (cx, y), or - when anchorBottom - sits with its
-// bottom edge at y. Never goes below 14.
-static const lv_font_t *pick_value_font(int32_t requested, const char *sample, float cx, float y,
-                                        bool anchorBottom, float maxW, float maxH) {
-  int top = GAUGE_VALUE_SIZE_COUNT - 1;
-  while (top > 0 && VALUE_FONTS[top].size > requested) top--;
+// Where a text box sits relative to the y given to pick_font_fit().
+enum { ANCHOR_CENTER = 0, ANCHOR_BOTTOM = 1, ANCHOR_TOP = 2 };
+
+// Picks the largest size in `tbl` that is <= `requested` and fits: no wider than maxW, no taller than maxH,
+// and fully on the round glass. The box is centred on (cx, y), or sits with its bottom (or top) edge at y.
+// Never goes below the smallest size in the table.
+static const lv_font_t *pick_font_fit(const SizedFont *tbl, int count, int32_t requested, const char *sample, float cx, float y,
+                                      int anchor, float maxW, float maxH) {
+  int top = count - 1;
+  while (top > 0 && tbl[top].size > requested) top--;
   for (int i = top; i > 0; i--) {
     lv_point_t sz;
-    lv_txt_get_size(&sz, sample, VALUE_FONTS[i].font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    float cy = anchorBottom ? y - sz.y / 2.0f : y;
-    if (sz.x <= maxW && sz.y <= maxH && box_in_panel(cx, cy, (float)sz.x, (float)sz.y)) return VALUE_FONTS[i].font;
+    lv_txt_get_size(&sz, sample, tbl[i].font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    float cy = anchor == ANCHOR_BOTTOM ? y - sz.y / 2.0f : (anchor == ANCHOR_TOP ? y + sz.y / 2.0f : y);
+    if (sz.x <= maxW && sz.y <= maxH && box_in_panel(cx, cy, (float)sz.x, (float)sz.y)) return tbl[i].font;
   }
-  return VALUE_FONTS[0].font;
+  return tbl[0].font;
 }
+
+static const lv_font_t *pick_value_font(int32_t requested, const char *sample, float cx, float y, int anchor, float maxW, float maxH) {
+  return pick_font_fit(VALUE_FONTS, GAUGE_VALUE_SIZE_COUNT, requested, sample, cx, y, anchor, maxW, maxH);
+}
+
+// Caption, title and units text: 14 / 20 / 28 / 36 / 48 (letters and digits). A size of 0 - never set - means the
+// display's default font, exactly as captions always looked, and is returned as NULL.
+static const SizedFont CAPTION_FONTS[GAUGE_CAPTION_SIZE_COUNT] = {
+  { 14, &lv_font_montserrat_14 }, { 20, &font_text_20 }, { 28, &lv_font_montserrat_28 }, { 36, &lv_font_montserrat_36 }, { 48, &font_text_48 },
+};
+
+static const lv_font_t *pick_caption_font(int32_t requested, const char *text, float cx, float y, int anchor, float maxW, float maxH) {
+  if (requested <= 0) return NULL;
+  return pick_font_fit(CAPTION_FONTS, GAUGE_CAPTION_SIZE_COUNT, requested, text, cx, y, anchor, maxW, maxH);
+}
+
+// The caption font at exactly `size`, with no fitting - used to plan how much room to leave. NULL for 0.
+static const lv_font_t *caption_font_exact(int32_t size) {
+  for (int i = 0; i < GAUGE_CAPTION_SIZE_COUNT; i++) if (CAPTION_FONTS[i].size == size) return CAPTION_FONTS[i].font;
+  return NULL;
+}
+
+static int font_line_h(const lv_font_t *f) { return (int)lv_font_get_line_height(f ? f : LV_FONT_DEFAULT); }
 
 // A dial that only occupies the top (or bottom) half of its circle is moved down (or up) so it sits in
 // the middle of its cell instead of leaving the other half of the cell empty. The standard 270 degree
@@ -268,6 +294,32 @@ static int16_t dial_vertical_shift(int32_t start, int32_t sweep, int16_t meterSi
   if (lo >= -0.05f) return (int16_t)(meterSize / 6);     // never dips below the centre line
   if (hi <= 0.05f) return (int16_t)(-(meterSize / 6));   // never rises above it
   return 0;
+}
+
+// How far a dial's picture reaches above and below its centre, as multiples of its radius (cos is +1 straight up):
+// the arc itself AND the hub, which the needle starts from.
+static void dial_extent(int32_t start, int32_t sweep, float *hi, float *lo) {
+  float h = 0.0f, l = 0.0f;
+  for (int32_t a = 0; a <= sweep; a++) {
+    float c = cosf((float)(start + a) * 0.01745329f);
+    if (c > h) h = c;
+    if (c < l) l = c;
+  }
+  *hi = h; *lo = l;
+}
+
+// Where the dial stands in its cell. Centre is the placement above (so every existing dial is unchanged). Top puts the
+// highest point of the dial at the top of the free area, Bottom puts its lowest point at the bottom of it (just above the
+// caption / readout), so a half moon - which only fills half its circle - really moves, while a nearly full dial has little
+// room to. A dial taller than the free area stays centred.
+static int16_t dial_aligned_shift(int valign, int32_t start, int32_t sweep, int16_t meterSize, float radius,
+                                  float cellCentreY, float areaTop, float areaBottom) {
+  if (valign == GAUGE_VALIGN_CENTER) return dial_vertical_shift(start, sweep, meterSize);
+  float hi, lo;
+  dial_extent(start, sweep, &hi, &lo);
+  if ((hi - lo) * radius > areaBottom - areaTop) return dial_vertical_shift(start, sweep, meterSize);
+  float shift = (valign == GAUGE_VALIGN_TOP) ? areaTop + hi * radius - cellCentreY : areaBottom + lo * radius - cellCentreY;
+  return (int16_t)lroundf(shift);
 }
 
 static void gesture_event_cb(lv_event_t *e);
@@ -288,11 +340,12 @@ static void switch_to_page(int index) {
 // cell (absolute screen coords) whose four corners all stay inside the
 // circle, leaving a band at the bottom for the caption. Prefers wide
 // shapes, since the horizontal axis is time. Runs once at build time.
-static void fit_chart_rect(CellRect cell, int16_t *ox, int16_t *oy, int16_t *ow, int16_t *oh) {
+static void fit_chart_rect(CellRect cell, int capBandIn, int16_t *ox, int16_t *oy, int16_t *ow, int16_t *oh) {
   const float S = 466.0f;
   const float cx = S / 2.0f, cy = S / 2.0f;
   const float R = S / 2.0f - 8.0f;
-  const int pad = 6, capBand = 34, step = 4, minW = 60, minH = 40;
+  const int pad = 6, step = 4, minW = 60, minH = 40;
+  const int capBand = capBandIn;      // room for the caption under the chart: its line height + 18 (34 for the default 16px line)
 
   int topLimit = cell.y + pad;
   int botLimit = cell.y + cell.h - capBand;
@@ -319,6 +372,25 @@ static void fit_chart_rect(CellRect cell, int16_t *ox, int16_t *oy, int16_t *ow,
     return;
   }
   *ox = (int16_t)bx; *oy = (int16_t)by0; *ow = (int16_t)bw; *oh = (int16_t)(by1 - by0);
+}
+
+// A trend graph's caption sits under its graph, and the graph leaves room for the caption, so a bigger caption makes a shorter
+// graph. Each size is therefore tried together with the graph it would leave; the biggest whose caption lies fully on the
+// round glass (and inside the cell) wins. A size of 0 (never set) is the default font, returned as NULL.
+static const lv_font_t *pick_hist_caption_font(CellRect rect, int32_t requested, const char *text) {
+  if (requested <= 0) return NULL;
+  int top = GAUGE_CAPTION_SIZE_COUNT - 1;
+  while (top > 0 && CAPTION_FONTS[top].size > requested) top--;
+  for (int i = top; i > 0; i--) {
+    lv_point_t sz;
+    lv_txt_get_size(&sz, text, CAPTION_FONTS[i].font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int16_t fx, fy, fw, fh;
+    fit_chart_rect(rect, font_line_h(CAPTION_FONTS[i].font) + 18, &fx, &fy, &fw, &fh);
+    float cx = fx + fw / 2.0f, cy = (float)(fy + fh) + 4.0f + sz.y / 2.0f;      // the caption is centred under the graph, 4px below it
+    bool inCell = cx - sz.x / 2.0f >= rect.x && cx + sz.x / 2.0f <= rect.x + rect.w;   // centred under the graph, which is not always centred in its cell
+    if (inCell && sz.x <= rect.w * 0.94f && sz.y <= rect.h * 0.25f && box_in_panel(cx, cy, (float)sz.x, (float)sz.y)) return CAPTION_FONTS[i].font;
+  }
+  return CAPTION_FONTS[0].font;
 }
 
 // Draws the needle shorter at either end. LVGL draws the needle from the dial's centre to a tip just inside
@@ -393,25 +465,54 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   lv_color_t needleColor = lv_color_hex(cfg->needle_color);
   lv_color_t tickColor = lv_color_hex(cfg->tick_color);
   int16_t minDim = rect.w < rect.h ? rect.w : rect.h;
+  // LVGL pads every container (16px on each side, plus the 1px border) and aligns children inside that padding.
+  lv_coord_t cPadT = lv_obj_get_style_pad_top(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+  lv_coord_t cPadB = lv_obj_get_style_pad_bottom(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+  int valign = gauge_resolve_valign(cfg->v_align);   // where the gauge stands in its cell: centre / top / bottom
+  float cellCx = rect.x + rect.w / 2.0f;
   int32_t tickSize = gauge_resolve_tick_size(cfg->tick_font_size, cfg->value_font_size);   // the numbers AROUND a dial (-1 = hidden)
   const lv_font_t *tickFont = get_font_for_size(tickSize < 0 ? 14 : tickSize);
 
   if (cfg->gauge_type == GAUGE_TYPE_NUMBER) {
     char sample[24];
     readout_sample(cfg, sample, sizeof(sample));
-    const lv_font_t *numFont = pick_value_font(cfg->value_font_size, sample, rect.x + rect.w / 2.0f, rect.y + rect.h / 2.0f,
-                                               false, rect.w * 0.94f, rect.h * 0.6f);
+    bool hasUnits = cfg->units[0] != '\0';
+    // The block is caption above, number, units below. Room for the caption and units is planned from the size asked for
+    // (they may shrink to fit afterwards); the number is the biggest size that fits where it will stand.
+    float capHReq = (float)font_line_h(caption_font_exact(cfg->caption_font_size));
+    float unitsHReq = hasUnits ? capHReq : 0.0f;
+    int numAnchor = ANCHOR_CENTER;
+    float numAnchorY = rect.y + rect.h / 2.0f;
+    if (valign == GAUGE_VALIGN_TOP) { numAnchor = ANCHOR_TOP; numAnchorY = rect.y + 8.0f + capHReq + 4.0f; }
+    else if (valign == GAUGE_VALIGN_BOTTOM) { numAnchor = ANCHOR_BOTTOM; numAnchorY = rect.y + rect.h - 8.0f - (hasUnits ? unitsHReq + 2.0f : 0.0f); }
+    const lv_font_t *numFont = pick_value_font(cfg->value_font_size, sample, cellCx, numAnchorY, numAnchor, rect.w * 0.94f, rect.h * 0.6f);
+    float numH = (float)lv_font_get_line_height(numFont);
+    float numTopAbs = numAnchor == ANCHOR_TOP ? numAnchorY : (numAnchor == ANCHOR_BOTTOM ? numAnchorY - numH : rect.y + rect.h / 2.0f - numH / 2.0f);
+    const lv_font_t *capFont = pick_caption_font(cfg->caption_font_size, cfg->caption, cellCx, numTopAbs - 4.0f, ANCHOR_BOTTOM, rect.w * 0.94f, rect.h * 0.25f);
+    const lv_font_t *unitsFont = hasUnits ? pick_caption_font(cfg->caption_font_size, cfg->units, cellCx, numTopAbs + numH + 2.0f, ANCHOR_TOP, rect.w * 0.6f, rect.h * 0.25f) : NULL;
+
     lv_obj_t *numLabel = lv_label_create(container);
     lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
     lv_obj_set_style_text_font(numLabel, numFont, 0);
     lv_label_set_text(numLabel, "--");
-    lv_obj_center(numLabel);
+    if (numAnchor == ANCHOR_TOP) lv_obj_align(numLabel, LV_ALIGN_TOP_MID, 0, (lv_coord_t)lroundf(numAnchorY - (rect.y + cPadT)));
+    else if (numAnchor == ANCHOR_BOTTOM) lv_obj_align(numLabel, LV_ALIGN_BOTTOM_MID, 0, -(lv_coord_t)lroundf((rect.y + rect.h - cPadB) - numAnchorY));
+    else lv_obj_center(numLabel);
     rt->numberLabel = numLabel;
 
     lv_obj_t *capLabel = lv_label_create(container);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
+    if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
     lv_label_set_text(capLabel, cfg->caption);
     lv_obj_align_to(capLabel, numLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+
+    if (hasUnits) {
+      lv_obj_t *unitsLabel = lv_label_create(container);
+      lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
+      if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
+      lv_label_set_text(unitsLabel, cfg->units);
+      lv_obj_align_to(unitsLabel, numLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+    }
   } else if (cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) {
     int32_t sec = cfg->history_sec;
     if (sec < HIST_MIN_SEC) sec = HIST_MIN_SEC;
@@ -432,8 +533,14 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     rt->hist_scale = scale;
     rt->hist_top = top;
 
+    // The caption (with the time span, so the graph's horizontal scale is never a guess) goes under the graph; the graph leaves
+    // room for it, so a bigger caption makes a slightly shorter graph. 16px line + 18 = the old fixed 34.
+    char cap[GAUGE_CAPTION_MAXLEN + 12];
+    if (sec >= 120) snprintf(cap, sizeof(cap), "%s  %d min", cfg->caption, (int)(sec / 60));
+    else snprintf(cap, sizeof(cap), "%s  %ds", cfg->caption, (int)sec);
+    const lv_font_t *capFont = pick_hist_caption_font(rect, cfg->caption_font_size, cap);
     int16_t fx, fy, fw, fh;
-    fit_chart_rect(rect, &fx, &fy, &fw, &fh);
+    fit_chart_rect(rect, font_line_h(capFont) + 18, &fx, &fy, &fw, &fh);
     // set_pos is relative to the container's CONTENT area (inside its padding and border)
     lv_coord_t padL = lv_obj_get_style_pad_left(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
     lv_coord_t padT = lv_obj_get_style_pad_top(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
@@ -472,12 +579,9 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_center(noData);
     rt->noDataLabel = noData;
 
-    // Caption with the time span, so the graph's horizontal scale is never a guess
-    char cap[GAUGE_CAPTION_MAXLEN + 12];
-    if (sec >= 120) snprintf(cap, sizeof(cap), "%s  %d min", cfg->caption, (int)(sec / 60));
-    else snprintf(cap, sizeof(cap), "%s  %ds", cfg->caption, (int)sec);
     lv_obj_t *capLabel = lv_label_create(container);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
+    if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
     lv_label_set_text(capLabel, cap);
     // Directly under its own graph, not pinned to the cell's bottom edge - in the
     // bottom cells that edge is where the round panel is narrowest, and the caption's ends
@@ -493,9 +597,29 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     int32_t rotation = (dialStart + 270) % 360;
     int16_t meterSize = (int16_t)(minDim * 0.88f);
 
+    // Plan the bottom stack (caption, units, readout) FIRST: where the dial may stand depends on where that stack starts.
+    // With the caption ON THE FACE (a title above the hub, TunerStudio style) it is not part of the stack at all.
+    bool onFace = cfg->caption_on_face;
+    bool hasUnits = cfg->show_value && cfg->units[0] != '\0';
+    float capBottomAbs = rect.y + rect.h - cPadB - 8.0f;        // where the caption's bottom edge really is
+    const lv_font_t *capFont = onFace ? NULL : pick_caption_font(cfg->caption_font_size, cfg->caption, cellCx, capBottomAbs, ANCHOR_BOTTOM, rect.w * 0.94f, rect.h * 0.3f);
+    const lv_font_t *unitsFont = hasUnits ? pick_caption_font(cfg->caption_font_size, cfg->units, cellCx, capBottomAbs, ANCHOR_BOTTOM, rect.w * 0.6f, rect.h * 0.25f) : NULL;
+    float capH = onFace ? 0.0f : (float)font_line_h(capFont), unitsH = hasUnits ? (float)font_line_h(unitsFont) : 0.0f;
+    char sample[24];
+    readout_sample(cfg, sample, sizeof(sample));
+    float planBottom = rect.y + rect.h - 8.0f - (onFace ? 0.0f : capH + 4.0f) - (hasUnits ? unitsH + 2.0f : 0.0f);
+    const lv_font_t *valFont = cfg->show_value
+        ? pick_value_font(cfg->value_font_size, sample, cellCx, planBottom, ANCHOR_BOTTOM, meterSize * 0.55f, meterSize * 0.24f) : NULL;
+    float stackTop = capBottomAbs;                                // the top of everything stacked at the bottom of the cell
+    if (!onFace) stackTop -= capH;
+    if (hasUnits) stackTop -= (onFace ? 0.0f : 2.0f) + unitsH;
+    if (cfg->show_value) stackTop -= (hasUnits ? 2.0f : (onFace ? 0.0f : 4.0f)) + (float)font_line_h(valFont);
+
     lv_obj_t *meter = lv_meter_create(container);
     lv_obj_set_size(meter, meterSize, meterSize);
-    lv_obj_align(meter, LV_ALIGN_CENTER, 0, dial_vertical_shift(dialStart, dialSweep, meterSize));
+    float meterRadius = meterSize / 2.0f - (float)lv_obj_get_style_pad_left(meter, LV_PART_MAIN);   // the dial's real radius (the ticks end here)
+    int16_t dialShift = dial_aligned_shift(valign, dialStart, dialSweep, meterSize, meterRadius, rect.y + rect.h / 2.0f, rect.y + 4.0f, stackTop - 4.0f);
+    lv_obj_align(meter, LV_ALIGN_CENTER, 0, dialShift);
     lv_obj_set_style_bg_color(meter, lv_color_hex(cfg->bg_color), 0);
     lv_obj_set_style_border_width(meter, 0, 0);
 
@@ -552,22 +676,35 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
     lv_obj_t *capLabel = lv_label_create(container);
     lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
+    if (onFace) {
+      // The title, printed on the dial face above the hub: the biggest size that fits in the room inside the ticks.
+      float faceY = rect.y + rect.h / 2.0f + dialShift - 0.30f * meterRadius;
+      capFont = pick_caption_font(cfg->caption_font_size, cfg->caption, cellCx, faceY, ANCHOR_CENTER, meterRadius, meterRadius * 0.30f);
+    }
+    if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
     lv_label_set_text(capLabel, cfg->caption);
-    lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
+    if (onFace) lv_obj_align_to(capLabel, meter, LV_ALIGN_CENTER, 0, -(lv_coord_t)lroundf(0.30f * meterRadius));
+    else lv_obj_align(capLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
+
+    lv_obj_t *unitsLabel = NULL;
+    if (hasUnits) {
+      unitsLabel = lv_label_create(container);
+      lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
+      if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
+      lv_label_set_text(unitsLabel, cfg->units);
+      if (onFace) lv_obj_align(unitsLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
+      else lv_obj_align_to(unitsLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -2);
+    }
 
     if (cfg->show_value) {
-      // The readout sits just above the caption at the bottom of the dial: the biggest size that fits there.
-      char sample[24];
-      readout_sample(cfg, sample, sizeof(sample));
-      float capH = (float)lv_font_get_line_height(lv_obj_get_style_text_font(capLabel, LV_PART_MAIN));
-      float readoutBottom = rect.y + rect.h - 8.0f - capH - 4.0f;
-      const lv_font_t *valFont = pick_value_font(cfg->value_font_size, sample, rect.x + rect.w / 2.0f, readoutBottom,
-                                                 true, meterSize * 0.55f, meterSize * 0.24f);
+      // The readout sits just above the units (or the caption) at the bottom of the dial.
       lv_obj_t *valueLabel = lv_label_create(container);
       lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
       lv_obj_set_style_text_font(valueLabel, valFont, 0);
       lv_label_set_text(valueLabel, "--");
-      lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+      if (unitsLabel) lv_obj_align_to(valueLabel, unitsLabel, LV_ALIGN_OUT_TOP_MID, 0, -2);
+      else if (onFace) lv_obj_align(valueLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
+      else lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
       rt->numberLabel = valueLabel; // reuse the same field - only one of these two paths is active per cell
     }
   }

@@ -146,6 +146,31 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   check(sizeOf(vals()[0]) === "35", "a cell with no saved size falls back to Medium");
   cells[0].value_font_size = 96; cells[1].value_font_size = 64; cells[2].value_font_size = 48; cells[3].value_font_size = 80; __next(0);
   check(vals().map(sizeOf).join(",") === "120,80,60,100", "96/64/48/80 -> 120/80/60/100px: " + vals().map(sizeOf).join(","));
+  console.log("12b. caption size, units line and gauge position on the dashboard");
+  { const CAPS = ["RPM", "MAP", "CLT", "AFR"];
+    const reset = () => cells.forEach((c, i) => { delete c.caption_font_size; delete c.units; delete c.v_align; c.caption = CAPS[i]; });
+    const capAttrs = () => [...grid().matchAll(/<div class="cap"([^>]*)>/g)].map(m => m[1]);
+    const dcellAttrs = () => [...grid().matchAll(/<div class="dcell c\d"([^>]*)>/g)].map(m => m[1]);
+    reset(); __next(0);
+    check(capAttrs().every(a => a === "") && dcellAttrs().every(a => a === "") && !grid().includes('class="units"'), "cells with none of the new settings are drawn exactly as before: no extra style, no units line");
+    cells[0].caption_font_size = 36; cells[1].caption_font_size = 14; cells[2].caption_font_size = 99; cells[3].caption_font_size = 0; __next(0);
+    const ca = capAttrs();
+    check(ca[0].includes("font-size:36px") && ca[0].includes("font-size:min(36px,14cqw)"), "caption size 36: a fixed size, with a fallback that shrinks it to the cell's width");
+    check(ca[1].includes("font-size:14px;"), "caption size 14 is applied");
+    check(ca[2] === "" && ca[3] === "", "an unknown size (99) and 'Normal' (0) leave the caption at its normal size");
+    reset(); cells[0].units = "kPa"; cells[0].caption_font_size = 28; cells[1].units = '<b>&"'; __next(0);
+    { const g = grid();
+      const cell0 = g.split('<div class="dcell c1"')[0], cell1 = g.split('<div class="dcell c1"')[1].split('<div class="dcell c2"')[0];
+      check(/<div class="cap"[^>]*>RPM<\/div><div class="val[^>]*>[^<]*<\/div><div class="units"[^>]*>kPa<\/div>/.test(cell0), "order inside a cell: caption, number, then the units line");
+      check(/<div class="units" style="font-size:28px/.test(cell0), "the units use the caption's size");
+      check(cell1.includes('<div class="units">&lt;b&gt;&amp;&quot;</div>') && !cell1.includes("<b>"), "units text is HTML-escaped");
+      check((g.match(/class="units"/g) || []).length === 2, "only cells that have units get a units line"); }
+    reset(); cells[0].v_align = 1; cells[1].v_align = 2; cells[2].v_align = 0; cells[3].v_align = 7; __next(0);
+    { const d = dcellAttrs();
+      check(d[0] === ' style="justify-content:flex-start"' && d[1] === ' style="justify-content:flex-end"' && d[2] === "" && d[3] === "", "Top = start, Bottom = end, Center and unknown values = as before: " + JSON.stringify(d)); }
+    reset(); cells[0].caption = '<img src=x onerror=alert(1)>'; __next(0);
+    check(grid().includes("&lt;img src=x onerror=alert(1)&gt;") && !grid().includes("<img"), "a caption with HTML in it is shown as text, not run");
+    reset(); __next(0); }
   console.log("13. indicator lamps: the same on/off rule as the round display");
   { // the SAME cases, with the SAME expected answers, as tests/host/test_indicators.c
     const N = (was, v, op, thr, hyst) => __ind(was, true, v, op, thr, hyst);
