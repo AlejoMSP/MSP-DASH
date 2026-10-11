@@ -75,10 +75,18 @@ options beyond the default profile - its default has PSRAM disabled and
 flash set to 4MB, both wrong for this board's actual ESP32-S3R8 chip
 (8MB PSRAM) and 16MB flash:
 
+The full commands used for every build (COM port changes per PC/cable; check Device Manager):
+
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-bsp-base
-arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-bsp-base
+cd C:\Users\alejo\OneDrive\GIT\MSP-DASH
+git pull origin main
+arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB --build-path C:\esp32build esp32s3-amoled-bsp-base
+arduino-cli upload -p COM4 --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB --input-dir C:\esp32build esp32s3-amoled-bsp-base
 ```
+
+`--build-path` on compile and `--input-dir` on upload must name the same folder, or upload sends an old binary
+(this once looked like an OTA firmware bug). `CDCOnBoot=cdc` puts Serial on the USB port. The partition scheme is
+explained below.
 
 The WROOM board (esp32-main) uses the plain default profile:
 ```powershell
