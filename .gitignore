@@ -20,3 +20,6 @@ esp32s3-amoled-bsp-base/wifi_config.h
 # dev tools installed by npm in tests/host
 tests/host/node_modules
 tests/host/package-lock.json
+
+# raw framebuffer dumps written by the host pixel tests
+*.rgb
