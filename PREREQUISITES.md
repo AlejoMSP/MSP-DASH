@@ -1,7 +1,7 @@
 # Prerequisites
 
 Setup steps for a new Windows machine to build/flash firmware in this
-repo. Both boards (esp32-main WROOM, esp32s3-amoled-lvgl-can-gauge) use
+repo. Both boards (esp32-main WROOM, esp32s3-amoled-bsp-base) use
 arduino-cli.
 
 ## One-time environment setup
@@ -70,14 +70,14 @@ and it will finish updating the branch pointer.
 
 ## Board-specific compile flags
 
-The ESP32-S3 AMOLED board (esp32s3-amoled-lvgl-can-gauge) needs board
+The ESP32-S3 AMOLED board (esp32s3-amoled-bsp-base) needs board
 options beyond the default profile - its default has PSRAM disabled and
 flash set to 4MB, both wrong for this board's actual ESP32-S3R8 chip
 (8MB PSRAM) and 16MB flash:
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-lvgl-can-gauge
-arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-lvgl-can-gauge
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-bsp-base
+arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M esp32s3-amoled-bsp-base
 ```
 
 The WROOM board (esp32-main) uses the plain default profile:
