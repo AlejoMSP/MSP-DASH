@@ -84,6 +84,16 @@ arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,C
 arduino-cli upload -p COM4 --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB --input-dir C:\esp32build esp32s3-amoled-bsp-base
 ```
 
+Normal way to flash: over WiFi to the board's `/update` page, no USB cable (replace the upload line above):
+
+```powershell
+curl.exe -F "firmware=@C:\esp32build\esp32s3-amoled-bsp-base.ino.bin" http://192.168.55.102/update
+```
+
+It prints `OK` and the board reboots into the new build (the build number shows on the web pages). Use `curl.exe`,
+not `curl`: in Windows PowerShell `curl` is a different command. The USB upload line is the fallback for a board
+that is off WiFi or won't boot.
+
 `--build-path` on compile and `--input-dir` on upload must name the same folder, or upload sends an old binary
 (this once looked like an OTA firmware bug). `CDCOnBoot=cdc` puts Serial on the USB port. The partition scheme is
 explained below.
