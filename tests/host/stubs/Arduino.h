@@ -39,7 +39,7 @@ public:
   String substring(unsigned a, unsigned b = 0xFFFFFFFF) const { return String(substr(a, b == 0xFFFFFFFF ? npos : b - a)); }
 };
 inline String operator+(const char *a, const String &b) { return String(std::string(a) + std::string(b)); }
-struct SerialClass { template <typename... A> int printf(const char *f, A... a) { return ::printf(f, a...); }
+struct SerialClass { int available() { return 0; } int read() { return -1; } template <typename... A> int printf(const char *f, A... a) { return ::printf(f, a...); }
   void println(const char *s = "") {} void print(const char *s) {} void print(int) {} void begin(int) {} void println(const String &) {} template <typename T> void println(const T &, int = 0) {} void println(int) {} };
 extern SerialClass Serial;
 struct EspClass { void restart() {} } extern ESP;

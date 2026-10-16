@@ -2054,3 +2054,10 @@ WiFi joined, ESP-NOW uses the network's channel (all boards on the same network 
 boot try, WiFi stops searching and parks on channel 1. `/status.json` has a `link` block (role, packets/s, ms since last
 packet, sender MAC, channel, own MAC); the front page build line shows it. Each remote keeps its own pages and editor.
 Later: configure remotes from the main board; EGT and IAT signals.
+
+## Static IP per board (build 118)
+
+`/net?ip=192.168.55.103&gw=192.168.55.1&mask=255.255.255.0` (`&dns=` optional, default = gateway) saves a static IP in NVS
+(`net`) and reboots; `/net?dhcp=1` goes back to DHCP. ip and gw must share the subnet. Applied with `WiFi.config()` before
+`WiFi.begin()`. `/status.json` shows `static_ip` and `ip`. Recovery if a board is unreachable: type `dhcp` + Enter in the
+USB serial monitor. Survives OTA and USB reflashes (NVS is not erased).

@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <Update.h>
+#include <Preferences.h>
 #include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
 #include "esp_heap_caps.h"
 #include "driver/twai.h"
@@ -1487,8 +1488,35 @@ static String buildCanJson() {
   return json;
 }
 
+// ---- static IP (per board, saved in NVS "net"; empty = DHCP) ----
+// Set: /net?ip=192.168.55.103&gw=192.168.55.1&mask=255.255.255.0 (&dns= optional, default = gw). Back to DHCP: /net?dhcp=1
+// Recovery if a board becomes unreachable: type "dhcp" + Enter in the USB serial monitor.
+static bool parseIp(const String &s, IPAddress &out) { return s.length() && out.fromString(s); }
+
+static void netSave(const String &ip, const String &gw, const String &mask, const String &dns) {
+  Preferences pr; pr.begin("net", false);
+  pr.putString("ip", ip); pr.putString("gw", gw); pr.putString("mask", mask); pr.putString("dns", dns);
+  pr.end();
+}
+
+static bool netLoad(IPAddress &ip, IPAddress &gw, IPAddress &mask, IPAddress &dns) {
+  Preferences pr; pr.begin("net", true);
+  String a = pr.getString("ip", ""), b = pr.getString("gw", ""), c = pr.getString("mask", ""), d = pr.getString("dns", "");
+  pr.end();
+  if (!parseIp(a, ip) || !parseIp(b, gw) || !parseIp(c, mask)) return false;
+  if (!parseIp(d, dns)) dns = gw;
+  return true;
+}
+
 void web_monitor_init(void) {
   WiFi.mode(WIFI_STA);
+  {
+    IPAddress ip, gw, mask, dns;
+    if (netLoad(ip, gw, mask, dns)) {
+      WiFi.config(ip, gw, mask, dns);
+      Serial.printf("Static IP %s (gateway %s)\n", ip.toString().c_str(), gw.toString().c_str());
+    }
+  }
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to WiFi network \"%s\"", WIFI_SSID);
 
@@ -1535,6 +1563,28 @@ void web_monitor_init(void) {
   // Everything needed to answer "is the board running what I think, and is
   // CAN actually flowing?" - build number, uptime, memory, WiFi, CAN driver
   // health, and per-signal data status.
+  server.on("/net", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("dhcp")) {
+      netSave("", "", "", "");
+      request->send(200, "text/plain", "DHCP set. Rebooting; find the new IP in your router.");
+      s_rebootAtMs = millis() + 800; return;
+    }
+    auto P = [&](const char *k) { return request->hasParam(k) ? request->getParam(k)->value() : String(""); };
+    String ip = P("ip"), gw = P("gw"), mask = P("mask"), dns = P("dns");
+    IPAddress a, g, m, d;
+    if (!parseIp(ip, a) || !parseIp(gw, g) || !parseIp(mask, m) || (dns.length() && !parseIp(dns, d))) {
+      request->send(400, "text/plain", "use /net?ip=192.168.55.103&gw=192.168.55.1&mask=255.255.255.0 (&dns= optional) or /net?dhcp=1");
+      return;
+    }
+    if (((uint32_t)a & (uint32_t)m) != ((uint32_t)g & (uint32_t)m) || a == g) {
+      request->send(400, "text/plain", "ip and gw must be in the same subnet and not equal; nothing saved");
+      return;
+    }
+    netSave(ip, gw, mask, dns);
+    request->send(200, "text/plain", "Static IP " + ip + " saved. Rebooting; open http://" + ip + "/");
+    s_rebootAtMs = millis() + 800;
+  });
+
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
@@ -1562,6 +1612,7 @@ void web_monitor_init(void) {
     link["from"] = mac;
     link["channel"] = espnow_link_channel();
     link["my_mac"] = WiFi.macAddress();
+    { IPAddress i, g, m, d; doc["static_ip"] = netLoad(i, g, m, d); doc["ip"] = WiFi.localIP().toString(); }
 
     JsonObject can = doc["can"].to<JsonObject>();
     uint32_t fps; int ids;
@@ -1953,6 +2004,17 @@ void web_monitor_init(void) {
 
 void web_monitor_loop(void) {
   unsigned long now = millis();
+
+  // USB serial recovery: "dhcp" + Enter clears a static IP and reboots
+  static char line[8]; static uint8_t n = 0;
+  while (Serial.available()) {
+    char ch = (char)Serial.read();
+    if (ch == '\n' || ch == '\r') {
+      line[n] = 0;
+      if (!strcmp(line, "dhcp")) { netSave("", "", "", ""); Serial.println("Static IP cleared, rebooting on DHCP"); delay(100); ESP.restart(); }
+      n = 0;
+    } else if (n < sizeof(line) - 1) line[n++] = ch;
+  }
 
   if (s_rebootAtMs != 0 && (long)(now - s_rebootAtMs) >= 0) {
     Serial.println("Rebooting (requested from the web page)");
