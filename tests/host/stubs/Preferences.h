@@ -10,6 +10,7 @@ class Preferences {
   std::string ns;
 public:
   bool begin(const char *n, bool = false) { ns = n; return true; }
+  void end() {}
   std::string getString(const char *k, const char *def = "") { auto it = store().find(ns + "/" + k); return it == store().end() ? std::string(def) : it->second; }
   size_t putString(const char *k, const std::string &v) {
     if (v.size() > 4000) { printf("   [NVS] putString(%s) REJECTED: %zu bytes > 4000\n", k, v.size()); return 0; }

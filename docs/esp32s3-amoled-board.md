@@ -2043,3 +2043,14 @@ widest text the cell can show, now formatted with its own decimals ("250.00" wit
 smaller. Warnings compare the real reading, not the rounded one (on the web dashboard they used to compare the 1-decimal text).
 The dial numbers around a needle are not affected. Tests: `test_dial_text decimals`, `test_style_defaults` (4), `test_gauge_config`,
 `test_editor_cells.js`, `test_front_page.js` (12c). Host test cell builders now set `decimals = 1` like makeCell() does.
+
+## ESP-NOW multi-board link, phase 1 (build 117)
+
+One firmware for every board (`espnow_link.cpp`). Role is saved on the board: `http://<ip>/role?set=remote` or
+`?set=main` (default main), then it reboots. Main: reads CAN as before and broadcasts all signals plus a has-data mask
+every 20 ms (no pairing). Remote: CAN is not started; received values are written to the same globals the CAN decoder
+uses, so pages, web dashboard and SD logging work unchanged. No packet for 1 s: readings go back to "--". Channel: with
+WiFi joined, ESP-NOW uses the network's channel (all boards on the same network match); with no network after the 20 s
+boot try, WiFi stops searching and parks on channel 1. `/status.json` has a `link` block (role, packets/s, ms since last
+packet, sender MAC, channel, own MAC); the front page build line shows it. Each remote keeps its own pages and editor.
+Later: configure remotes from the main board; EGT and IAT signals.

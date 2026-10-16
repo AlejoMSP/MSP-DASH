@@ -46,6 +46,7 @@
 #include "can_parsing.h"
 #include "page_button.h"
 #include "build_info.h"
+#include "espnow_link.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available).
 // These are this board's dedicated UART0 pins, which Serial defaults
@@ -69,7 +70,8 @@ void setup()
   Touch_Init();
   lcd_lvgl_Init();
 
-  // --- CAN init ---
+  // --- CAN init (main board only; a remote board takes its values over ESP-NOW) ---
+  if (!espnow_link_is_remote()) {
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g_config.rx_queue_len = 64; // default is 5 - this bus runs several hundred frames/sec, so give the driver room to buffer
   twai_timing_config_t t_config = CAN_BITRATE;
@@ -82,10 +84,12 @@ void setup()
   }
   can_start_task(); // frames are received and decoded on their own task from here on, see can_parsing.h
   Serial.println("CAN running - waiting for rusEFI/MegaSquirt/LinkECU frames...");
+  }
 
   sd_storage_init();
   sd_logging_init();
   web_monitor_init();
+  espnow_link_init();   // after WiFi has joined (shares its channel) or given up (parks on channel 1)
 }
 
 void loop()
@@ -96,6 +100,7 @@ void loop()
   checkPageButton();
   web_monitor_loop();
   sim_loop();
+  espnow_link_loop();
   sd_logging_loop();
   vTaskDelay(pdMS_TO_TICKS(5)); // previously paced by twai_receive()'s timeout - keeps this from spinning flat out
 }

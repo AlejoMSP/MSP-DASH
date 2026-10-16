@@ -1,0 +1,24 @@
+// espnow_link.h - multi-board link over ESP-NOW.
+// One firmware for every board. Role "main" (default) reads CAN and broadcasts all signals 50 times a second;
+// role "remote" ignores CAN and shows the main board's values. Broadcast: no pairing, no MAC list.
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define ESPNOW_SEND_MS     20     // main: one packet every 20 ms (50/s)
+#define ESPNOW_TIMEOUT_MS  1000   // remote: no packet for this long -> readings show "--"
+#define ESPNOW_CAR_CHANNEL 1      // channel used when no WiFi network joined (in the car)
+
+void espnow_link_init(void);            // call after WiFi has connected or given up
+void espnow_link_loop(void);            // call from loop()
+bool espnow_link_is_remote(void);
+void espnow_link_set_remote(bool remote); // saved on the board; takes effect after a reboot
+uint32_t espnow_link_pps(void);          // packets per second, sent (main) or received (remote)
+int32_t espnow_link_last_ms(void);       // remote: ms since the last packet, -1 = never
+void espnow_link_peer_mac(char out[18]); // remote: the sender's MAC, "--" if none yet
+uint8_t espnow_link_channel(void);
+#ifdef __cplusplus
+}
+#endif

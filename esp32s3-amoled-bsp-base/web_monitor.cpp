@@ -37,6 +37,7 @@
 #include "build_info.h"
 #include "gauge_config_json.h"
 #include "simulator.h"
+#include "espnow_link.h"
 #include "web_theme.h"
 #include <math.h> // NAN
 
@@ -327,7 +328,14 @@ function renderIndicators(page, pageIdx) {
       try {
         const res = await fetch("/status.json");
         const st = await res.json();
-        document.getElementById("build").textContent = "build " + st.build + " - " + st.compiled;
+        let t = "build " + st.build + " - " + st.compiled;
+        const L = st.link;
+        if (L) {
+          t += L.role === "remote"
+            ? " | Remote board, " + (L.last_ms < 0 ? "no packets yet" : L.pps + " packets/s from " + L.from) + ", ch " + L.channel
+            : " | Main board, sending " + L.pps + " packets/s, ch " + L.channel;
+        }
+        document.getElementById("build").textContent = t;
       } catch (e) {
         setTimeout(loadBuild, 5000);
       }
@@ -1527,6 +1535,15 @@ void web_monitor_init(void) {
   // Everything needed to answer "is the board running what I think, and is
   // CAN actually flowing?" - build number, uptime, memory, WiFi, CAN driver
   // health, and per-signal data status.
+  // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
+  server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String r = request->hasParam("set") ? request->getParam("set")->value() : "";
+    if (r != "main" && r != "remote") { request->send(400, "text/plain", "use /role?set=main or /role?set=remote"); return; }
+    espnow_link_set_remote(r == "remote");
+    request->send(200, "text/plain", "Role set to " + r + ". Rebooting.");
+    s_rebootAtMs = millis() + 800;
+  });
+
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     JsonDocument doc;
     doc["build"] = FW_BUILD_NUMBER;
@@ -1537,6 +1554,14 @@ void web_monitor_init(void) {
     doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["wifi_rssi"] = WiFi.RSSI();
     doc["ws_clients"] = ws.count();
+    JsonObject link = doc["link"].to<JsonObject>();
+    char mac[18]; espnow_link_peer_mac(mac);
+    link["role"] = espnow_link_is_remote() ? "remote" : "main";
+    link["pps"] = espnow_link_pps();
+    link["last_ms"] = espnow_link_last_ms();
+    link["from"] = mac;
+    link["channel"] = espnow_link_channel();
+    link["my_mac"] = WiFi.macAddress();
 
     JsonObject can = doc["can"].to<JsonObject>();
     uint32_t fps; int ids;
