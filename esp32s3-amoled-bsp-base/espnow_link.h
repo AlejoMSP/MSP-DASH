@@ -19,6 +19,11 @@ uint32_t espnow_link_pps(void);          // packets per second, sent (main) or r
 int32_t espnow_link_last_ms(void);       // remote: ms since the last packet, -1 = never
 void espnow_link_peer_mac(char out[18]); // remote: the sender's MAC, "--" if none yet
 uint8_t espnow_link_channel(void);
+
+// Main board: the remotes it has heard. Each remote broadcasts a small "hello" (its IP and build) every 2 s.
+#define ESPNOW_MAX_BOARDS 4
+typedef struct { char mac[18]; char ip[16]; uint16_t build; int32_t age_ms; } LinkBoard;
+int espnow_link_boards(LinkBoard out[ESPNOW_MAX_BOARDS]);   // returns how many
 #ifdef __cplusplus
 }
 #endif

@@ -336,7 +336,19 @@ function renderIndicators(page, pageIdx) {
             ? " | Remote board, " + (L.last_ms < 0 ? "no packets yet" : L.pps + " packets/s from " + L.from) + ", ch " + L.channel
             : " | Main board, sending " + L.pps + " packets/s, ch " + L.channel;
         }
-        document.getElementById("build").textContent = t;
+        const el = document.getElementById("build");
+        el.textContent = t;
+        // Main board: the remotes it hears, sorted by IP, each a link to that board's own gauge editor
+        const bs = (L && L.boards ? L.boards : []).filter(b => b.age_ms < 10000)
+          .sort((a, b) => a.ip.split(".").map(Number)[3] - b.ip.split(".").map(Number)[3]);
+        bs.forEach((b, i) => {
+          el.appendChild(document.createElement("br"));
+          const a = document.createElement("a");
+          a.href = "http://" + b.ip + "/gauges"; a.target = "_blank";
+          a.textContent = "Remote " + (i + 1) + ": " + b.ip + " (build " + b.build + ")";
+          el.appendChild(a);
+          if (b.build !== st.build) el.appendChild(document.createTextNode(" - different build, flash it"));
+        });
       } catch (e) {
         setTimeout(loadBuild, 5000);
       }
@@ -1612,6 +1624,9 @@ void web_monitor_init(void) {
     link["from"] = mac;
     link["channel"] = espnow_link_channel();
     link["my_mac"] = WiFi.macAddress();
+    { LinkBoard bs[ESPNOW_MAX_BOARDS]; int nb = espnow_link_boards(bs);
+      JsonArray arr = link["boards"].to<JsonArray>();
+      for (int i = 0; i < nb; i++) { JsonObject o = arr.add<JsonObject>(); o["mac"] = bs[i].mac; o["ip"] = bs[i].ip; o["build"] = bs[i].build; o["age_ms"] = bs[i].age_ms; } }
     { IPAddress i, g, m, d; doc["static_ip"] = netLoad(i, g, m, d); doc["ip"] = WiFi.localIP().toString(); }
 
     JsonObject can = doc["can"].to<JsonObject>();

@@ -2066,3 +2066,9 @@ USB serial monitor. Survives OTA and USB reflashes (NVS is not erased).
 
 In the serial monitor (115200, Enter): `info` (build, role, IP, static/DHCP, MAC), `ip <ip> <gw> <mask> [dns]`,
 `dhcp`, `role main`, `role remote`. Each change is saved and the board reboots. Same checks as `/net`.
+
+## Remote list on the main board (build 121)
+
+Each remote broadcasts a hello (`MSH1`: its IP and build) every 2 s over ESP-NOW. The main board keeps up to 4 and lists
+them under the build line on its front page (heard in the last 10 s, sorted by IP), each a link to that board's `/gauges`
+editor, with a note when a remote runs a different build. `/status.json` `link.boards`: mac, ip, build, age_ms.

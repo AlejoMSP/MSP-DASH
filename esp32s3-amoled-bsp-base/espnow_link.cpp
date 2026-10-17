@@ -8,8 +8,17 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <string.h>
+#include "build_info.h"
 
 #define PKT_MAGIC 0x4D534431u   // "MSD1"
+#define HELLO_MAGIC 0x4D534831u // "MSH1"
+#define HELLO_MS 2000
+
+typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; } HelloPacket;
+
+typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; uint32_t lastMs; bool used; } BoardSlot;
+static BoardSlot s_boards[ESPNOW_MAX_BOARDS];
+static uint32_t s_lastHelloMs = 0;
 
 typedef struct __attribute__((packed)) {
   uint32_t magic;
@@ -52,6 +61,25 @@ static void sendTask(void *) {
     if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_txCount++;
     vTaskDelay(pdMS_TO_TICKS(ESPNOW_SEND_MS));
   }
+}
+
+static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len < (int)sizeof(HelloPacket)) return;
+  const HelloPacket *h = (const HelloPacket *)data;
+  if (h->magic != HELLO_MAGIC) return;
+  portENTER_CRITICAL(&s_mux);
+  int slot = -1, oldest = 0;
+  for (int i = 0; i < ESPNOW_MAX_BOARDS; i++) {
+    if (s_boards[i].used && !memcmp(s_boards[i].mac, info->src_addr, 6)) { slot = i; break; }
+    if (slot < 0 && !s_boards[i].used) slot = i;
+  }
+  if (slot < 0) {   // full: replace the one heard longest ago
+    for (int i = 1; i < ESPNOW_MAX_BOARDS; i++) if (s_boards[i].lastMs < s_boards[oldest].lastMs) oldest = i;
+    slot = oldest;
+  }
+  memcpy(s_boards[slot].mac, info->src_addr, 6);
+  s_boards[slot].ip = h->ip; s_boards[slot].build = h->build; s_boards[slot].lastMs = millis(); s_boards[slot].used = true;
+  portEXIT_CRITICAL(&s_mux);
 }
 
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
@@ -111,15 +139,16 @@ void espnow_link_init(void) {
   wifi_second_chan_t sc; esp_wifi_get_channel(&s_channel, &sc);
 
   if (esp_now_init() != ESP_OK) { Serial.println("ESP-NOW init FAILED"); return; }
+  esp_now_peer_info_t peer = {};   // both roles send broadcasts: main its values, remote its hello
+  memcpy(peer.peer_addr, BCAST, 6);
+  peer.channel = 0;                // whatever channel the radio is on
+  peer.ifidx = WIFI_IF_STA;
+  peer.encrypt = false;
+  esp_now_add_peer(&peer);
   if (s_remote) {
     esp_now_register_recv_cb(onRecv);
   } else {
-    esp_now_peer_info_t peer = {};
-    memcpy(peer.peer_addr, BCAST, 6);
-    peer.channel = 0;            // whatever channel the radio is on
-    peer.ifidx = WIFI_IF_STA;
-    peer.encrypt = false;
-    esp_now_add_peer(&peer);
+    esp_now_register_recv_cb(onHello);
     xTaskCreatePinnedToCore(sendTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
   }
   s_up = true;
@@ -136,6 +165,12 @@ void espnow_link_loop(void) {
   }
 
   if (!s_remote) return;   // sending runs in sendTask()
+
+  if (now - s_lastHelloMs >= HELLO_MS) {
+    s_lastHelloMs = now;
+    HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER };
+    esp_now_send(BCAST, (const uint8_t *)&h, sizeof(h));
+  }
 
   if (s_rxNew) {
     LinkPacket p;
@@ -169,4 +204,20 @@ uint8_t espnow_link_channel(void) { return s_channel; }
 void espnow_link_peer_mac(char out[18]) {
   if (!s_everRx) { strcpy(out, "--"); return; }
   snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X", s_peer[0], s_peer[1], s_peer[2], s_peer[3], s_peer[4], s_peer[5]);
+}
+
+int espnow_link_boards(LinkBoard out[ESPNOW_MAX_BOARDS]) {
+  BoardSlot b[ESPNOW_MAX_BOARDS];
+  portENTER_CRITICAL(&s_mux);
+  memcpy(b, s_boards, sizeof(b));
+  portEXIT_CRITICAL(&s_mux);
+  int n = 0; uint32_t now = millis();
+  for (int i = 0; i < ESPNOW_MAX_BOARDS; i++) {
+    if (!b[i].used) continue;
+    LinkBoard &o = out[n++];
+    snprintf(o.mac, sizeof(o.mac), "%02X:%02X:%02X:%02X:%02X:%02X", b[i].mac[0], b[i].mac[1], b[i].mac[2], b[i].mac[3], b[i].mac[4], b[i].mac[5]);
+    snprintf(o.ip, sizeof(o.ip), "%u.%u.%u.%u", (unsigned)(b[i].ip & 0xFF), (unsigned)(b[i].ip >> 8 & 0xFF), (unsigned)(b[i].ip >> 16 & 0xFF), (unsigned)(b[i].ip >> 24));
+    o.build = b[i].build; o.age_ms = (int32_t)(now - b[i].lastMs);
+  }
+  return n;
 }
