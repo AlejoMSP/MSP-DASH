@@ -2072,3 +2072,9 @@ In the serial monitor (115200, Enter): `info` (build, role, IP, static/DHCP, MAC
 Each remote broadcasts a hello (`MSH1`: its IP and build) every 2 s over ESP-NOW. The main board keeps up to 4 and lists
 them under the build line on its front page (heard in the last 10 s, sorted by IP), each a link to that board's `/gauges`
 editor, with a note when a remote runs a different build. `/status.json` `link.boards`: mac, ip, build, age_ms.
+
+## Board names (build 122)
+
+Name saved in NVS (`link`/`name`, up to 20 characters; empty = "Main" or "Remote"). Set with `/name?set=Remote%201` or the
+serial command `name Remote 1` (no reboot). Shown first on the board's build line and in its tab title, and sent in the
+hello so the main board's remote list uses it.

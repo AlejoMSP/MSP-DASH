@@ -14,9 +14,9 @@
 #define HELLO_MAGIC 0x4D534831u // "MSH1"
 #define HELLO_MS 2000
 
-typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; } HelloPacket;
+typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[ESPNOW_NAME_LEN]; } HelloPacket;
 
-typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; uint32_t lastMs; bool used; } BoardSlot;
+typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[ESPNOW_NAME_LEN + 1]; uint32_t lastMs; bool used; } BoardSlot;
 static BoardSlot s_boards[ESPNOW_MAX_BOARDS];
 static uint32_t s_lastHelloMs = 0;
 
@@ -64,8 +64,9 @@ static void sendTask(void *) {
 }
 
 static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
-  if (len < (int)sizeof(HelloPacket)) return;
-  const HelloPacket *h = (const HelloPacket *)data;
+  if (len < (int)offsetof(HelloPacket, name)) return;
+  HelloPacket hb; memset(&hb, 0, sizeof(hb)); memcpy(&hb, data, len < (int)sizeof(hb) ? len : sizeof(hb));
+  const HelloPacket *h = &hb;
   if (h->magic != HELLO_MAGIC) return;
   portENTER_CRITICAL(&s_mux);
   int slot = -1, oldest = 0;
@@ -78,7 +79,8 @@ static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int le
     slot = oldest;
   }
   memcpy(s_boards[slot].mac, info->src_addr, 6);
-  s_boards[slot].ip = h->ip; s_boards[slot].build = h->build; s_boards[slot].lastMs = millis(); s_boards[slot].used = true;
+  s_boards[slot].ip = h->ip; s_boards[slot].build = h->build;
+  memcpy(s_boards[slot].name, h->name, ESPNOW_NAME_LEN); s_boards[slot].name[ESPNOW_NAME_LEN] = 0; s_boards[slot].lastMs = millis(); s_boards[slot].used = true;
   portEXIT_CRITICAL(&s_mux);
 }
 
@@ -168,7 +170,8 @@ void espnow_link_loop(void) {
 
   if (now - s_lastHelloMs >= HELLO_MS) {
     s_lastHelloMs = now;
-    HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER };
+    HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER, {0} };
+    char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); memcpy(h.name, nm, ESPNOW_NAME_LEN);
     esp_now_send(BCAST, (const uint8_t *)&h, sizeof(h));
   }
 
@@ -217,7 +220,21 @@ int espnow_link_boards(LinkBoard out[ESPNOW_MAX_BOARDS]) {
     LinkBoard &o = out[n++];
     snprintf(o.mac, sizeof(o.mac), "%02X:%02X:%02X:%02X:%02X:%02X", b[i].mac[0], b[i].mac[1], b[i].mac[2], b[i].mac[3], b[i].mac[4], b[i].mac[5]);
     snprintf(o.ip, sizeof(o.ip), "%u.%u.%u.%u", (unsigned)(b[i].ip & 0xFF), (unsigned)(b[i].ip >> 8 & 0xFF), (unsigned)(b[i].ip >> 16 & 0xFF), (unsigned)(b[i].ip >> 24));
+    memcpy(o.name, b[i].name, sizeof(o.name));
     o.build = b[i].build; o.age_ms = (int32_t)(now - b[i].lastMs);
   }
   return n;
+}
+
+void espnow_link_name(char out[ESPNOW_NAME_LEN + 1]) {
+  Preferences pr; pr.begin("link", true);
+  String n = pr.getString("name", "");
+  pr.end();
+  if (!n.length()) n = espnow_link_is_remote() ? "Remote" : "Main";
+  strncpy(out, n.c_str(), ESPNOW_NAME_LEN); out[ESPNOW_NAME_LEN] = 0;
+}
+
+void espnow_link_set_name(const char *name) {
+  char t[ESPNOW_NAME_LEN + 1]; strncpy(t, name ? name : "", ESPNOW_NAME_LEN); t[ESPNOW_NAME_LEN] = 0;
+  Preferences pr; pr.begin("link", false); pr.putString("name", t); pr.end();
 }

@@ -24,6 +24,7 @@ public:
   String(unsigned long v) : std::string(std::to_string(v)) {}
   String(float v) : std::string(std::to_string(v)) {}
   String(double v) : std::string(std::to_string(v)) {}
+  void trim() { size_t a = find_first_not_of(" \t\r\n"); if (a == npos) { clear(); return; } erase(0, a); erase(find_last_not_of(" \t\r\n") + 1); }
   long toInt() const { return atol(c_str()); }
   double toFloat() const { return atof(c_str()); }
   unsigned char concat(const char *s, unsigned n) { append(s, n); return 1; }

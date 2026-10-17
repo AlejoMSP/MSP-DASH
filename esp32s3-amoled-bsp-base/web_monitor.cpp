@@ -329,7 +329,8 @@ function renderIndicators(page, pageIdx) {
       try {
         const res = await fetch("/status.json");
         const st = await res.json();
-        let t = "build " + st.build + " - " + st.compiled;
+        let t = (st.link && st.link.name ? st.link.name + " | " : "") + "build " + st.build + " - " + st.compiled;
+        if (st.link && st.link.name) document.title = "MSP-DASH - " + st.link.name;
         const L = st.link;
         if (L) {
           t += L.role === "remote"
@@ -345,7 +346,7 @@ function renderIndicators(page, pageIdx) {
           el.appendChild(document.createElement("br"));
           const a = document.createElement("a");
           a.href = "http://" + b.ip + "/gauges"; a.target = "_blank";
-          a.textContent = "Remote " + (i + 1) + ": " + b.ip + " (build " + b.build + ")";
+          a.textContent = (b.name || ("Remote " + (i + 1))) + ": " + b.ip + " (build " + b.build + ")";
           el.appendChild(a);
           if (b.build !== st.build) el.appendChild(document.createTextNode(" - different build, flash it"));
         });
@@ -1597,6 +1598,14 @@ void web_monitor_init(void) {
     s_rebootAtMs = millis() + 800;
   });
 
+  // Board name (shown on its page and in the main board's list): /name?set=Remote%201 . No reboot needed.
+  server.on("/name", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("set")) { request->send(400, "text/plain", "use /name?set=Remote 1"); return; }
+    String n = request->getParam("set")->value(); n.trim();
+    espnow_link_set_name(n.c_str());
+    request->send(200, "text/plain", "Name set to " + n);
+  });
+
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
@@ -1619,6 +1628,7 @@ void web_monitor_init(void) {
     JsonObject link = doc["link"].to<JsonObject>();
     char mac[18]; espnow_link_peer_mac(mac);
     link["role"] = espnow_link_is_remote() ? "remote" : "main";
+    { char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); link["name"] = nm; }
     link["pps"] = espnow_link_pps();
     link["last_ms"] = espnow_link_last_ms();
     link["from"] = mac;
@@ -1626,7 +1636,7 @@ void web_monitor_init(void) {
     link["my_mac"] = WiFi.macAddress();
     { LinkBoard bs[ESPNOW_MAX_BOARDS]; int nb = espnow_link_boards(bs);
       JsonArray arr = link["boards"].to<JsonArray>();
-      for (int i = 0; i < nb; i++) { JsonObject o = arr.add<JsonObject>(); o["mac"] = bs[i].mac; o["ip"] = bs[i].ip; o["build"] = bs[i].build; o["age_ms"] = bs[i].age_ms; } }
+      for (int i = 0; i < nb; i++) { JsonObject o = arr.add<JsonObject>(); o["mac"] = bs[i].mac; o["ip"] = bs[i].ip; o["build"] = bs[i].build; o["name"] = bs[i].name; o["age_ms"] = bs[i].age_ms; } }
     { IPAddress i, g, m, d; doc["static_ip"] = netLoad(i, g, m, d); doc["ip"] = WiFi.localIP().toString(); }
 
     JsonObject can = doc["can"].to<JsonObject>();
@@ -2042,12 +2052,17 @@ void web_monitor_loop(void) {
         if (!strcmp(a, "main") || !strcmp(a, "remote")) { espnow_link_set_remote(!strcmp(a, "remote")); Serial.printf("OK: role %s, rebooting\n", a); delay(100); ESP.restart(); }
         else Serial.println("usage: role main | role remote");
       }
+      else if (!strcmp(cmd, "name")) {
+        const char *nm = line + 4; while (*nm == ' ') nm++;
+        espnow_link_set_name(nm); Serial.printf("OK: name \"%s\"\n", nm);
+      }
       else if (!strcmp(cmd, "info")) {
         IPAddress i, g, m, x; bool st = netLoad(i, g, m, x);
-        Serial.printf("build %d | role %s | IP %s (%s) | MAC %s\n", FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
+        char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
+        Serial.printf("%s | build %d | role %s | IP %s (%s) | MAC %s\n", nm, FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
                       WiFi.localIP().toString().c_str(), st ? "static" : "DHCP", WiFi.macAddress().c_str());
       }
-      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote");
+      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text>");
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 

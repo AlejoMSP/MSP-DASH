@@ -22,7 +22,11 @@ uint8_t espnow_link_channel(void);
 
 // Main board: the remotes it has heard. Each remote broadcasts a small "hello" (its IP and build) every 2 s.
 #define ESPNOW_MAX_BOARDS 4
-typedef struct { char mac[18]; char ip[16]; uint16_t build; int32_t age_ms; } LinkBoard;
+#define ESPNOW_NAME_LEN 20
+typedef struct { char mac[18]; char ip[16]; char name[ESPNOW_NAME_LEN + 1]; uint16_t build; int32_t age_ms; } LinkBoard;
+// Board name, saved in NVS ("link"/"name"). Empty = "Main" or "Remote" from the role.
+void espnow_link_name(char out[ESPNOW_NAME_LEN + 1]);
+void espnow_link_set_name(const char *name);   // trimmed to ESPNOW_NAME_LEN
 int espnow_link_boards(LinkBoard out[ESPNOW_MAX_BOARDS]);   // returns how many
 #ifdef __cplusplus
 }
