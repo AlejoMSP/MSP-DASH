@@ -75,27 +75,38 @@ typedef struct {
 
 // Returns the pixel rect for a given cell index within a given layout,
 // on the 466x466 panel.
+// The visible circle every gauge page is laid out in (gauge_app_set_diameter): 466 = the whole panel.
+static int16_t s_diam = GAUGE_DIAMETER_DEFAULT;
+static float s_glassR = GAUGE_DIAMETER_DEFAULT / 2.0f;   // its radius, centred on the panel (233, 233)
+
+void gauge_app_set_diameter(int d) {
+  if (d < GAUGE_DIAMETER_MIN || d > GAUGE_DIAMETER_MAX) d = GAUGE_DIAMETER_DEFAULT;
+  s_diam = (int16_t)(d & ~1);   // even, so the halves meet on a whole pixel
+  s_glassR = s_diam / 2.0f;
+}
+
 static CellRect get_cell_rect(LayoutType layout, int cellIndex) {
-  const int16_t S = 466;
-  const int16_t H = S / 2; // 233
+  const int16_t S = s_diam;
+  const int16_t H = S / 2;
+  const int16_t o = (466 - S) / 2;   // the square around the circle, centred on the panel
 
   switch (layout) {
     case LAYOUT_1CELL:
-      return (CellRect){0, 0, S, S};
+      return (CellRect){o, o, S, S};
     case LAYOUT_2UP:
-      if (cellIndex == 0) return (CellRect){0, 0, S, H};
-      return (CellRect){0, H, S, H};
+      if (cellIndex == 0) return (CellRect){o, o, S, H};
+      return (CellRect){o, o + H, S, H};
     case LAYOUT_3UP:
-      if (cellIndex == 0) return (CellRect){0, 0, S, H};
-      if (cellIndex == 1) return (CellRect){0, H, H, H};
-      return (CellRect){H, H, H, H};
+      if (cellIndex == 0) return (CellRect){o, o, S, H};
+      if (cellIndex == 1) return (CellRect){o, o + H, H, H};
+      return (CellRect){o + H, o + H, H, H};
     case LAYOUT_2X2:
-      if (cellIndex == 0) return (CellRect){0, 0, H, H};
-      if (cellIndex == 1) return (CellRect){H, 0, H, H};
-      if (cellIndex == 2) return (CellRect){0, H, H, H};
-      return (CellRect){H, H, H, H};
+      if (cellIndex == 0) return (CellRect){o, o, H, H};
+      if (cellIndex == 1) return (CellRect){o + H, o, H, H};
+      if (cellIndex == 2) return (CellRect){o, o + H, H, H};
+      return (CellRect){o + H, o + H, H, H};
     default:
-      return (CellRect){0, 0, S, S};
+      return (CellRect){o, o, S, S};
   }
 }
 
@@ -224,7 +235,7 @@ static const SizedFont VALUE_FONTS[GAUGE_VALUE_SIZE_COUNT] = {   // same order a
 };
 
 #define PANEL_CENTRE 233.0f        // the AMOLED is 466x466 and round
-#define PANEL_FIT_RADIUS 228.0f    // a readout's corners must stay inside this circle, or the bezel cuts the digits off
+#define PANEL_FIT_RADIUS (s_glassR - 5.0f)   // a readout's corners must stay inside this circle, or the bezel cuts the digits off
 
 static bool box_in_panel(float cx, float cy, float w, float h) {
   for (int sx = -1; sx <= 1; sx += 2) {
@@ -347,9 +358,8 @@ static void switch_to_page(int index) {
 // circle, leaving a band at the bottom for the caption. Prefers wide
 // shapes, since the horizontal axis is time. Runs once at build time.
 static void fit_chart_rect(CellRect cell, int capBandIn, int16_t *ox, int16_t *oy, int16_t *ow, int16_t *oh) {
-  const float S = 466.0f;
-  const float cx = S / 2.0f, cy = S / 2.0f;
-  const float R = S / 2.0f - 8.0f;
+  const float cx = 233.0f, cy = 233.0f;
+  const float R = s_glassR - 8.0f;
   const int pad = 6, step = 4, minW = 60, minH = 40;
   const int capBand = capBandIn;      // room for the caption under the chart: its line height + 18 (34 for the default 16px line)
 
@@ -448,7 +458,7 @@ static void apply_text_halign(lv_obj_t *container, CellRect rect, int32_t halign
     if (!lv_obj_has_flag(l, LV_OBJ_FLAG_USER_1)) continue;
     lv_area_t a; lv_obj_get_coords(l, &a);
     float dy = fmaxf(fabsf(a.y1 - 233.0f), fabsf(a.y2 + 1 - 233.0f));
-    float half = dy < 227.0f ? sqrtf(227.0f * 227.0f - dy * dy) : 0.0f;
+    float gr = s_glassR - 6.0f, half = dy < gr ? sqrtf(gr * gr - dy * dy) : 0.0f;
     float xl = fmaxf(rect.x + 8.0f, 233.0f - half), xr = fminf(rect.x + rect.w - 8.0f, 233.0f + half);
     float w = (float)(a.x2 - a.x1 + 1);
     if (xr - xl < w) continue;   // no spare room: leave it centred
@@ -674,7 +684,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
         for (int32_t a = 0; a <= dialSweep && ok; a += 3) {
           float rad = (float)(dialStart + a) * 0.01745329f, R = cand / 2.0f;
           float x = cellCx + sinf(rad) * R, y = cy - cosf(rad) * R, dx = x - 233.0f, dy = y - 233.0f;
-          if (dx * dx + dy * dy > 231.0f * 231.0f || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
+          if (dx * dx + dy * dy > (s_glassR - 2.0f) * (s_glassR - 2.0f) || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
         }
         if (ok) { best = cand; break; }
       }

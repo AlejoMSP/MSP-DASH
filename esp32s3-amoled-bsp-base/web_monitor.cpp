@@ -1619,6 +1619,15 @@ void web_monitor_init(void) {
     request->send(200, "text/plain", String("Perf overlay ") + (on ? "on" : "off") + ": " + lcd_perf_fps() + " fps, drawing " + lcd_perf_busy_pct() + "%");
   });
 
+  // Visible screen diameter for the gauge layout: /diameter?set=440 (300-560, 466 = the whole panel). Saved, reboots.
+  server.on("/diameter", HTTP_GET, [](AsyncWebServerRequest *request) {
+    int d = request->hasParam("set") ? request->getParam("set")->value().toInt() : 0;
+    if (d < GAUGE_DIAMETER_MIN || d > GAUGE_DIAMETER_MAX) { request->send(400, "text/plain", "use /diameter?set=466 (300 to 560)"); return; }
+    Preferences dp; dp.begin("disp", false); dp.putInt("diam", d); dp.end();
+    request->send(200, "text/plain", "Diameter " + String(d) + " saved. Rebooting.");
+    s_rebootAtMs = millis() + 800;
+  });
+
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
@@ -1638,6 +1647,7 @@ void web_monitor_init(void) {
     doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["wifi_rssi"] = WiFi.RSSI();
     doc["ws_clients"] = ws.count();
+    { Preferences dp; dp.begin("disp", true); doc["diameter"] = dp.getInt("diam", GAUGE_DIAMETER_DEFAULT); dp.end(); }
     doc["fps"] = lcd_perf_fps();
     doc["lvgl_busy"] = lcd_perf_busy_pct();
     JsonObject link = doc["link"].to<JsonObject>();
@@ -2075,13 +2085,18 @@ void web_monitor_loop(void) {
         bool on = !strcmp(a, "on"); lcd_perf_overlay(on);
         Serial.printf("OK: perf overlay %s | %lu fps, drawing %lu%%\n", on ? "on" : "off", (unsigned long)lcd_perf_fps(), (unsigned long)lcd_perf_busy_pct());
       }
+      else if (!strcmp(cmd, "diameter")) {
+        int d = atoi(a);
+        if (d < GAUGE_DIAMETER_MIN || d > GAUGE_DIAMETER_MAX) Serial.println("usage: diameter 466 (300 to 560)");
+        else { Preferences dp; dp.begin("disp", false); dp.putInt("diam", d); dp.end(); Serial.printf("OK: diameter %d, rebooting\n", d); delay(100); ESP.restart(); }
+      }
       else if (!strcmp(cmd, "info")) {
         IPAddress i, g, m, x; bool st = netLoad(i, g, m, x);
         char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
         Serial.printf("%s | build %d | role %s | IP %s (%s) | MAC %s\n", nm, FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
                       WiFi.localIP().toString().c_str(), st ? "static" : "DHCP", WiFi.macAddress().c_str());
       }
-      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text> | perf on|off");
+      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text> | perf on|off | diameter <px>");
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 

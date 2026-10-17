@@ -2106,3 +2106,11 @@ keeps its edge. Test: `test_dial_text halign`.
 
 Build 127: alignment applies to the caption only ("Caption alignment"); the readout and units always stay centred. Also
 fixed: a dial's readout was placed once for "--" and then grew to the right as digits appeared; it now re-centres.
+
+## Screen diameter (build 128)
+
+Per board, NVS `disp`/`diam` (300-560, default 466 = the whole panel): `/diameter?set=440` or serial `diameter 440`, saved,
+reboots. Gauge pages are laid out in a square of that size centred on the panel (`get_cell_rect`), and every glass check uses
+its radius (readout fit, trend-graph fit, half-moon growth, caption alignment). Smaller: everything shrinks inside a bezel.
+Larger: everything grows; anything past 466 falls off the real panel. Indicator pages are not affected. `/status.json`
+shows `diameter`. Tests: `test_dial_text diam400 | diam520`.

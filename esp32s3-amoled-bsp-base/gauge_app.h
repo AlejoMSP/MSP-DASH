@@ -11,6 +11,12 @@ extern "C" {
 // Called once from lcd_bsp.c's lcd_lvgl_Init(), in place of the
 // original lv_demo_widgets() placeholder call.
 void build_gauge_app(void);
+// Visible screen diameter in pixels (the panel is 466; less if a bezel covers the edge, more to push gauges past it).
+// Every gauge page is laid out in a circle of this size, centred on the panel. Set before build_gauge_app().
+#define GAUGE_DIAMETER_DEFAULT 466
+#define GAUGE_DIAMETER_MIN 300
+#define GAUGE_DIAMETER_MAX 560
+void gauge_app_set_diameter(int d);
 
 // The actual number of active pages - the .ino's BOOT button handler
 // uses this instead of a hardcoded count, since the page count is now
