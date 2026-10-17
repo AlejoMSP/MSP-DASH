@@ -243,26 +243,32 @@ int main(int argc, char **argv) {
   }
 
   if (!strcmp(mode, "halign")) {
-    printf("halign: left / right text stays inside the cell and the glass, and keeps its edge as the number changes\n");
+    printf("halign: the caption goes left / right inside the cell and the glass; the readout stays centred\n");
+    s_has[SIG_AFR] = true; s_val[SIG_AFR] = 14.7f; run_ms(150);
     for (int p = 0; p < 3; p++) {
+      lv_obj_update_layout(s_pageScr[p]);
       lv_obj_t *box = lv_obj_get_child(s_pageScr[p], 0);
-      int edge[2] = {0, 0};
-      for (int pass = 0; pass < 2; pass++) {
-        s_has[SIG_AFR] = true; s_val[SIG_AFR] = pass ? 248.7f : 3.2f; run_ms(150); lv_obj_update_layout(s_pageScr[p]);
-        for (uint32_t i = 0; i < lv_obj_get_child_cnt(box); i++) {
-          lv_obj_t *k = lv_obj_get_child(box, i);
-          if (!lv_obj_check_type(k, &lv_label_class) || !lv_obj_has_flag(k, LV_OBJ_FLAG_USER_1)) continue;
-          lv_area_t a; lv_obj_get_coords(k, &a);
-          const char *t = lv_label_get_text(k);
+      lv_area_t bx; lv_obj_get_coords(box, &bx);
+      int nCap = 0;
+      for (uint32_t i = 0; i < lv_obj_get_child_cnt(box); i++) {
+        lv_obj_t *k = lv_obj_get_child(box, i);
+        if (!lv_obj_check_type(k, &lv_label_class)) continue;
+        lv_area_t a; lv_obj_get_coords(k, &a);
+        const char *t = lv_label_get_text(k);
+        char m[160];
+        if (lv_obj_has_flag(k, LV_OBJ_FLAG_USER_1)) {
+          nCap++;
           lv_point_t sz; lv_txt_get_size(&sz, t, lv_obj_get_style_text_font(k, LV_PART_MAIN), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-          lv_area_t txt = a;   // where the text itself is drawn inside the label
-          if (lv_obj_get_style_text_align(k, LV_PART_MAIN) == LV_TEXT_ALIGN_LEFT) txt.x2 = a.x1 + sz.x - 1; else txt.x1 = a.x2 - sz.x + 1;
-          char m[160]; snprintf(m, sizeof(m), "page %d '%s': on the glass", p, t); CHECK(inside_circle(&txt, 233.0f), m);
-          if (strchr("0123456789-", t[0])) edge[pass] = p == 0 ? txt.x1 : txt.x2;
+          lv_area_t txt = a;
+          if (p == 0) txt.x2 = a.x1 + sz.x - 1; else txt.x1 = a.x2 - sz.x + 1;
+          snprintf(m, sizeof(m), "page %d caption '%s': on the glass and off centre", p, t);
+          CHECK(inside_circle(&txt, 233.0f) && fabsf((txt.x1 + txt.x2) / 2.0f - (bx.x1 + bx.x2) / 2.0f) > 10.0f, m);
+        } else if (strchr("0123456789-", t[0])) {
+          snprintf(m, sizeof(m), "page %d readout '%s' stays centred", p, t);
+          CHECK(fabsf((a.x1 + a.x2) / 2.0f - (bx.x1 + bx.x2) / 2.0f) <= 2.0f, m);
         }
       }
-      char m[120]; snprintf(m, sizeof(m), "page %d: the readout keeps its %s edge (%d, %d)", p, p == 0 ? "left" : "right", edge[0], edge[1]);
-      CHECK(edge[0] && edge[0] == edge[1], m);
+      char m[80]; snprintf(m, sizeof(m), "page %d: one caption follows the setting", p); CHECK(nCap == 1, m);
     }
   }
 

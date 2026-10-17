@@ -531,7 +531,7 @@ R"rawliteral(
           </label>
           <label>Decimals
             <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
-          <label>Text alignment
+          <label>Caption alignment
             <select onchange="setCellField(${pIdx},${cIdx},'h_align',parseInt(this.value))">${[[0,"Center"],[1,"Left"],[2,"Right"]].map(([v,n]) => `<option value="${v}" ${(c.h_align||0)===v?"selected":""}>${n}</option>`).join("")}</select></label>
           <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
           ${(c.gauge_type===0 || c.gauge_type===2) ? `

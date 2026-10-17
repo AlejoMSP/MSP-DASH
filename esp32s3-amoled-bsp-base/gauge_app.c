@@ -434,7 +434,7 @@ static void needle_trim_cb(lv_event_t *e) {
 // own container, sized/positioned to the given rect. Content is built
 // using relative positioning (center/align) within the container, so
 // the same logic works regardless of the cell's actual size.
-// Left / right text: every label marked LV_OBJ_FLAG_USER_1 gets a fixed width spanning the room its row really has (the
+// Left / right caption: every label marked LV_OBJ_FLAG_USER_1 (only the caption; the readout and units always stay centred) gets a fixed width spanning the room its row really has (the
 // cell, less the round glass at that height) and is aligned inside it, so a changing number stays put. Centre (the
 // default) leaves the layout exactly as it was.
 static void apply_text_halign(lv_obj_t *container, CellRect rect, int32_t halign) {
@@ -525,7 +525,6 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     const lv_font_t *unitsFont = hasUnits ? pick_caption_font(cfg->caption_font_size, cfg->units, cellCx, numTopAbs + numH + 2.0f, ANCHOR_TOP, rect.w * 0.6f, rect.h * 0.25f) : NULL;
 
     lv_obj_t *numLabel = lv_label_create(container);
-    lv_obj_add_flag(numLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
     lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
     lv_obj_set_style_text_font(numLabel, numFont, 0);
     lv_label_set_text(numLabel, "--");
@@ -543,7 +542,6 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
     if (hasUnits) {
       lv_obj_t *unitsLabel = lv_label_create(container);
-      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -765,7 +763,6 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_t *unitsLabel = NULL;
     if (hasUnits) {
       unitsLabel = lv_label_create(container);
-      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -776,13 +773,14 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     if (cfg->show_value) {
       // The readout sits just above the units (or the caption) at the bottom of the dial.
       lv_obj_t *valueLabel = lv_label_create(container);
-      lv_obj_add_flag(valueLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
       lv_obj_set_style_text_font(valueLabel, valFont, 0);
       lv_label_set_text(valueLabel, "--");
       if (unitsLabel) lv_obj_align_to(valueLabel, unitsLabel, LV_ALIGN_OUT_TOP_MID, 0, -2);
       else if (onFace) lv_obj_align(valueLabel, LV_ALIGN_BOTTOM_MID, 0, -8);
       else lv_obj_align_to(valueLabel, capLabel, LV_ALIGN_OUT_TOP_MID, 0, -4);
+      // align_to places it once, for "--": keep the same row but re-centre it whenever the number's width changes
+      if (unitsLabel || !onFace) lv_obj_align(valueLabel, LV_ALIGN_TOP_MID, 0, lv_obj_get_y_aligned(valueLabel));
       rt->numberLabel = valueLabel; // reuse the same field - only one of these two paths is active per cell
     }
   }

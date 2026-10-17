@@ -2103,3 +2103,6 @@ Cell field `h_align` (display editor "Text alignment"): 0 Center (default, layou
 the caption (not a caption on the dial face), the readout and the units. Each such label gets a fixed width spanning the
 room its row really has (cell less the round glass at that height) and its text is aligned inside it, so a changing number
 keeps its edge. Test: `test_dial_text halign`.
+
+Build 127: alignment applies to the caption only ("Caption alignment"); the readout and units always stay centred. Also
+fixed: a dial's readout was placed once for "--" and then grew to the right as digits appeared; it now re-centres.
