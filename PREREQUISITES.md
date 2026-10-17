@@ -84,15 +84,31 @@ arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,C
 arduino-cli upload -p COM4 --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB --input-dir C:\esp32build esp32s3-amoled-bsp-base
 ```
 
-Normal way to flash: over WiFi to the board's `/update` page, no USB cable (replace the upload line above):
+Normal way to flash: over WiFi to each board's `/update` page, no USB cable (replace the upload line above).
+Boards: Main 192.168.55.231, Remote 1 192.168.55.232, Remote 2 192.168.55.233.
 
 ```powershell
-curl.exe -F "firmware=@C:\esp32build\esp32s3-amoled-bsp-base.ino.bin" http://192.168.55.102/update
+cls
+foreach ($ip in "192.168.55.231","192.168.55.232","192.168.55.233") { $r = curl.exe -s -H "Expect:" -w " HTTP %{http_code}" -F "firmware=@C:\esp32build\esp32s3-amoled-bsp-base.ino.bin" http://$ip/update; Write-Host "$ip -> $r" }
 ```
 
-It prints `OK` and the board reboots into the new build (the build number shows on the web pages). Use `curl.exe`,
-not `curl`: in Windows PowerShell `curl` is a different command. The USB upload line is the fallback for a board
-that is off WiFi or won't boot.
+Each line should end in `HTTP 200`; the board then reboots (the build number shows on its web page). A reset or
+`HTTP 100` usually still means the update worked: check the build line. Use `curl.exe`, not `curl`: in Windows
+PowerShell `curl` is a different command. The USB upload line is the fallback for a board that is off WiFi or won't boot.
+
+### USB serial commands
+
+`arduino-cli monitor -p COMx -c baudrate=115200`, then type a command and press Enter (typing is not echoed):
+
+| Command | What it does |
+|---|---|
+| `info` | name, build, role, IP (static or DHCP), MAC |
+| `ip <ip> <gateway> <mask> [dns]` | static IP, saved, reboots |
+| `dhcp` | back to DHCP, reboots |
+| `role main` / `role remote` | ESP-NOW role, saved, reboots |
+| `name <text>` | board name (up to 20 characters), no reboot |
+
+The same settings over WiFi: `/net?ip=&gw=&mask=`, `/net?dhcp=1`, `/role?set=remote`, `/name?set=Remote%201`.
 
 `--build-path` on compile and `--input-dir` on upload must name the same folder, or upload sends an old binary
 (this once looked like an OTA firmware bug). `CDCOnBoot=cdc` puts Serial on the USB port. The partition scheme is
