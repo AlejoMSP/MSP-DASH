@@ -2005,14 +2005,34 @@ void web_monitor_init(void) {
 void web_monitor_loop(void) {
   unsigned long now = millis();
 
-  // USB serial recovery: "dhcp" + Enter clears a static IP and reboots
-  static char line[8]; static uint8_t n = 0;
+  // USB serial commands (115200, end with Enter):
+  //   ip <ip> <gateway> <mask> [dns]   static IP, saved, reboots     dhcp           back to DHCP, reboots
+  //   role main | role remote          ESP-NOW role, saved, reboots  info           role, IP, build
+  static char line[80]; static uint8_t n = 0;
   while (Serial.available()) {
     char ch = (char)Serial.read();
     if (ch == '\n' || ch == '\r') {
-      line[n] = 0;
-      if (!strcmp(line, "dhcp")) { netSave("", "", "", ""); Serial.println("Static IP cleared, rebooting on DHCP"); delay(100); ESP.restart(); }
-      n = 0;
+      line[n] = 0; n = 0;
+      char a[20] = "", b[20] = "", c[20] = "", d[20] = "", cmd[8] = "";
+      int k = sscanf(line, "%7s %19s %19s %19s %19s", cmd, a, b, c, d);
+      if (k <= 0) continue;
+      if (!strcmp(cmd, "dhcp")) { netSave("", "", "", ""); Serial.println("OK: DHCP, rebooting"); delay(100); ESP.restart(); }
+      else if (!strcmp(cmd, "ip")) {
+        IPAddress i, g, m, x;
+        if (k < 4 || !parseIp(a, i) || !parseIp(b, g) || !parseIp(c, m) || (k == 5 && !parseIp(d, x))) Serial.println("usage: ip 192.168.55.231 192.168.55.1 255.255.255.0 [dns]");
+        else if (((uint32_t)i & (uint32_t)m) != ((uint32_t)g & (uint32_t)m) || i == g) Serial.println("ERROR: ip and gateway must be in the same subnet and not equal; nothing saved");
+        else { netSave(a, b, c, k == 5 ? d : ""); Serial.printf("OK: static IP %s, rebooting\n", a); delay(100); ESP.restart(); }
+      }
+      else if (!strcmp(cmd, "role")) {
+        if (!strcmp(a, "main") || !strcmp(a, "remote")) { espnow_link_set_remote(!strcmp(a, "remote")); Serial.printf("OK: role %s, rebooting\n", a); delay(100); ESP.restart(); }
+        else Serial.println("usage: role main | role remote");
+      }
+      else if (!strcmp(cmd, "info")) {
+        IPAddress i, g, m, x; bool st = netLoad(i, g, m, x);
+        Serial.printf("build %d | role %s | IP %s (%s) | MAC %s\n", FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
+                      WiFi.localIP().toString().c_str(), st ? "static" : "DHCP", WiFi.macAddress().c_str());
+      }
+      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote");
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 

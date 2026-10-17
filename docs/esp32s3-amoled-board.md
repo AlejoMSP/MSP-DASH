@@ -2061,3 +2061,8 @@ Later: configure remotes from the main board; EGT and IAT signals.
 (`net`) and reboots; `/net?dhcp=1` goes back to DHCP. ip and gw must share the subnet. Applied with `WiFi.config()` before
 `WiFi.begin()`. `/status.json` shows `static_ip` and `ip`. Recovery if a board is unreachable: type `dhcp` + Enter in the
 USB serial monitor. Survives OTA and USB reflashes (NVS is not erased).
+
+## USB serial commands (build 119)
+
+In the serial monitor (115200, Enter): `info` (build, role, IP, static/DHCP, MAC), `ip <ip> <gw> <mask> [dns]`,
+`dhcp`, `role main`, `role remote`. Each change is saved and the board reboots. Same checks as `/net`.
