@@ -748,6 +748,8 @@ R"rawliteral(
       pages[pIdx].layout = newLayout;
       const needed = CELLS_PER_LAYOUT[newLayout];
       while (pages[pIdx].cells.length < needed) pages[pIdx].cells.push(emptyCell());
+      // 2-Up: a cell that is not set up yet becomes a Half-Moon (the dial that fits a short, wide cell)
+      if (newLayout === 1) pages[pIdx].cells.forEach((c, i) => { if (i < needed && !c.enabled && c.gauge_type === 0) { c.gauge_type = 2; c.start_deg = 270; c.end_deg = 90; } });
       renderPages();
     }
 

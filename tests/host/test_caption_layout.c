@@ -231,7 +231,9 @@ int main(int argc, char **argv) {
         if (va == GAUGE_VALIGN_CENTER) {
           float shift = mcy - cellCy; centreShift[p == 3 ? 1 : 0] = shift;
           float want = p >= 3 && p <= 5 ? (am.x2 - am.x1 + 1) / 6.0f : 0.0f;
-          snprintf(m, sizeof(m), "page %d CENTER: exactly where it always stood (shift %.1f, expected %.1f)", p, shift, want); CHECK(fabsf(shift - want) <= 1.5f, m);
+          // a half moon that grew to fill its cell (build 124) is centred in the free area instead
+          bool centredInArea = fabsf((extTop + extBot) / 2.0f - ((float)cell.y1 + 4.0f + stackTop - 4.0f) / 2.0f) <= 1.5f;
+          snprintf(m, sizeof(m), "page %d CENTER: where it always stood, or (grown half moon) centred in the free area (shift %.1f, expected %.1f)", p, shift, want); CHECK(fabsf(shift - want) <= 1.5f || (p >= 3 && p <= 5 && centredInArea), m);
         }
         snprintf(m, sizeof(m), "page %d cell %d: the dial never reaches into the caption/readout (lowest point %.1f, stack starts %.1f)", p, c, extBot, stackTop); CHECK(va == GAUGE_VALIGN_CENTER || extBot <= stackTop, m);
         snprintf(m, sizeof(m), "page %d cell %d: the dial's highest point stays inside its cell", p, c); CHECK(va == GAUGE_VALIGN_CENTER || extTop >= cell.y1, m);

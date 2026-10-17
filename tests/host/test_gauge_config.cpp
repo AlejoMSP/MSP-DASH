@@ -29,9 +29,9 @@ SerialClass Serial;
 bool g_ffat_mounts = true;
 FFatClass FFat;
 void *heap_caps_malloc(size_t n, int) { return malloc(n); }
-volatile float g_afr, g_clt_f, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_boost_kpa, g_rpm, g_tps, g_battv;
+volatile float g_afr, g_clt_f, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_boost_kpa, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f;
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
-              g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data;
+              g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data;
 volatile int g_requested_page = -1;
 volatile int g_page_nav_delta = 0;
 volatile uint16_t g_flag_bits = 0, g_flag_seen = 0;
@@ -293,8 +293,8 @@ int main(int argc, char **argv) {
   {
     static const char *NAMES[9] = { "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal" };
     bool namesOk = true; for (int i = 0; i < 9; i++) if (strcmp(gauge_config_signal_name((SignalId)(SIG_FIRST_FLAG + i)), NAMES[i]) != 0) namesOk = false;
-    CHECK(namesOk && SIG_COUNT == 20, "nine flag signals with readable names (20 signals in all)");
-    CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(0), "which signals are flags");
+    CHECK(namesOk && SIG_COUNT == 22 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (22 signals in all)");
+    CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(SIG_EGT) && !gauge_signal_is_flag(SIG_IAT) && !gauge_signal_is_flag(0), "which signals are flags");
     g_fake_millis = 50000; g_flag_bits = 0; g_flag_seen = 0;
     CHECK(!gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 0.0f, "before any frame: no data");
     g_flag_bits = (1u << (SIG_FAN - SIG_FIRST_FLAG)); g_flag_seen = 0x00FF; for (int i = 0; i < 8; i++) gauge_config_mark_signal_active((SignalId)(SIG_FIRST_FLAG + i));
@@ -312,7 +312,7 @@ int main(int argc, char **argv) {
   {
     gauge_config_log_init();
     bool analogOn = true; for (int sg = 1; sg < SIG_FIRST_FLAG; sg++) if (!gauge_config_is_log_enabled((SignalId)sg)) analogOn = false;
-    bool flagsOff = true; for (int sg = SIG_FIRST_FLAG; sg < SIG_COUNT; sg++) if (gauge_config_is_log_enabled((SignalId)sg)) flagsOff = false;
+    bool flagsOff = true; for (int sg = SIG_FIRST_FLAG; sg < SIG_FLAG_END; sg++) if (gauge_config_is_log_enabled((SignalId)sg)) flagsOff = false;
     CHECK(analogOn, "the ten analog signals are still logged by default (the CSV columns people use do not change)");
     CHECK(flagsOff, "the nine flags default to not logged");
     gauge_config_set_log_enabled(SIG_FAN, true); CHECK(gauge_config_is_log_enabled(SIG_FAN), "but a flag can be switched on");

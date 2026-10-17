@@ -34,12 +34,16 @@ typedef enum {
   SIG_FAN,         // fan 1 on
   SIG_FAN2,        // fan 2 on
   SIG_BRAKE,       // brake pedal pressed (BASE11)
+  // Analog signals added after the flags: appended so the numbers saved in existing configs keep their meaning.
+  SIG_EGT,         // exhaust gas temp, F (placeholder CAN ID until the real one is known)
+  SIG_IAT,         // intake air temp, F
   SIG_COUNT
 } SignalId;
 
 #define SIG_FIRST_FLAG SIG_REVLIM
-#define SIG_FLAG_COUNT (SIG_COUNT - SIG_FIRST_FLAG)
-static inline bool gauge_signal_is_flag(int sig) { return sig >= SIG_FIRST_FLAG && sig < SIG_COUNT; }
+#define SIG_FLAG_END (SIG_BRAKE + 1)
+#define SIG_FLAG_COUNT (SIG_FLAG_END - SIG_FIRST_FLAG)
+static inline bool gauge_signal_is_flag(int sig) { return sig >= SIG_FIRST_FLAG && sig < SIG_FLAG_END; }
 
 // ---- Page layout templates - a fixed set of common arrangements
 // rather than a fully arbitrary grid, per project decision. ----

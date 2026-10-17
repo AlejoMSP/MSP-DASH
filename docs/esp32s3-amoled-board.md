@@ -2078,3 +2078,14 @@ editor, with a note when a remote runs a different build. `/status.json` `link.b
 Name saved in NVS (`link`/`name`, up to 20 characters; empty = "Main" or "Remote"). Set with `/name?set=Remote%201` or the
 serial command `name Remote 1` (no reboot). Shown first on the board's build line and in its tab title, and sent in the
 hello so the main board's remote list uses it.
+
+## EGT and IAT, half moons that fill their cell, 2-Up default (build 124)
+
+New analog signals EGT (20) and IAT (21), deg F, appended after the flags so numbers saved in configs keep their meaning
+(`SIG_FLAG_END` now marks the end of the flags). IAT is read from rusEFI BASE3 (0x203) byte 3, unsigned, offset -40 like CLT
+(to confirm against the DBC). EGT has no source yet: PLACEHOLDER ID `CAN_ID_EGT_PLACEHOLDER` 0x7F0, bytes 0-1 unsigned LE,
+deg C (can_parsing.h). Default scales EGT 0-1800, IAT 0-200; both in the simulator and the ESP-NOW packet.
+
+Half moons grow to the largest size whose arc and hub fit the cell's free area, its width and the round glass (never smaller
+than before). Center then centres the arc + hub in the free area; Top / Bottom work as before. In the display editor,
+choosing 2-Up turns cells that are not set up yet into Half-Moons.

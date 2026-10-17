@@ -109,6 +109,8 @@ static void applyPacket(const LinkPacket *p) {
   PUT(SIG_FLEX, g_flex_pct, g_flex_has_data)
   PUT(SIG_TPS, g_tps, g_tps_has_data)
   PUT(SIG_BATTV, g_battv, g_battv_has_data)
+  PUT(SIG_EGT, g_egt_f, g_egt_has_data)
+  PUT(SIG_IAT, g_iat_f, g_iat_has_data)
   #undef PUT
   uint16_t bits = 0, seen = 0;
   for (int i = 0; i < SIG_FLAG_COUNT && SIG_FIRST_FLAG + i < n; i++) {
@@ -125,6 +127,7 @@ static void applyPacket(const LinkPacket *p) {
 static void clearAll(void) {   // back to "--", as when CAN has gone quiet
   g_rpm_has_data = g_clt_has_data = g_boost_has_data = g_afr_has_data = g_oilp_has_data = false;
   g_oilt_has_data = g_fuelp_has_data = g_flex_has_data = g_tps_has_data = g_battv_has_data = false;
+  g_egt_has_data = g_iat_has_data = false;
   g_flag_seen = 0;
 }
 

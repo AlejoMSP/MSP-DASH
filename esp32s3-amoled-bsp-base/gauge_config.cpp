@@ -531,6 +531,8 @@ const char *gauge_config_signal_name(SignalId sig) {
     case SIG_FLEX: return "Ethanol %";
     case SIG_TPS: return "Throttle Position";
     case SIG_BATTV: return "Battery Voltage";
+    case SIG_EGT: return "EGT";
+    case SIG_IAT: return "Intake Air Temp";
     case SIG_REVLIM: return "Rev Limiter Active";
     case SIG_MAINRELAY: return "Main Relay";
     case SIG_FUELPUMP: return "Fuel Pump";
@@ -556,6 +558,8 @@ float gauge_config_signal_value(SignalId sig) {
     case SIG_FLEX: return g_flex_pct;
     case SIG_TPS: return g_tps;
     case SIG_BATTV: return g_battv;
+    case SIG_EGT: return g_egt_f;
+    case SIG_IAT: return g_iat_f;
     default:
       if (gauge_signal_is_flag(sig)) return ((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f;
       return 0;
@@ -575,6 +579,8 @@ bool gauge_config_signal_has_data(SignalId sig) {
     case SIG_FLEX: seen = g_flex_has_data; break;
     case SIG_TPS: seen = g_tps_has_data; break;
     case SIG_BATTV: seen = g_battv_has_data; break;
+    case SIG_EGT: seen = g_egt_has_data; break;
+    case SIG_IAT: seen = g_iat_has_data; break;
     default:
       seen = gauge_signal_is_flag(sig) && ((g_flag_seen >> (sig - SIG_FIRST_FLAG)) & 1u);
       break;

@@ -46,6 +46,8 @@ volatile float g_boost_kpa = 0;
 volatile float g_rpm = 0;
 volatile float g_tps = 0;
 volatile float g_battv = 0;
+volatile float g_egt_f = 0;
+volatile float g_iat_f = 0;
 
 volatile bool g_afr_has_data = false;
 volatile bool g_clt_has_data = false;
@@ -57,6 +59,8 @@ volatile bool g_boost_has_data = false;
 volatile bool g_rpm_has_data = false;
 volatile bool g_tps_has_data = false;
 volatile bool g_battv_has_data = false;
+volatile bool g_egt_has_data = false;
+volatile bool g_iat_has_data = false;
 volatile uint16_t g_flag_bits = 0;
 volatile uint16_t g_flag_seen = 0;
 
@@ -620,8 +624,46 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
     lv_obj_t *meter = lv_meter_create(container);
     lv_obj_set_size(meter, meterSize, meterSize);
-    float meterRadius = meterSize / 2.0f - (float)lv_obj_get_style_pad_left(meter, LV_PART_MAIN);   // the dial's real radius (the ticks end here)
-    int16_t dialShift = dial_aligned_shift(valign, dialStart, dialSweep, meterSize, meterRadius, rect.y + rect.h / 2.0f, rect.y + 4.0f, stackTop - 4.0f);
+    float meterPad = (float)lv_obj_get_style_pad_left(meter, LV_PART_MAIN);
+    float meterRadius = meterSize / 2.0f - meterPad;   // the dial's real radius (the ticks end here)
+    int16_t dialShift;
+    if (cfg->gauge_type == GAUGE_TYPE_HALFMOON) {
+      // A half moon only fills the top half of its circle, so sized like a full dial it came out small, worst in a short
+      // wide cell (2-up). Grow it to the largest size whose arc and hub fit the free area of the cell, the cell's width and
+      // the round glass, never smaller than before.
+      float hi, lo;
+      dial_extent(dialStart, dialSweep, &hi, &lo);
+      float areaTop = rect.y + 4.0f, areaBot = stackTop - 4.0f, cellMid = rect.y + rect.h / 2.0f;
+      float span = hi - lo > 0.05f ? hi - lo : 0.05f;
+      int16_t best = meterSize;
+      int16_t cand = (int16_t)fminf(rect.w - 8.0f, 2.0f * ((areaBot - areaTop) / span + meterPad));
+      for (; cand > meterSize; cand -= 2) {
+        float r = cand / 2.0f - meterPad;
+        float cy = (valign == GAUGE_VALIGN_TOP) ? areaTop + hi * r
+                 : (valign == GAUGE_VALIGN_BOTTOM) ? areaBot + lo * r
+                 : (areaTop + areaBot) / 2.0f + (hi + lo) / 2.0f * r;   // centre the arc + hub in the free area
+        bool ok = true;
+        for (int32_t a = 0; a <= dialSweep && ok; a += 3) {
+          float rad = (float)(dialStart + a) * 0.01745329f, R = cand / 2.0f;
+          float x = cellCx + sinf(rad) * R, y = cy - cosf(rad) * R, dx = x - 233.0f, dy = y - 233.0f;
+          if (dx * dx + dy * dy > 231.0f * 231.0f || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
+        }
+        if (ok) { best = cand; break; }
+      }
+      if (best != meterSize) {
+        meterSize = best;
+        lv_obj_set_size(meter, meterSize, meterSize);
+        meterRadius = meterSize / 2.0f - meterPad;
+        float cy = (valign == GAUGE_VALIGN_TOP) ? areaTop + hi * meterRadius
+                 : (valign == GAUGE_VALIGN_BOTTOM) ? areaBot + lo * meterRadius
+                 : (areaTop + areaBot) / 2.0f + (hi + lo) / 2.0f * meterRadius;
+        dialShift = (int16_t)lroundf(cy - cellMid);
+      } else {
+        dialShift = dial_aligned_shift(valign, dialStart, dialSweep, meterSize, meterRadius, cellMid, areaTop, areaBot);
+      }
+    } else {
+      dialShift = dial_aligned_shift(valign, dialStart, dialSweep, meterSize, meterRadius, rect.y + rect.h / 2.0f, rect.y + 4.0f, stackTop - 4.0f);
+    }
     lv_obj_align(meter, LV_ALIGN_CENTER, 0, dialShift);
     lv_obj_set_style_bg_color(meter, lv_color_hex(cfg->bg_color), 0);
     lv_obj_set_style_border_width(meter, 0, 0);

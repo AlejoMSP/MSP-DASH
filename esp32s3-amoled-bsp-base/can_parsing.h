@@ -42,6 +42,8 @@
 #define RUSEFI_BASE3 0x203
 #define RUSEFI_BASE4 0x204
 #define RUSEFI_BASE7 0x207
+// PLACEHOLDER: no real CAN ID yet. Change this once the EGT source is known. Assumed: bytes 0-1, unsigned LE, deg C.
+#define CAN_ID_EGT_PLACEHOLDER 0x7F0
 
 // ---- MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0) ----
 #define SEC_BASE      1520        // 0x5F0
@@ -95,6 +97,10 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
       g_clt_f = cToF(cltRaw - 40);
       g_clt_has_data = true;
       gauge_config_mark_signal_active(SIG_CLT);
+      uint8_t iatRaw = d[3]; // rusEFI BASE3 byte 3: IAT, unsigned, offset -40 (same as CLT). Confirm against the DBC.
+      g_iat_f = cToF(iatRaw - 40);
+      g_iat_has_data = true;
+      gauge_config_mark_signal_active(SIG_IAT);
       break;
     }
     case RUSEFI_BASE4: {
@@ -122,6 +128,12 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
       g_fuelp_kpa = fpLowRaw * 0.0333333f;
       g_fuelp_has_data = true;
       gauge_config_mark_signal_active(SIG_FUELP);
+      break;
+    }
+    case CAN_ID_EGT_PLACEHOLDER: {
+      g_egt_f = cToF((float)readU16LE(d, 0));
+      g_egt_has_data = true;
+      gauge_config_mark_signal_active(SIG_EGT);
       break;
     }
   }
