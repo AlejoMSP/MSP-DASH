@@ -66,6 +66,7 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.show_value = false;
   c.value_font_size = 28;
   c.decimals = GAUGE_DECIMALS_DEFAULT;
+  c.h_align = GAUGE_HALIGN_CENTER;
   { int32_t dmin, dmax;       // AFR 10-20, temperatures 60-250, pressures 0-100 (gauge_style.h)
     if (gauge_signal_default_range(signal, &dmin, &dmax)) { c.min_val = dmin; c.max_val = dmax; c.rest_val = dmin; } }
   c.tick_font_size = 28;
@@ -161,6 +162,7 @@ static void serializeCell(JsonObject o, const CellConfig *c) {
   o["caption_on_face"] = c->caption_on_face;
   o["units"] = c->units;
   o["decimals"] = c->decimals;
+  o["h_align"] = c->h_align;
   o["v_align"] = c->v_align;
   o["start_deg"] = c->start_deg;
   o["end_deg"] = c->end_deg;
@@ -212,6 +214,7 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   c->caption_font_size = gauge_snap_caption_size(o["caption_font_size"] | 0);   // 0 (never set) stays 0: the display's default font
   c->caption_on_face = o["caption_on_face"] | false;
   copyLampText(c->units, sizeof(c->units), o["units"] | "");
+  c->h_align = gauge_resolve_halign(o["h_align"] | 0);
   c->decimals = gauge_resolve_decimals(o["decimals"] | GAUGE_DECIMALS_DEFAULT);
   c->v_align = gauge_resolve_valign(o["v_align"] | 0);
   c->tick_font_size = gauge_resolve_tick_size(o["tick_font_size"] | 0, c->value_font_size);

@@ -61,6 +61,12 @@ static inline int32_t gauge_snap_caption_size(int32_t v) {
 #define GAUGE_VALIGN_BOTTOM 2
 static inline int32_t gauge_resolve_valign(int32_t v) { return (v == GAUGE_VALIGN_TOP || v == GAUGE_VALIGN_BOTTOM) ? v : GAUGE_VALIGN_CENTER; }
 
+// ---- horizontal text alignment in a cell (caption, readout, units) ----
+#define GAUGE_HALIGN_CENTER 0
+#define GAUGE_HALIGN_LEFT   1
+#define GAUGE_HALIGN_RIGHT  2
+static inline int32_t gauge_resolve_halign(int32_t v) { return (v == GAUGE_HALIGN_LEFT || v == GAUGE_HALIGN_RIGHT) ? v : GAUGE_HALIGN_CENTER; }
+
 // ---- digits after the decimal point in a readout (the big number, the alert value) ----
 #define GAUGE_DECIMALS_DEFAULT 1   // what every readout showed before this setting existed
 static inline int32_t gauge_resolve_decimals(int32_t v) { return (v >= 0 && v <= 2) ? v : GAUGE_DECIMALS_DEFAULT; }

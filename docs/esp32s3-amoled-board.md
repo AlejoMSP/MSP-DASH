@@ -2096,3 +2096,10 @@ The LVGL task (lcd_bsp.c) counts frames sent to the panel and the share of each 
 `/status.json` `fps` and `lvgl_busy`; the front page build line shows them. On-screen overlay: `/perf?on=1` / `?on=0` or the
 serial command `perf on` / `perf off` (not saved). The main board now sends 20 ESP-NOW packets a second (was 50): gauges
 refresh 10 times a second by default, and heavy ESP-NOW traffic costs the receivers CPU.
+
+## Text alignment (build 126)
+
+Cell field `h_align` (display editor "Text alignment"): 0 Center (default, layout unchanged), 1 Left, 2 Right. Applies to
+the caption (not a caption on the dial face), the readout and the units. Each such label gets a fixed width spanning the
+room its row really has (cell less the round glass at that height) and its text is aligned inside it, so a changing number
+keeps its edge. Test: `test_dial_text halign`.

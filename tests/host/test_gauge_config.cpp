@@ -424,6 +424,9 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"decimals\":5}"); CHECK(c10.decimals == 1, "an unknown decimals value is 1");
   c10 = load1("{\"enabled\":true,\"decimals\":-2}"); CHECK(c10.decimals == 1, "a negative decimals value is 1");
   c10 = load1("{\"enabled\":true,\"decimals\":0}"); CHECK(c10.decimals == 0, "0 is kept");
+  c10 = load1("{\"enabled\":true}"); CHECK(c10.h_align == 0, "a config saved before text alignment existed is centred");
+  c10 = load1("{\"enabled\":true,\"h_align\":2}"); CHECK(c10.h_align == 2, "right is kept");
+  c10 = load1("{\"enabled\":true,\"h_align\":9}"); CHECK(c10.h_align == 0, "an unknown alignment is centred");
   c10 = load1("{\"enabled\":true,\"v_align\":7}"); CHECK(c10.v_align == 0, "an unknown position is centre");
   c10 = load1("{\"enabled\":true,\"v_align\":1}"); CHECK(c10.v_align == 1, "top is kept");
   c10 = load1("{\"enabled\":true,\"units\":\"ABCDEFGHIJK\"}"); CHECK(strcmp(c10.units, "ABCDEFG") == 0, "units are cut to 7 characters");

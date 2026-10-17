@@ -434,6 +434,32 @@ static void needle_trim_cb(lv_event_t *e) {
 // own container, sized/positioned to the given rect. Content is built
 // using relative positioning (center/align) within the container, so
 // the same logic works regardless of the cell's actual size.
+// Left / right text: every label marked LV_OBJ_FLAG_USER_1 gets a fixed width spanning the room its row really has (the
+// cell, less the round glass at that height) and is aligned inside it, so a changing number stays put. Centre (the
+// default) leaves the layout exactly as it was.
+static void apply_text_halign(lv_obj_t *container, CellRect rect, int32_t halign) {
+  if (halign == GAUGE_HALIGN_CENTER) return;
+  lv_obj_update_layout(container);
+  lv_area_t ca; lv_obj_get_coords(container, &ca);
+  lv_coord_t padL = lv_obj_get_style_pad_left(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+  lv_coord_t padT = lv_obj_get_style_pad_top(container, LV_PART_MAIN) + lv_obj_get_style_border_width(container, LV_PART_MAIN);
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(container); i++) {
+    lv_obj_t *l = lv_obj_get_child(container, i);
+    if (!lv_obj_has_flag(l, LV_OBJ_FLAG_USER_1)) continue;
+    lv_area_t a; lv_obj_get_coords(l, &a);
+    float dy = fmaxf(fabsf(a.y1 - 233.0f), fabsf(a.y2 + 1 - 233.0f));
+    float half = dy < 227.0f ? sqrtf(227.0f * 227.0f - dy * dy) : 0.0f;
+    float xl = fmaxf(rect.x + 8.0f, 233.0f - half), xr = fminf(rect.x + rect.w - 8.0f, 233.0f + half);
+    float w = (float)(a.x2 - a.x1 + 1);
+    if (xr - xl < w) continue;   // no spare room: leave it centred
+    lv_obj_set_align(l, LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(l, (lv_coord_t)lroundf(xl) - ca.x1 - padL, a.y1 - ca.y1 - padT);
+    lv_obj_set_width(l, (lv_coord_t)lroundf(xr - xl));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(l, halign == GAUGE_HALIGN_LEFT ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
+  }
+}
+
 static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRuntime *rt) {
   rt->enabled = cfg->enabled;
   rt->gauge_type = cfg->gauge_type;
@@ -499,6 +525,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     const lv_font_t *unitsFont = hasUnits ? pick_caption_font(cfg->caption_font_size, cfg->units, cellCx, numTopAbs + numH + 2.0f, ANCHOR_TOP, rect.w * 0.6f, rect.h * 0.25f) : NULL;
 
     lv_obj_t *numLabel = lv_label_create(container);
+    lv_obj_add_flag(numLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
     lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
     lv_obj_set_style_text_font(numLabel, numFont, 0);
     lv_label_set_text(numLabel, "--");
@@ -508,6 +535,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     rt->numberLabel = numLabel;
 
     lv_obj_t *capLabel = lv_label_create(container);
+    if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
     if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
     lv_label_set_text(capLabel, cfg->caption);
@@ -515,6 +543,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
     if (hasUnits) {
       lv_obj_t *unitsLabel = lv_label_create(container);
+      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -587,6 +616,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     rt->noDataLabel = noData;
 
     lv_obj_t *capLabel = lv_label_create(container);
+    if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
     if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
     lv_label_set_text(capLabel, cap);
@@ -720,6 +750,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     }
 
     lv_obj_t *capLabel = lv_label_create(container);
+    if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
     if (onFace) {
       // The title, printed on the dial face above the hub: the biggest size that fits in the room inside the ticks.
@@ -734,6 +765,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_t *unitsLabel = NULL;
     if (hasUnits) {
       unitsLabel = lv_label_create(container);
+      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -744,6 +776,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     if (cfg->show_value) {
       // The readout sits just above the units (or the caption) at the bottom of the dial.
       lv_obj_t *valueLabel = lv_label_create(container);
+      lv_obj_add_flag(valueLabel, LV_OBJ_FLAG_USER_1);   // follows the cell's text alignment
       lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
       lv_obj_set_style_text_font(valueLabel, valFont, 0);
       lv_label_set_text(valueLabel, "--");
@@ -753,6 +786,8 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       rt->numberLabel = valueLabel; // reuse the same field - only one of these two paths is active per cell
     }
   }
+
+  apply_text_halign(container, rect, gauge_resolve_halign(cfg->h_align));
 
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
 

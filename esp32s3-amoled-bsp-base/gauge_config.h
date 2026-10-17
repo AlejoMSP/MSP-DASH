@@ -94,6 +94,7 @@ typedef struct {
   int32_t caption_font_size; // caption (and units) text: 14/20/28/36/48; 0 = never set, the display's default font. Big text shrinks to fit.
   bool caption_on_face;    // needle/half-moon only: the caption is printed ON the dial face, above the hub, instead of at the bottom of the cell
   char units[GAUGE_UNITS_MAXLEN]; // e.g. "F", "kPa": printed under the readout (needle dials with Show value, and number cells)
+  int32_t h_align;         // text in the cell (caption, readout, units): 0 centre, 1 left, 2 right
   int32_t decimals;        // digits after the point in the readout: 0, 1 or 2 (configs saved before this existed: 1)
   int32_t v_align;         // where the gauge stands in its cell: 0 centre, 1 top, 2 bottom (needle, half-moon and number cells)
   int32_t tick_font_size;  // numbers around a needle/half-moon dial: 14/28/36, -1 = hidden, 0 = follow value_font_size (configs saved before this existed)

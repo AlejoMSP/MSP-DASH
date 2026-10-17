@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -95,6 +95,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angles")) mkcell(cc, GAUGE_TYPE_NEEDLE, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
+      else if (!strcmp(mode, "halign")) { mkcell(cc, p == 2 ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NUMBER, 48, 28, 270, 90, true);
+        cc->h_align = (p == 0) ? 1 : 2; cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
       else if (!strcmp(mode, "decimals")) { mkcell(cc, p == 3 ? GAUGE_TYPE_NEEDLE : GAUGE_TYPE_NUMBER, 120, 28, 225, 135, true);
         cc->decimals = (p == 4) ? 7 : (p == 3 ? 2 : p % 3); cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
       else { printf("unknown mode %s\n", mode); return 2; }
@@ -238,6 +240,30 @@ int main(int argc, char **argv) {
     CHECK(strcmp(lv_label_get_text(num), "--") == 0, "infinity shows -- too");
     s_val[SIG_AFR] = -3.25f; run_ms(100);
     CHECK(strcmp(lv_label_get_text(num), "-3.2") == 0 || strcmp(lv_label_get_text(num), "-3.3") == 0, "a negative reading shows its minus sign");
+  }
+
+  if (!strcmp(mode, "halign")) {
+    printf("halign: left / right text stays inside the cell and the glass, and keeps its edge as the number changes\n");
+    for (int p = 0; p < 3; p++) {
+      lv_obj_t *box = lv_obj_get_child(s_pageScr[p], 0);
+      int edge[2] = {0, 0};
+      for (int pass = 0; pass < 2; pass++) {
+        s_has[SIG_AFR] = true; s_val[SIG_AFR] = pass ? 248.7f : 3.2f; run_ms(150); lv_obj_update_layout(s_pageScr[p]);
+        for (uint32_t i = 0; i < lv_obj_get_child_cnt(box); i++) {
+          lv_obj_t *k = lv_obj_get_child(box, i);
+          if (!lv_obj_check_type(k, &lv_label_class) || !lv_obj_has_flag(k, LV_OBJ_FLAG_USER_1)) continue;
+          lv_area_t a; lv_obj_get_coords(k, &a);
+          const char *t = lv_label_get_text(k);
+          lv_point_t sz; lv_txt_get_size(&sz, t, lv_obj_get_style_text_font(k, LV_PART_MAIN), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+          lv_area_t txt = a;   // where the text itself is drawn inside the label
+          if (lv_obj_get_style_text_align(k, LV_PART_MAIN) == LV_TEXT_ALIGN_LEFT) txt.x2 = a.x1 + sz.x - 1; else txt.x1 = a.x2 - sz.x + 1;
+          char m[160]; snprintf(m, sizeof(m), "page %d '%s': on the glass", p, t); CHECK(inside_circle(&txt, 233.0f), m);
+          if (strchr("0123456789-", t[0])) edge[pass] = p == 0 ? txt.x1 : txt.x2;
+        }
+      }
+      char m[120]; snprintf(m, sizeof(m), "page %d: the readout keeps its %s edge (%d, %d)", p, p == 0 ? "left" : "right", edge[0], edge[1]);
+      CHECK(edge[0] && edge[0] == edge[1], m);
+    }
   }
 
   if (!strcmp(mode, "decimals")) {
