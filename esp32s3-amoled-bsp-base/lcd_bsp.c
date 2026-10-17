@@ -1,4 +1,5 @@
 #include "lcd_bsp.h"
+#include "lcd_perf.h"
 #include "esp_lcd_sh8601.h"
 #include "lcd_config.h"
 #include "FT3168.h"
@@ -140,14 +141,45 @@ static void example_lvgl_unlock(void)
   assert(lvgl_mux && "bsp_display_start must be called first");
   xSemaphoreGive(lvgl_mux);
 }
+// ---- performance numbers (lcd_perf.h) ----
+static volatile uint32_t s_frames = 0, s_fps = 0, s_busyPct = 0;
+static volatile bool s_overlayWant = false;
+static lv_obj_t *s_overlay = NULL;
+uint32_t lcd_perf_fps(void) { return s_fps; }
+uint32_t lcd_perf_busy_pct(void) { return s_busyPct; }
+void lcd_perf_overlay(bool on) { s_overlayWant = on; }
+bool lcd_perf_overlay_on(void) { return s_overlayWant; }
+
+static void perf_second(void) {   // runs in the LVGL task with the lock held
+  if (s_overlayWant && !s_overlay) {
+    s_overlay = lv_label_create(lv_layer_top());
+    lv_obj_set_style_text_color(s_overlay, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_style_bg_color(s_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_overlay, LV_OPA_COVER, 0);
+    lv_obj_align(s_overlay, LV_ALIGN_TOP_MID, 0, 40);
+  } else if (!s_overlayWant && s_overlay) {
+    lv_obj_del(s_overlay); s_overlay = NULL;
+  }
+  if (s_overlay) lv_label_set_text_fmt(s_overlay, "%lu fps  %lu%%", (unsigned long)s_fps, (unsigned long)s_busyPct);
+}
+
 static void example_lvgl_port_task(void *arg)
 {
+  int64_t winStart = esp_timer_get_time(), busyUs = 0;
   uint32_t task_delay_ms = EXAMPLE_LVGL_TASK_MAX_DELAY_MS;
   for(;;)
   {
     if (example_lvgl_lock(-1))
     {
+      int64_t t0 = esp_timer_get_time();
       task_delay_ms = lv_timer_handler();
+      busyUs += esp_timer_get_time() - t0;
+      int64_t now = esp_timer_get_time();
+      if (now - winStart >= 1000000) {
+        s_fps = s_frames; s_frames = 0;
+        s_busyPct = (uint32_t)(busyUs * 100 / (now - winStart)); busyUs = 0; winStart = now;
+        perf_second();
+      }
       
       example_lvgl_unlock();
     }
@@ -174,6 +206,7 @@ static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, 
 }
 static void example_lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
+  if (lv_disp_flush_is_last(drv)) s_frames++;
   esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) drv->user_data;
   const int offsetx1 = (READ_LCD_ID == SH8601_ID) ? area->x1 : area->x1 + 0x06;
   const int offsetx2 = (READ_LCD_ID == SH8601_ID) ? area->x2 : area->x2 + 0x06;

@@ -39,6 +39,7 @@
 #include "gauge_config_json.h"
 #include "simulator.h"
 #include "espnow_link.h"
+#include "lcd_perf.h"
 #include "web_theme.h"
 #include <math.h> // NAN
 
@@ -330,6 +331,7 @@ function renderIndicators(page, pageIdx) {
         const res = await fetch("/status.json");
         const st = await res.json();
         let t = (st.link && st.link.name ? st.link.name + " | " : "") + "build " + st.build + " - " + st.compiled;
+        if (st.fps !== undefined) t += " | " + st.fps + " fps, drawing " + st.lvgl_busy + "%";
         if (st.link && st.link.name) document.title = "MSP-DASH - " + st.link.name;
         const L = st.link;
         if (L) {
@@ -1608,6 +1610,13 @@ void web_monitor_init(void) {
     request->send(200, "text/plain", "Name set to " + n);
   });
 
+  // Performance overlay on the screen: /perf?on=1 or /perf?on=0 (not saved; off after a reboot)
+  server.on("/perf", HTTP_GET, [](AsyncWebServerRequest *request) {
+    bool on = request->hasParam("on") && request->getParam("on")->value() == "1";
+    lcd_perf_overlay(on);
+    request->send(200, "text/plain", String("Perf overlay ") + (on ? "on" : "off") + ": " + lcd_perf_fps() + " fps, drawing " + lcd_perf_busy_pct() + "%");
+  });
+
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
@@ -1627,6 +1636,8 @@ void web_monitor_init(void) {
     doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["wifi_rssi"] = WiFi.RSSI();
     doc["ws_clients"] = ws.count();
+    doc["fps"] = lcd_perf_fps();
+    doc["lvgl_busy"] = lcd_perf_busy_pct();
     JsonObject link = doc["link"].to<JsonObject>();
     char mac[18]; espnow_link_peer_mac(mac);
     link["role"] = espnow_link_is_remote() ? "remote" : "main";
@@ -2058,13 +2069,17 @@ void web_monitor_loop(void) {
         const char *nm = line + 4; while (*nm == ' ') nm++;
         espnow_link_set_name(nm); Serial.printf("OK: name \"%s\"\n", nm);
       }
+      else if (!strcmp(cmd, "perf")) {
+        bool on = !strcmp(a, "on"); lcd_perf_overlay(on);
+        Serial.printf("OK: perf overlay %s | %lu fps, drawing %lu%%\n", on ? "on" : "off", (unsigned long)lcd_perf_fps(), (unsigned long)lcd_perf_busy_pct());
+      }
       else if (!strcmp(cmd, "info")) {
         IPAddress i, g, m, x; bool st = netLoad(i, g, m, x);
         char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
         Serial.printf("%s | build %d | role %s | IP %s (%s) | MAC %s\n", nm, FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
                       WiFi.localIP().toString().c_str(), st ? "static" : "DHCP", WiFi.macAddress().c_str());
       }
-      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text>");
+      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text> | perf on|off");
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 

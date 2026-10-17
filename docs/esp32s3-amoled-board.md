@@ -2089,3 +2089,10 @@ deg C (can_parsing.h). Default scales EGT 0-1800, IAT 0-200; both in the simulat
 Half moons grow to the largest size whose arc and hub fit the cell's free area, its width and the round glass (never smaller
 than before). Center then centres the arc + hub in the free area; Top / Bottom work as before. In the display editor,
 choosing 2-Up turns cells that are not set up yet into Half-Moons.
+
+## Performance numbers, ESP-NOW at 20/s (build 125)
+
+The LVGL task (lcd_bsp.c) counts frames sent to the panel and the share of each second spent in `lv_timer_handler()`.
+`/status.json` `fps` and `lvgl_busy`; the front page build line shows them. On-screen overlay: `/perf?on=1` / `?on=0` or the
+serial command `perf on` / `perf off` (not saved). The main board now sends 20 ESP-NOW packets a second (was 50): gauges
+refresh 10 times a second by default, and heavy ESP-NOW traffic costs the receivers CPU.

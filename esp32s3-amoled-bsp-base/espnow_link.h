@@ -7,7 +7,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define ESPNOW_SEND_MS     20     // main: one packet every 20 ms (50/s)
+#define ESPNOW_SEND_MS     50     // main: one packet every 50 ms (20/s); gauges refresh 10/s by default
 #define ESPNOW_TIMEOUT_MS  1000   // remote: no packet for this long -> readings show "--"
 #define ESPNOW_CAR_CHANNEL 1      // channel used when no WiFi network joined (in the car)
 
