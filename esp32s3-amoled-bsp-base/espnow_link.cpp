@@ -22,7 +22,7 @@ typedef struct __attribute__((packed)) {
 static bool s_remote = false;
 static bool s_up = false;
 static uint16_t s_seq = 0;
-static uint32_t s_lastSendMs = 0, s_ppsWindowMs = 0, s_ppsCount = 0, s_pps = 0;
+static uint32_t s_ppsWindowMs = 0, s_ppsCount = 0, s_pps = 0;
 static uint8_t s_channel = 0;
 
 // written by the receive callback (WiFi task), read in loop()
@@ -35,6 +35,24 @@ static bool s_everRx = false, s_rxLive = false;
 static uint8_t s_peer[6];
 
 static const uint8_t BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+static volatile uint32_t s_txCount = 0;
+static uint32_t s_txSeen = 0;
+
+// Main board: send from its own task, so a slow screen redraw in loop() can't hold packets back (it did: 12/s instead of 50).
+static void sendTask(void *) {
+  for (;;) {
+    LinkPacket p;
+    p.magic = PKT_MAGIC; p.seq = s_seq++; p.count = SIG_COUNT; p.has_mask = 0;
+    for (int s = 0; s < SIG_COUNT; s++) {
+      bool has = s != SIG_NONE && gauge_config_signal_has_data((SignalId)s);
+      p.v[s] = has ? gauge_config_signal_value((SignalId)s) : 0.0f;
+      if (has) p.has_mask |= 1u << s;
+    }
+    if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_txCount++;
+    vTaskDelay(pdMS_TO_TICKS(ESPNOW_SEND_MS));
+  }
+}
 
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (len < (int)offsetof(LinkPacket, v) || ((const LinkPacket *)data)->magic != PKT_MAGIC) return;
@@ -102,6 +120,7 @@ void espnow_link_init(void) {
     peer.ifidx = WIFI_IF_STA;
     peer.encrypt = false;
     esp_now_add_peer(&peer);
+    xTaskCreatePinnedToCore(sendTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
   }
   s_up = true;
   Serial.printf("ESP-NOW up: %s board, channel %u\n", s_remote ? "remote" : "main", s_channel);
@@ -112,23 +131,11 @@ void espnow_link_loop(void) {
   uint32_t now = millis();
   if (now - s_ppsWindowMs >= 1000) {
     if (s_remote) { s_pps = s_rxCount - s_ppsCount; s_ppsCount = s_rxCount; }
-    else { s_pps = s_ppsCount; s_ppsCount = 0; }
+    else { uint32_t t = s_txCount; s_pps = t - s_txSeen; s_txSeen = t; }
     s_ppsWindowMs = now;
   }
 
-  if (!s_remote) {
-    if (now - s_lastSendMs < ESPNOW_SEND_MS) return;
-    s_lastSendMs = now;
-    LinkPacket p;
-    p.magic = PKT_MAGIC; p.seq = s_seq++; p.count = SIG_COUNT; p.has_mask = 0;
-    for (int s = 0; s < SIG_COUNT; s++) {
-      bool has = s != SIG_NONE && gauge_config_signal_has_data((SignalId)s);
-      p.v[s] = has ? gauge_config_signal_value((SignalId)s) : 0.0f;
-      if (has) p.has_mask |= 1u << s;
-    }
-    if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_ppsCount++;
-    return;
-  }
+  if (!s_remote) return;   // sending runs in sendTask()
 
   if (s_rxNew) {
     LinkPacket p;

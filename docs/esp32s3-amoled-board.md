@@ -2053,7 +2053,7 @@ uses, so pages, web dashboard and SD logging work unchanged. No packet for 1 s: 
 WiFi joined, ESP-NOW uses the network's channel (all boards on the same network match); with no network after the 20 s
 boot try, WiFi stops searching and parks on channel 1. `/status.json` has a `link` block (role, packets/s, ms since last
 packet, sender MAC, channel, own MAC); the front page build line shows it. Each remote keeps its own pages and editor.
-Later: configure remotes from the main board; EGT and IAT signals.
+Later: configure remotes from the main board; EGT and IAT signals. Build 120: sending moved to its own task (core 0, every 20 ms); in loop() it only reached 12/s while the screen redrew.
 
 ## Static IP per board (build 118)
 
