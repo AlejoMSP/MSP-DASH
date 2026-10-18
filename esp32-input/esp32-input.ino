@@ -2,7 +2,8 @@
 // Reads 2 buttons (next / previous page) and a knob (brightness) and sends them to every screen over ESP-NOW.
 // Also on the home network for WiFi updates: same curl command as the screens, at its own IP.
 //
-// Bench board: ESP32-D (classic ESP32, fqbn esp32:esp32:esp32). Later: the S2 Mini (change the pins below).
+// Bench board: ESP32-D (classic ESP32, fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio: at the default 80 MHz this board
+// boot-looped reading garbage from flash). Later: the S2 Mini (change the pins below).
 // Wiring: button between BTN_NEXT and GND, button between BTN_PREV and GND (internal pull-ups),
 //         10k knob: outer legs to 3.3 V and GND, middle leg to POT_PIN (ADC1 only: ADC2 doesn't work with the radio on).
 // Copy wifi_config.h.example to wifi_config.h and fill in the network, the same one the screens use.
