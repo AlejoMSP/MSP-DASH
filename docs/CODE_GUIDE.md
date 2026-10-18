@@ -23,7 +23,6 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 |---|---|
 | `esp32s3-amoled-bsp-base/` | Screen firmware (Waveshare ESP32-S3 AMOLED 1.43, 466x466, LVGL 8.4) |
 | `esp32-input/` | Hub firmware (classic ESP32): CAN, buttons, brightness |
-| `esp32-main/` | Old WROOM + Nextion firmware (phase 1), kept for reference |
 | `tests/host/` | Tests that run on a PC: C tests for gauge logic, JS tests for the web editors |
 | `docs/` | Board notes, CAN map, rusEFI DBC, this guide, timeline |
 | `tools/` | Helper scripts |

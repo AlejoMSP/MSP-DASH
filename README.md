@@ -1,24 +1,11 @@
 # MSP-DASH
 
-Custom digital gauge cluster for a turbo Miata. Two active firmware
-targets, sharing this repo:
-
-## esp32-main/
-Production firmware for a classic ESP32 (WROOM) board, driving a
-Nextion 5" HMI display and a web dashboard over WiFi.
-- ECUs supported: rusEFI (bench-confirmed, full DBC decoded - 74
-  gauges), MegaSquirt/LinkECU (shared parser, selectable on /config)
-- CAN via TWAI driver, 500kbps
-- Interactive web dashboard: drag-reorder, right-click gauge type
-  change, close/hide gauges, appearance theming, SD card CSV logging,
-  OTA firmware updates
-- See `docs/CAN-map.md` for full protocol/signal history and
-  confirmation status per ECU
+Custom digital gauge cluster for a turbo Miata. Two firmwares:
 
 ## esp32s3-amoled-bsp-base/
 Current firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.43 round
-display (466x466, SH8601), reading rusEFI CAN data directly (own
-transceiver, no dependency on the WROOM board).
+display (466x466, SH8601), showing the data the hub sends over ESP-NOW
+(or reading CAN itself when set to role main).
 - LVGL v8 on Waveshare's BSP: up to 8 pages, each a 1-cell, 2-up, 3-up
   or 2x2 layout of needle, number, half-moon or trend-graph gauges, or
   a page of indicator lamps. BOOT button changes page.
@@ -27,7 +14,11 @@ transceiver, no dependency on the WROOM board).
 - Host tests (no board needed) in `tests/host/`
 - See `docs/esp32s3-amoled-board.md` for the full build history
 
-Early bring-up sketches (serial echo, touch test, first LVGL CAN gauge)
+## esp32-input/
+The hub (classic ESP32 DevKitC, 192.168.55.204): reads CAN, page buttons and
+dash dimmer, and sends everything to the screens. See `docs/CODE_GUIDE.md`.
+
+The old WROOM + Nextion firmware (esp32-main) was removed in build 149. Early bring-up sketches (serial echo, touch test, first LVGL CAN gauge)
 were removed in build 114. They are still in git history.
 
 ## Getting started

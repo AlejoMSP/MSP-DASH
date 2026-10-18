@@ -180,3 +180,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 146 | 2026-10-18 | 1e6035e | Hub build 5: raw CAN page /can (every ID, bytes, count, age, bus state) and /can.json |
 | 147 | 2026-10-18 | 68b8a0a | Hub build 5: include the CAN tracker before the web pages use it |
 | 148 | 2026-10-18 | (this commit) | Docs: CODE_GUIDE.md and TIMELINE.md |
+| 149 | 2026-10-18 | (this commit) | Removed the old WROOM + Nextion firmware (esp32-main); still in git history |
