@@ -444,12 +444,13 @@ R"rawliteral(<div class="pad">
       <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
       <label>Background<input type="color" id="bulkBg" value="#000000"></label>
     </div>
-    <div class="bulk-colors">
+    <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply colors to All</button>
+    <div class="bulk-colors" style="margin-top:12px">
       <label>Needle gap at center %<input type="number" id="bulkHub" min="0" max="60" value="0"></label>
       <label>Needle short of tip %<input type="number" id="bulkTip" min="0" max="60" value="0"></label>
       <label>Needle thickness px<input type="number" id="bulkNw" min="1" max="20" value="6"></label>
     </div>
-    <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply to All</button>
+    <button type="button" class="bulk-apply" onclick="applyNeedleToAll()">Apply needle to All</button>
   </div>
 
   <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
@@ -876,19 +877,24 @@ R"rawliteral(
                                 : "Saved, but the board never restarted. Press Save & Reboot Board again, or restart it by hand.";
     }
 
+    // Needle length (gap + tip trim) and thickness on every cell, without touching colors.
+    function applyNeedleToAll() {
+      const num = (id, lo, hi, d) => { const v = parseInt(document.getElementById(id).value); return isNaN(v) ? d : Math.min(hi, Math.max(lo, v)); };
+      const nw = num("bulkNw", 1, 20, 6), hub = num("bulkHub", 0, 60, 0), tip = Math.min(num("bulkTip", 0, 60, 0), 85 - hub);
+      for (const p of pages) for (const c of p.cells) { c.needle_w = nw; c.needle_hub_pct = hub; c.needle_tip_pct = tip; }
+      renderPages();
+      document.getElementById("status").textContent = "Needle applied locally - click Save to persist.";
+    }
+
     async function applyColorsToAll() {
       const needle = document.getElementById("bulkNeedle").value.substring(1);
       const tick = document.getElementById("bulkTick").value.substring(1);
       const bg = document.getElementById("bulkBg").value.substring(1);
-      const num = (id, lo, hi, d) => { const v = parseInt(document.getElementById(id).value); return isNaN(v) ? d : Math.min(hi, Math.max(lo, v)); };
-      const nw = num("bulkNw", 1, 20, 6), hub = num("bulkHub", 0, 60, 0), tip = Math.min(num("bulkTip", 0, 60, 0), 85 - hub);
       for (const p of pages) {
         for (const c of p.cells) {
           c.needle_color = parseInt(needle, 16);
           c.tick_color = parseInt(tick, 16);
           c.bg_color = parseInt(bg, 16);
-          c.needle_w = nw;
-          c.needle_hub_pct = hub; c.needle_tip_pct = tip;
         }
       }
       renderPages();

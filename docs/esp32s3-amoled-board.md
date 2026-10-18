@@ -2124,3 +2124,5 @@ centre, +x right, +y down, clamped to -300..300). With `text_xy` on, the caption
 and the units sit centred under the readout; caption alignment is ignored. The editor's "Apply to ALL cells" box now also
 sets needle gap at centre %, needle short of tip % (hub + tip <= 85) and needle thickness on every cell. Tests:
 `test_dial_text textxy`, `test_gauge_config`.
+
+Build 131: Apply to ALL has two buttons, "Apply colors to All" and "Apply needle to All" (gap, tip trim, thickness); neither touches the other's fields.
