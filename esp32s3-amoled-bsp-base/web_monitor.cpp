@@ -451,6 +451,10 @@ R"rawliteral(<div class="pad">
       <label>Needle thickness px<input type="number" id="bulkNw" min="1" max="20" value="6"></label>
     </div>
     <button type="button" class="bulk-apply" onclick="applyNeedleToAll()">Apply needle to All</button>
+    <div class="bulk-colors" style="margin-top:12px">
+      <label>Caption text size<select id="bulkCap"></select></label>
+    </div>
+    <button type="button" class="bulk-apply" onclick="applyCaptionToAll()">Apply caption size to All</button>
   </div>
 
   <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
@@ -876,6 +880,15 @@ R"rawliteral(
       st.textContent = wentDown ? "Saved, but the board has not come back after 45 seconds. Check its power, then reload this page."
                                 : "Saved, but the board never restarted. Press Save & Reboot Board again, or restart it by hand.";
     }
+
+    // Caption text size on every cell (the same choices as each cell's own setting).
+    function applyCaptionToAll() {
+      const v = parseInt(document.getElementById("bulkCap").value) || 0;
+      for (const p of pages) for (const c of p.cells) c.caption_font_size = v;
+      renderPages();
+      document.getElementById("status").textContent = "Caption size applied locally - click Save to persist.";
+    }
+    window.addEventListener("load", () => { const el = document.getElementById("bulkCap"); if (el && !el.options.length) el.innerHTML = captionSizeOptions(28); });
 
     // Needle length (gap + tip trim) and thickness on every cell, without touching colors.
     function applyNeedleToAll() {
