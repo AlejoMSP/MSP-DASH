@@ -1393,6 +1393,91 @@ R"rawliteral(
 </html>
 )rawliteral";
 
+static const char SETTINGS_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Board Settings</title>" PH_STYLE
+R"rawliteral(<style>
+    .card { background:#111; padding:14px 16px; border-radius:8px; margin:14px 0; }
+    .card h2 { margin:0 0 8px; font-size:17px; color:#4dd0e1; }
+    .card label { display:block; margin:8px 0 4px; }
+    .card input[type=text], .card input[type=number], .card select { width:100%; box-sizing:border-box; }
+    .card .chk { display:flex; gap:8px; align-items:center; }
+    .card .chk input { width:auto; }
+    .note { color:#999; font-size:13px; margin:6px 0 0; }
+    .msg { color:#7fdf7f; font-size:13px; min-height:1em; margin-top:6px; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
+  <h1>Board Settings</h1>
+  <p id="who" style="text-align:center;color:#4dd0e1;margin:4px 0">Loading...</p>
+
+  <div class="card"><h2>Name</h2>
+    <label>Board name (up to 20 characters)<input type="text" id="name" maxlength="20"></label>
+    <button type="button" onclick="go('/name?set=' + encodeURIComponent(v('name')), 'mName')">Save name</button>
+    <div class="msg" id="mName"></div></div>
+
+  <div class="card"><h2>Display</h2>
+    <label class="chk"><input type="checkbox" id="sweep"> Sweep all needles at startup</label>
+    <label class="chk"><input type="checkbox" id="demo"> Demo: needles sweep while there is no data</label>
+    <label class="chk"><input type="checkbox" id="perf"> Show FPS on the screen (until the next reboot)</label>
+    <button type="button" onclick="saveDisplay()">Save display options</button>
+    <p class="note">Demo and FPS change at once. The startup sweep applies at the next boot.</p>
+    <div class="msg" id="mDisp"></div>
+    <label>Screen diameter, px (300 to 560; 466 is the whole panel)<input type="number" id="diam" min="300" max="560" step="2"></label>
+    <button type="button" onclick="reboot('/diameter?set=' + v('diam'), 'mDiam')">Save diameter and reboot</button>
+    <div class="msg" id="mDiam"></div></div>
+
+  <div class="card"><h2>Network</h2>
+    <label class="chk"><input type="checkbox" id="static" onchange="showNet()"> Static IP</label>
+    <div id="netFields">
+      <label>IP address<input type="text" id="ip" placeholder="192.168.55.231"></label>
+      <label>Gateway<input type="text" id="gw" placeholder="192.168.55.1"></label>
+      <label>Subnet mask<input type="text" id="mask" placeholder="255.255.255.0"></label>
+    </div>
+    <button type="button" onclick="saveNet()">Save network and reboot</button>
+    <p class="note">After a reboot the board is at its new address. If it can't be reached, type dhcp in the USB serial monitor.</p>
+    <div class="msg" id="mNet"></div></div>
+
+  <div class="card"><h2>ESP-NOW role</h2>
+    <label>This board is<select id="role"><option value="main">Main (reads CAN, sends to the others)</option><option value="remote">Remote (shows the main board's data)</option></select></label>
+    <button type="button" onclick="reboot('/role?set=' + v('role'), 'mRole')">Save role and reboot</button>
+    <div class="msg" id="mRole"></div></div>
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
+  const v = id => document.getElementById(id).value.trim();
+  const ck = id => document.getElementById(id).checked ? 1 : 0;
+  async function go(url, msgId) {
+    const m = document.getElementById(msgId);
+    try { const r = await fetch(url); m.style.color = r.ok ? "#7fdf7f" : "#ff8080"; m.textContent = await r.text(); }
+    catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the board."; }
+  }
+  function reboot(url, msgId) { if (confirm("The board will save this and reboot. Continue?")) go(url, msgId); }
+  async function saveDisplay() {
+    await go("/display?sweep=" + ck("sweep") + "&demo=" + ck("demo"), "mDisp");
+    await fetch("/perf?on=" + ck("perf")).catch(() => {});
+  }
+  function showNet() { document.getElementById("netFields").style.display = document.getElementById("static").checked ? "" : "none"; }
+  function saveNet() {
+    if (!document.getElementById("static").checked) return reboot("/net?dhcp=1", "mNet");
+    reboot("/net?ip=" + encodeURIComponent(v("ip")) + "&gw=" + encodeURIComponent(v("gw")) + "&mask=" + encodeURIComponent(v("mask")), "mNet");
+  }
+  fetch("/status.json").then(r => r.json()).then(st => {
+    const L = st.link || {};
+    document.getElementById("who").textContent = (L.name || "") + " | build " + st.build + " | " + (st.ip || "");
+    document.getElementById("name").value = L.name || "";
+    document.getElementById("role").value = L.role === "remote" ? "remote" : "main";
+    document.getElementById("sweep").checked = st.startup_sweep !== false;
+    document.getElementById("demo").checked = st.demo !== false;
+    document.getElementById("perf").checked = !!st.perf_overlay;
+    document.getElementById("diam").value = st.diameter || 520;
+    document.getElementById("static").checked = !!st.static_ip;
+    const n = st.net || {};
+    document.getElementById("ip").value = n.ip || st.ip || "";
+    document.getElementById("gw").value = n.gw || "";
+    document.getElementById("mask").value = n.mask || "255.255.255.0";
+    showNet();
+  }).catch(() => { document.getElementById("who").textContent = "Could not read the board's settings."; });
+</script>
+</body></html>)rawliteral";
+
 static const char OTA_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Firmware Update</title>" PH_STYLE
 R"rawliteral(<style>
     #updateForm { margin-top:20px; background:#111; padding:16px; border-radius:8px; }
@@ -1731,7 +1816,9 @@ void web_monitor_init(void) {
     { LinkBoard bs[ESPNOW_MAX_BOARDS]; int nb = espnow_link_boards(bs);
       JsonArray arr = link["boards"].to<JsonArray>();
       for (int i = 0; i < nb; i++) { JsonObject o = arr.add<JsonObject>(); o["mac"] = bs[i].mac; o["ip"] = bs[i].ip; o["build"] = bs[i].build; o["name"] = bs[i].name; o["age_ms"] = bs[i].age_ms; } }
-    { IPAddress i, g, m, d; doc["static_ip"] = netLoad(i, g, m, d); doc["ip"] = WiFi.localIP().toString(); }
+    { IPAddress i, g, m, d; bool st = netLoad(i, g, m, d); doc["static_ip"] = st; doc["ip"] = WiFi.localIP().toString();
+      if (st) { JsonObject n = doc["net"].to<JsonObject>(); n["ip"] = i.toString(); n["gw"] = g.toString(); n["mask"] = m.toString(); } }
+    doc["perf_overlay"] = lcd_perf_overlay_on();
 
     JsonObject can = doc["can"].to<JsonObject>();
     uint32_t fps; int ids;
@@ -2081,6 +2168,10 @@ void web_monitor_init(void) {
 
   server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", OTA_HTML);
+  });
+
+  server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", SETTINGS_HTML);
   });
 
   server.on("/update", HTTP_POST,

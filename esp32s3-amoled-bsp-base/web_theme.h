@@ -80,6 +80,7 @@
     "<a href='/simulator'>Bench Simulator</a>" \
     "<a href='/can'>Raw CAN Monitor</a>" \
     "<a href='/sd'>SD Card</a>" \
+    "<a href='/settings'>Board Settings</a>" \
     "<a href='/update'>Firmware Update</a>" \
   "</div>"
 

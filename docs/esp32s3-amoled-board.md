@@ -2156,3 +2156,10 @@ page sweeps min -> max -> min together once at boot (1.6 s), then shows data. De
 signal has no data; off = the needle rests at its minimum. Both saved in NVS (`disp`/`sweep`, `disp`/`demo`, default on):
 `/display?sweep=0|1&demo=0|1` or serial `sweep on|off`, `demo on|off`; demo applies at once, sweep at the next boot.
 `/status.json`: `startup_sweep`, `demo`. Host tests start with the sweep off. Tests: `test_dial_text startsweep | demooff`.
+
+## Board Settings page (build 138)
+
+`/settings` (menu: Board Settings) gathers the per-board settings that were only links or serial commands: name, startup
+sweep, demo, FPS overlay, screen diameter, static IP / DHCP, ESP-NOW role. Each section calls the existing endpoint
+(`/name`, `/display`, `/perf`, `/diameter`, `/net`, `/role`); settings that reboot ask first. `/status.json` adds `net`
+(saved ip/gw/mask when static) and `perf_overlay`. The page is in the compiler page check (dump_pages.cpp).
