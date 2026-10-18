@@ -1,0 +1,115 @@
+# MSP-DASH code guide
+
+How the code fits together. Plain words, no history (see TIMELINE.md for that).
+
+## 1. The system
+
+```
+ ECU --CAN--> HUB (ESP32 DevKitC, 192.168.55.204, esp32-input/)
+               |  reads CAN, buttons, dimmer, lights wire
+               |  ESP-NOW broadcast, channel 10
+               v
+   Screen .231 (Main, SD logging)   Screen .232 (Remote 1)   Screen .233 (Remote 2)
+   all run esp32s3-amoled-bsp-base/ with role = remote
+```
+
+- **Hub** decodes CAN and sends one data packet 20 times a second with every signal.
+- **Screens** draw gauges from that packet. If no packet arrives for 1 s, readouts show `--`.
+- A screen can still be set to role **main** and read CAN itself (fallback if the hub dies).
+
+## 2. Folders
+
+| Folder | What it is |
+|---|---|
+| `esp32s3-amoled-bsp-base/` | Screen firmware (Waveshare ESP32-S3 AMOLED 1.43, 466x466, LVGL 8.4) |
+| `esp32-input/` | Hub firmware (classic ESP32): CAN, buttons, brightness |
+| `esp32-main/` | Old WROOM + Nextion firmware (phase 1), kept for reference |
+| `tests/host/` | Tests that run on a PC: C tests for gauge logic, JS tests for the web editors |
+| `docs/` | Board notes, CAN map, rusEFI DBC, this guide, timeline |
+| `tools/` | Helper scripts |
+
+## 3. Screen firmware, file by file
+
+**Startup and main loop**
+- `esp32s3-amoled-bsp-base.ino` - `setup()` and `loop()`. Boot order: NVS settings, display, WiFi scan (skip join if home WiFi is absent), ESP-NOW, CAN (only if role main), web server, SD.
+- `build_info.h` - build number, shown on the web pages and serial.
+
+**Display**
+- `lcd_bsp.c/.h`, `esp_lcd_sh8601.c/.h`, `lcd_config.h` - Waveshare driver for the SH8601 panel over QSPI, LVGL task, brightness (command 0x51).
+- `lcd_perf.h` - fps and LVGL busy % counters.
+- `FT3168.cpp/.h` - touch controller (swipe is off; I2C bus is shared).
+- `read_lcd_id_bsp.c/.h` - panel ID check.
+
+**Gauges**
+- `gauge_app.c/.h` - builds each page out of cells (1/2/3/4 per page) and draws dials, half moons, numbers, trend graphs, indicator lamps. Holds the global signal values (`g_rpm`, `g_clt_f` ...) and their has-data flags.
+- `gauge_config.cpp/.h` - the config model: pages, cells, signal list (`SignalId`), ranges, colors, warning zones, text sizes, decimals, peak hold, needle and text positions. Saved as JSON on the FAT partition.
+- `gauge_config_json.h` - JSON read/write for that model (ArduinoJson 7).
+- `gauge_style.h`, `gauge_fonts.h`, `font_*.c` - colors and fonts.
+- `gauge_indicators.h` - on/off lamps (fan, check engine, rev limiter ...).
+- `page_button.h` - BOOT button page switching.
+
+**CAN**
+- `can_parsing.h` - decodes rusEFI (0x200 range, little endian) and MegaSquirt/Link (0x5F0 range, big endian). Runs in its own FreeRTOS task, priority 3. Writes plain globals only, never LVGL. Also used by the hub.
+- `can_flags.h` - ECU on/off flags into `g_flag_bits`.
+- `ecu_config.cpp/.h` - ECU type label.
+
+**Link between boards**
+- `espnow_link.cpp/.h` - role main/remote, data packet (`MSD1`), remote hello (`MSH1`), command packet from the hub (`MSC1`: page next/prev, brightness), timeouts.
+
+**Web**
+- `web_monitor.cpp/.h` - web server: front page, `/gauges` editor, `/settings`, `/can`, `/status.json`, `/update` (OTA), net/name/diameter/role endpoints.
+- `web_indicator_editor.h`, `web_theme.h` - indicator editor page and shared page style.
+
+**Storage**
+- `sd_storage.cpp/.h` - SD card mount and web file browser.
+- `sd_logging.cpp/.h` - CSV logging, only above 800 rpm, chosen channels.
+- `simulator.cpp/.h` - bench simulator (demo sweep or manual values). Stops when real CAN appears.
+
+## 4. Hub firmware (`esp32-input/`)
+
+- `esp32-input.ino` - everything for the hub:
+  - Buttons on GPIO25 (next page) and GPIO26 (prev page), sent as command packets 3 times each.
+  - Brightness: Auto (lights wire GPIO35, dimmer GPIO32, both through 47k/10k dividers) or Knob (pot on GPIO34). Settings saved in NVS `bri`.
+  - CAN: TWAI on GPIO21 (TX) and GPIO22 (RX) through an SN65HVD230, 500 kbit/s.
+  - Data task: builds the same `MSD1` packet the screens already understand and broadcasts it every 50 ms.
+  - Web: `/` status and brightness settings, `/can` raw CAN monitor, `/update` OTA.
+- `input_btn.h` - button struct (in a header because the Arduino builder moves prototypes above the sketch).
+- `gauge_app.h`, `web_monitor.h`, `simulator.h` - small hub versions of the screen files so the shared decoder compiles here.
+- `can_parsing.h`, `can_flags.h`, `gauge_config.h` - **not in the repo**; copied from the screen folder by the build command so there is only one decoder.
+
+## 5. Packets (ESP-NOW broadcast)
+
+| Magic | From | Contents |
+|---|---|---|
+| `MSD1` | hub (or a main screen) | seq, count, has-data mask, one float per signal |
+| `MSH1` | remote screens | IP and build, every 2 s |
+| `MSC1` | hub | seq, command, value, target name ("" = all) |
+
+## 6. Saved settings (NVS)
+
+| Namespace / key | Meaning |
+|---|---|
+| `link/remote` | role main or remote |
+| `link/name` | board name |
+| `net` | static IP or DHCP |
+| `disp/diam` | screen diameter (default 520) |
+| `disp/sweep`, `disp/demo` | startup sweep, demo sweep |
+| `bri` (hub) | brightness mode and calibration |
+
+## 7. How data flows, one frame
+
+1. ECU sends a CAN frame.
+2. Hub CAN task receives it, logs it for `/can`, decodes it into `g_*` values and marks the signal seen.
+3. Hub data task (every 50 ms) packs all signals seen in the last 2 s into `MSD1`.
+4. Each screen's ESP-NOW callback copies the values into its own `g_*` globals.
+5. The screen's LVGL task redraws the gauges. The main screen also writes the SD log.
+
+## 8. Rules learned the hard way
+
+- Build number must equal the commit count.
+- Run the host tests before every push.
+- Every new web page must be listed in `tests/host/dump_pages.cpp`.
+- New config fields must be set in `fillAll` in `test_gauge_config.cpp`.
+- Hub flash settings: `FlashFreq=40,FlashMode=dio` or it boot-loops.
+- Use `curl.exe -H "Expect:"` for OTA uploads.
+- Do not name anything `F` in a sketch (Arduino macro).

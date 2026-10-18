@@ -1,0 +1,182 @@
+# MSP-DASH timeline
+
+Every commit in order. The number is the build number (build number = commit count). Generated from `git log`.
+
+
+## Phase 1: WROOM board, Nextion and web dashboard
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 1 | 2026-09-05 | 6ef39a2 | Initial commit: minimal README and gitignore |
+| 2 | 2026-09-06 | 9223ceb | Add ESP32 CAN sniffer for rusEFI bench testing |
+| 3 | 2026-09-06 | 3633b09 | Add CANBed sniffer sketch (confirmed CS pin 17, mcp_can library, per Longan docs) |
+| 4 | 2026-09-06 | 87d2fa8 | Fix CANBed sniffer include: mcp_canbus.h not mcp_can.h |
+| 5 | 2026-09-06 | c677747 | Add official rusEFI DBC and fully confirmed CAN map (RPM/TPS1 verified live; CLT/OilPress/Lambda pending longer capture) |
+| 6 | 2026-09-06 | 32409ff | Bench-confirm RPM/MAP/TPS1/BattVolt/MCUTemp against real values; add esp32-main.ino with confirmed byte layout |
+| 7 | 2026-09-06 | 559dad4 | Add Serial debug output to esp32-main for bench verification without Nextion attached |
+| 8 | 2026-09-06 | a8a3a4a | Realign esp32-main to real Nextion HMI: 12-field digital dashboard (rpm/mph/tps/eth/ego/fuelp/oilp/oilt/map/clt/mat/vvt) |
+| 9 | 2026-09-06 | c499712 | Fix Serial2 baud rate: 115200 to match Nextion project's baud= startup setting (was 9600) |
+| 10 | 2026-09-06 | 5f0c11d | Add GT-U7 GPS on UART1: mph now sourced from GPS speed instead of rusEFI VSS |
+| 11 | 2026-09-06 | 740306a | Add MegaSquirt support alongside rusEFI (no mode switch, ID ranges don't overlap); reorganize esp32-main.ino into clear sections |
+| 12 | 2026-09-06 | 71d3b14 | Add EGT via MAX6675 + K-type thermocouple (console-only, bit-banged) |
+| 13 | 2026-09-06 | 67b4111 | Add wifi_config.h.example template and gitignore real wifi_config.h |
+| 14 | 2026-09-06 | bf97ce8 | Add live web dashboard (WiFi + WebSocket) showing all gauges including EGT/BattVolt not yet on Nextion |
+| 15 | 2026-09-06 | 949e4b9 | Redesign web dashboard: dial gauges for RPM/Boost, progress bar for TPS, cleaner tile grid; add boost field broadcast |
+| 16 | 2026-09-06 | 0e83b9b | Add /config page: persistent on/off toggles for each gauge, stored in NVS flash |
+| 17 | 2026-09-06 | 20d2212 | Redesign web dashboard as classic OEM instrument cluster (SVG gauges, LCD trip computer); add FuelLevel signal |
+| 18 | 2026-09-06 | eb335e8 | Convert all temps to Fahrenheit (fixes CLT gauge unit mismatch); add GPS fix status light |
+| 19 | 2026-09-06 | 38afa5c | Major overhaul: per-gauge config (type/refresh/limits/redline), per-ECU config page, debug logging toggle (off by default), LinkECU support (shared parser with MegaSquirt), AEM X-Series scaffold (unconfirmed) |
+| 20 | 2026-09-06 | 0f20530 | Expose full rusEFI DBC as configurable gauges (74 total); remove MegaSquirt/LinkECU support (rusEFI-only focus for now) |
+| 21 | 2026-09-06 | 58f46bb | Add Light gauge type + MDI icons (unverified names), per-gauge console debug, and dashboard interactivity: close/X, drag-reorder, right-click type change |
+| 22 | 2026-09-06 | 8fd5646 | Fix /config blank page: stream response instead of building one giant String (heap fragmentation with 74 gauges) |
+| 23 | 2026-09-06 | 53638c0 | Add ESP32 system info panel (RAM/CPU/flash/temp) and SD card CSV logging |
+| 24 | 2026-09-06 | 1e6984d | Add OTA firmware update via browser (/update page, ESP32 core Update library); clarify NVS persistence behavior |
+| 25 | 2026-09-06 | 1be9e6b | Fix compile error: forward-declare broadcastStatus() before updateSystemInfo() uses it |
+| 26 | 2026-09-06 | a11cb8e | Make /config Save button fixed/floating at top of viewport - always visible on the long 74-gauge page |
+| 27 | 2026-09-06 | 29eb559 | Fix Save button visibility: replace fragile position:fixed with a simple second button at the top of the form |
+| 28 | 2026-09-06 | b897b86 | Add appearance/theme system: configurable face/needle colors, gauge size scale, and fully configurable center LCD panel contents/colors/speed |
+
+## Phase 2: round AMOLED bring-up (Arduino_GFX, LVGL 9 tests)
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 29 | 2026-09-27 | f235660 | Add Waveshare ESP32-S3-Touch-AMOLED-1.43 display bring-up: CO5300/SH8601 test sketches, confirmed pinout/library docs |
+| 30 | 2026-09-27 | 7b4d5da | Fix compile error in AMOLED test sketches: use raw RGB565 hex values instead of undefined named color constants |
+| 31 | 2026-09-27 | ffc9e93 | CO5300 test: explicit 20MHz QSPI clock to test signal integrity theory (default is 40MHz) |
+| 32 | 2026-09-27 | 21fcf96 | CO5300 test: try 10MHz - 20MHz cleaned fills but text still dithered, confirming signal integrity theory |
+| 33 | 2026-09-27 | 11a2974 | CO5300 test: use class default 480x480 buffer size instead of 466x466 - testing persistent green-sliver theory (buffer size mismatch, not signal integrity) |
+| 34 | 2026-09-27 | eab35e7 | CO5300 test: try centering 466x466 visible area with offset=7 within 480x480 buffer; add border+crosshair for precise alignment check |
+| 35 | 2026-09-27 | 999df53 | Add digital clock test sketch (big text, seconds.milliseconds, boots straight to it) - drops color test pattern, uses partial-region clear for smooth updates at confirmed 10MHz QSPI speed |
+| 36 | 2026-09-27 | 31c2773 | Fix clock test tearing: use opaque-background text (single write) instead of separate clear-rect + draw-text (two writes) |
+| 37 | 2026-09-27 | 564606f | Add LinkECU CAN + numbers-only gauge display for ESP32-S3 AMOLED board; document confirmed display bring-up (CO5300, 10MHz, offset 7,7,7,7, tearing fix) and CAN pin choices |
+| 38 | 2026-09-27 | d19a41e | Fix CAN pin choice: GPIO5/6 were 'free' per the chip table but not actually broken out on this board's headers. Confirmed from real board photo: use GPIO1/GPIO2 instead (physically accessible on the left-side header) |
+| 39 | 2026-09-28 | 18948c8 | Re-add MegaSquirt/LinkECU support to WROOM (all 3 ECUs now supported); add UART bridge to forward decoded data to the ESP32-S3 round display instead of it reading CAN independently |
+| 40 | 2026-09-28 | 23efb09 | Add SD-card image loading for the round AMOLED display: standalone test sketch + confirmed Arduino_GFX bitmap API + converted test image (RGB565 raw format) |
+| 41 | 2026-09-28 | 5beba65 | Add moving needle test for round AMOLED display - automatic simulated sweep, proves rotation math and flicker-free redraw |
+| 42 | 2026-09-28 | 2ff3e22 | Rewrite needle test with step-by-step setup logging and continuous heartbeat print - diagnoses exactly where it fails and solves the 'missed the boot-time prints' problem |
+| 43 | 2026-09-28 | 53a25ff | Add minimal LVGL v9 bring-up test, adapted from LVGL's own official Arduino example, bridged to our confirmed Arduino_GFX/CO5300 display - first test of whether lv_conf.h needs manual setup |
+| 44 | 2026-09-28 | 75cf8dc | Fix LVGL v9 color format: LV_COLOR_DEPTH doesn't exist in v9 (confirmed), use lv_display_set_color_format(RGB565) instead; document lv_conf.h setup and API findings |
+| 45 | 2026-09-28 | d36ae15 | Fix white screen: LVGL's default theme uses a light background, making our white text invisible against it. Explicitly set screen background to black to match project's dark aesthetic |
+| 46 | 2026-09-28 | 2b5f0cb | Add real LVGL gauge test: lv_scale + line needle, automatic simulated sweep, using confirmed API from installed source |
+| 47 | 2026-09-28 | 8e8d7a4 | Test tearing fix: disable rounded line caps (simpler redraw region) and slow update rate to 80ms - isolate whether rendering complexity or update rate is the cause |
+| 48 | 2026-09-28 | d9ac195 | Add combined LVGL gauge + direct CAN sketch: real RPM needle gauge on the round AMOLED, reading LinkECU CAN directly on this board |
+| 49 | 2026-09-28 | 8200140 | Switch CAN pins from inaccessible 1.27mm GPIO header (GPIO1/GPIO2) to the UART connector (GPIO43/44) - matching JST-SH cable was available; ESP32-S3's flexible GPIO matrix makes this a valid substitution |
+| 50 | 2026-09-28 | 6e6c060 | Switch to boost gauge on rusEFI CAN (was RPM/LinkECU); on-screen shows kPa, console shows kPa/bar/inHg/psi for multi-unit visibility and CAN-flow confirmation |
+| 51 | 2026-09-29 | 58086e2 | Clean up repo: remove all test/bench sketches (AMOLED bring-up tests, CAN sniffers), keep only the two active firmwares (esp32-main, esp32s3-amoled-lvgl-can-gauge); update README to reflect current structure |
+| 52 | 2026-09-29 | ec3748c | Add multi-page gauge cluster: AFR needle+readout, CLT/OilP half-moons, 6-value grid page - cycled via BOOT button, expanded rusEFI CAN parsing |
+| 53 | 2026-09-29 | eec923d | Add PREREQUISITES.md: new-machine setup script (winget check, arduino-cli, ESP32 core, libraries, lv_conf.h), OneDrive git quirk fix, board-specific compile flags |
+| 54 | 2026-09-29 | 890dc48 | Add standalone touch controller test (bb_captouch library) - validates hardware/library and basic swipe detection before integrating into the gauge cluster |
+| 55 | 2026-09-29 | ab39461 | Rewrite touch test with step-by-step setup logging and continuous heartbeat - same fix that resolved the identical 'nothing on Serial' symptom seen with the needle test |
+| 56 | 2026-09-30 | f30b49f | Add serial-echo diagnostic: type on terminal, see it on screen - tests Serial RX direction + display, isolates whether the persistent 'nothing on Serial' issue is TX-specific or something more fundamental |
+
+## Phase 3: rebuild on the Waveshare BSP (ESP-IDF + LVGL 8)
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 57 | 2026-09-30 | 3848b33 | Add confirmed-working Waveshare BSP example as new foundation (ESP-IDF esp_lcd + LVGL v8 + FT3168 touch) - display and touch both confirmed working end-to-end through our own toolchain |
+| 58 | 2026-09-30 | 015bdab | Full pivot: rebuild multi-page gauge cluster on Waveshare's confirmed-working ESP-IDF/LVGL v8 BSP foundation, replacing our Arduino_GFX/LVGL v9 stack that had persistent unresolved issues. Uses lv_meter widget, safe cross-task value sharing via lv_timer, rusEFI CAN reading in Arduino loop() |
+| 59 | 2026-09-30 | d2b03eb | Add touch swipe left/right page switching using LVGL v8's gesture detection, alongside existing BOOT button |
+| 60 | 2026-09-30 | eff443f | Switch CAN pins to GPIO43/44 (UART connector, the only cable currently on hand) - must compile with CDCOnBoot=cdc to avoid conflicting with Serial's default UART0 routing on those same pins |
+| 61 | 2026-09-30 | 26c0f96 | Full redesign: 6 full-screen analog gauges (AFR, CLT, Oil Press, Oil Temp, Fuel Press, Ethanol%) matching classic automotive gauge look - black bg, white needle/ticks, auto-cycle every 5s, sits at minimum until real CAN data arrives |
+| 62 | 2026-09-30 | ec6ddf5 | Fix compile error: add missing stdbool.h include to gauge_app.h (bool type used in header but only included in the .c file) |
+| 63 | 2026-09-30 | 45a34d9 | Thicker needle, wider tick-number gap, new numbers-grid page, new boost/vacuum gauge (rests at 0, kPa scale), removed auto-cycle per request |
+| 64 | 2026-09-30 | c53e541 | Enable 28px Montserrat font and apply to LV_PART_TICKS for bigger, brighter tick numbers matching reference image |
+| 65 | 2026-09-30 | 28d8930 | Reorder pages (Boost after AFR), change Boost to raw MAP 0-200kPa with 100=ambient, enlarge numbers-grid value text to 28px |
+| 66 | 2026-09-30 | 79e2723 | Reorder/rename pages (CLT,MAP,AFR,OIL PRESS,OIL TEMP,FUEL PRESS,ETH%), update CLT/OilTemp ranges to 250F, enlarge caption text to 28px, add flashing-red warning system for threshold values |
+| 67 | 2026-09-30 | 3f90ab8 | Replace static rest-value with a back-and-forth sweep animation while waiting for real CAN data on each signal |
+| 68 | 2026-09-30 | c50ef77 | Add Stage 1 of wireless config plan: WiFi AP + web server with a live read-only gauge monitoring page (WebSocket broadcast every 500ms) |
+| 69 | 2026-09-30 | 0ff4093 | Fix boot crash (buf2 DMA allocation assert) caused by WiFi/LVGL competing for limited DMA-capable memory - shrink LVGL buffer height from /4 to /10 |
+| 70 | 2026-09-30 | 673fdf1 | Switch web monitor from AP mode to STA mode (joins home WiFi), same git-ignored wifi_config.h credential pattern as the WROOM board, prints connection status and IP to Serial |
+| 71 | 2026-09-30 | 3e23ca6 | Add Stage 2 of wireless config plan: raw CAN broadcast monitor web page (/can), showing every CAN ID seen with raw bytes and frequency |
+| 72 | 2026-09-30 | c0ccae4 | Add Stage 3 of wireless config plan: port MegaSquirt/LinkECU parser from WROOM board, add persisted ECU selection (NVS) with web UI dropdown |
+| 73 | 2026-09-30 | 863e1f5 | Stage 4: full gauge configuration - data-driven pages, persisted signal/range/color/caption/warning config per slot, web UI editor. Added RPM/TPS/BattV decoding to expand signal pool to 10. Fixed stale hardcoded page-count bug in BOOT button handler |
+| 74 | 2026-09-30 | 94c78d1 | Add tick/background color customization per gauge slot, bump tick-label font to 36px, fix warning flash to respect custom background color instead of assuming black |
+| 75 | 2026-09-30 | 70d0a70 | Add SD card support: mount (ported from Waveshare's confirmed example), web-based browse/upload/download via ESP-IDF native VFS/FAT + POSIX file I/O |
+| 76 | 2026-09-30 | 70fc4d8 | Fix compile error: add missing Arduino.h include to sd_storage.cpp (Serial not auto-included in plain .cpp files, only .ino) |
+| 77 | 2026-09-30 | 79d7daa | Document required PartitionScheme=app3M_fat9M_16MB in PREREQUISITES.md - board's default scheme was sized for 4MB flash, not this board's actual 16MB, causing a 103% overflow once the sketch grew large enough |
+| 78 | 2026-09-30 | 40232cb | Add SD logging (always-on CSV), gauge page reordering (web UI up/down), and per-slot value divisor + tick density (enables RPM x1000 display with clean 1-9 ticks) |
+| 79 | 2026-09-30 | 216321f | Add Waveshare's confirmed QMI8658 IMU driver + I2C bus layer files, for the G-force gauge integration |
+| 80 | 2026-09-30 | ce5939a | Merge remote changes |
+| 81 | 2026-09-30 | 9971a0e | Merge origin/main into local work |
+| 82 | 2026-10-01 | fb3dd11 | Remove i2c_bsp.cpp - duplicates functions already defined in FT3168.cpp (same I2C bus, shared between touch and IMU per the board's pinout) and would cause both a duplicate-driver-install crash and a linker 'multiple definition' error |
+| 83 | 2026-10-01 | 5bdd3e0 | Fix CoolantTemp/OilTemp signed-vs-unsigned bug, confirmed against actual rusEFI DBC file - was wrapping negative above ~87C/189F, a realistic normal-operating-temperature range |
+| 84 | 2026-10-01 | e470d79 | Complete IMU/G-meter integration: QMI8658 reading (resolved I2C bus conflict with touch), custom cross+trailing-dot widget with accel/brake color coding, wired into the shared page cycle |
+| 85 | 2026-10-01 | e44ebdb | Disable touch swipe navigation (BOOT button only now) via a single master toggle - kept Touch_Init() running since the IMU shares its I2C bus for the G-meter page |
+| 86 | 2026-10-01 | ed15924 | Remove G-meter (didn't work vertically-mounted), add per-gauge refresh rate (20ms master tick, self-throttling per slot), value-above-caption display toggle with font size, bulk color apply to all gauges |
+| 87 | 2026-10-01 | cb58201 | Reposition gauge caption to 3/4 down from top, centered horizontally - better fit for the circular gauge shape |
+| 88 | 2026-10-01 | c6fbf1f | Revert caption position (was meant for FPS monitor, not caption) - FPS monitor alignment is a separate lv_conf.h setting, not something set in our own code |
+| 89 | 2026-10-01 | 4dd1ef6 | Enable OTA firmware updates: new /update web page + POST endpoint using Arduino's built-in Update library, confirmed our partition scheme genuinely has dual OTA app slots |
+
+## Phase 4: pages and cells, editors, logging, alerts
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 90 | 2026-10-01 | ef72e93 | Stage A of page/cell redesign: new nested data model (pages/layouts/cells) replacing the old flat one-gauge-per-page model. NOT yet integrated - gauge_app.c and web_monitor.cpp still need updating (Stage B/C) |
+| 91 | 2026-10-01 | 31f2f51 | Stage B of page/cell redesign: rewrite gauge_app.c to build multi-cell pages (1/2/3/4 cells per fixed layout, 3 gauge types per cell). Added signal-activity tracking calls. web_monitor.cpp (Stage C) still needs rewriting before this compiles |
+| 92 | 2026-10-01 | 8a6e71a | Stage C of page/cell redesign: full web UI rewrite (layout picker, per-cell editor, activity-sorted sensor picker, page management, hamburger menu, remote page nav). Fixed sd_logging.cpp which was missed in earlier stages. Redesign complete |
+| 93 | 2026-10-01 | 3d1a2b0 | Fix silent save failure: POST body buffer was too small (8192) for fully-populated multi-cell page configs, causing JSON parse failures and silently-dropped saves. Increased to 24576, added error logging |
+| 94 | 2026-10-01 | c1c49c1 | Add fully independent web-dashboard page/cell config (separate from physical display config) with its own /web-config editor. Rewrote main page: phone-frame styling (iPhone 15 Pro Max viewport, auto-detects desktop vs phone), single-page dynamic rendering, generalized WebSocket broadcast |
+| 95 | 2026-10-01 | 31d338a | Project review: fix stale comment, remove 9 dead functions (unused page-management + ecu_config_name), fix nav wording inconsistency, reorganize main .ino into can_parsing.h + page_button.h (269 -> 96 lines) |
+| 96 | 2026-10-02 | 806fb5c | Stage 1 of ESP-NOW/multi-screen plan: new histogram (strip-chart) gauge type, RPM-gated logging (>800), independent Log Channels config+page, blinking on-screen logging indicator via lv_layer_sys() |
+| 97 | 2026-10-02 | bee6d1f | Fix /gauges, /web-config, /log-channels silently hanging on load - concurrent fetches with no error handling occasionally stalled under this board's CAN+LVGL+webserver load. Sequential fetches + try/catch + visible retry |
+| 98 | 2026-10-06 | 2a35ed7 | Move CAN receive to its own priority-3 FreeRTOS task, raise TWAI rx queue 5 -> 64, add missed-frame warning + bus-off recovery, lock the /can frame table |
+| 99 | 2026-10-07 | 1ef006d | Move POST body buffers from static internal RAM to PSRAM (51KB), add 10s heap readout, add on-page script banner/error display, refuse to save an unloaded (empty) config, check save response |
+| 100 | 2026-10-07 | c0c62ca | Lost-signal handling (2s timeout, -- readouts, empty log fields), per-cell full-screen alert overlay, BOOT button no longer desyncs from the shown page, host tests for gauge_app.c and gauge_config.cpp |
+| 101 | 2026-10-07 | 8b0e0a1 | Trend graph rework: real history window (own sample rate), scaled values, reference line, fits the round panel, caption under graph; Trend Graph now selectable in the editors; host tests + screenshot tool |
+| 102 | 2026-10-07 | e66968f | Show build number (web page, /update, Serial); front page status line + auto-reconnect + silence watchdog; /status.json; live CAN health in the broadcast; host type-check kit |
+| 103 | 2026-10-07 | 162784f | Fix settings never saving: config exceeded NVS's 4000-byte string limit. Store as JSON files on the ffat partition, report real save results, share JSON conversion, sanitize input; build 103 |
+| 104 | 2026-10-07 | e1410cc | Bench simulator (demo + manual, off at boot, 10 min timeout, stops on real CAN, pauses logging, SIMULATED banner); NO DATA on trend graphs; fix logging dot that was off the round panel; end-to-end tests; build 104 |
+| 105 | 2026-10-07 | 75dc9f9 | Whole site in the iPhone frame: shared web_theme.h (bezel on desktop only, plain column on phones, safe-area, 16px fields, shared header+menu on every page); fix SD page overflow and editor checkbox/gap; browser layout tests; build 105 |
+| 106 | 2026-10-07 | 26318d6 | Tidy the apply-colours box on both editors (equal columns, labels above swatches, full-width buttons); layout rule for it; build 106 |
+| 107 | 2026-10-07 | d5c0e08 | Text sizes up to 120px with shrink-to-fit on the round glass; front page finally honours Value Text Size; separate dial-number size; dial start/end angles with live preview; Save & Reboot Board; tests; build 107 |
+| 108 | 2026-10-07 | e0a5092 | Yellow and red tick-mark zones (high or low end of the scale) and needle length trim (gap at the centre, stop short of the tip); editor controls with live dial preview; pixel-level tests; build 108 |
+| 109 | 2026-10-07 | f22b626 | ECU on/off flags (fan, check engine, rev limiter ...) decoded per the official DBC; indicators pages (up to 12 lamps, thresholds with hysteresis or ECU flags, flash, colours) on the round display and web dashboard; shared editor with presets; end-to-end tests; build 109 |
+| 110 | 2026-10-07 | bf1375b | TunerStudio-style warning zones: four thresholds (low/high critical and warning) drawn as coloured bands behind the ticks, coloured ticks, or both; converts build 108 zone settings; editor rows with band preview; tests; build 110 |
+| 111 | 2026-10-08 | e927261 | Caption text size (14/20/28/36/48) and units text; caption on the dial face; gauge position Center/Top/Bottom; default scales AFR 10-20, temperature 60-250, pressure 0-100; new 20 and 48 px text fonts; dashboard honors them; tests; build 111 |
+| 112 | 2026-10-08 | 4645c6c | Decimals setting (0/1/2) for the readout: round display, alert value, web dashboard; both editors; old configs load as 1; readout size picked for the widest text with its decimals; dashboard warning compares the real reading; tests; build 112 |
+| 113 | 2026-10-11 | 67bb431 | Repo cleanup: remove 5 stray pixel-test dumps (*.rgb) from the root and ignore *.rgb from now on; build 113 (no code change) |
+| 114 | 2026-10-11 | b113259 | Repo cleanup: remove the early bring-up sketches (lvgl-can-gauge, serial-echo, touch-test); README and PREREQUISITES point at esp32s3-amoled-bsp-base; build 114 (no code change) |
+| 115 | 2026-10-11 | 29bfff8 | PREREQUISITES: the exact compile/upload commands in use (CDCOnBoot, app3M_fat9M_16MB, shared build folder); build 115 (no code change) |
+| 116 | 2026-10-11 | 7c368e6 | PREREQUISITES: flash over WiFi (curl to /update at 192.168.55.102) as the normal path, USB as fallback; build 116 (no code change) |
+
+## Phase 5: multi-board ESP-NOW link, board settings, input board
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 117 | 2026-10-16 | 26102c3 | ESP-NOW link phase 1: one firmware, main/remote role (/role?set=), main broadcasts all signals at 50/s, remote shows them (CAN off, 1 s timeout to --), channel 1 when no WiFi; link status in /status.json and front page; build 117 |
+| 118 | 2026-10-16 | 9be624b | Static IP per board: /net?ip=&gw=&mask=(&dns=) or /net?dhcp=1, saved in NVS; serial 'dhcp' recovery; status shows ip; build 118 |
+| 119 | 2026-10-17 | a434558 | USB serial commands: info, ip <ip> <gw> <mask> [dns], dhcp, role main/remote; build 119 |
+| 120 | 2026-10-17 | 4a8626b | ESP-NOW: main sends from its own task (core 0, 20 ms) so screen redraws can't slow it (was 12/s); build 120 |
+| 121 | 2026-10-17 | 5fc0f52 | Main board lists the remotes it hears (ESP-NOW hello every 2 s: IP + build), with links to each remote's gauge editor and a build-mismatch note; build 121 |
+| 122 | 2026-10-17 | 2aef4cc | Board names in NVS: /name?set= or serial 'name <text>'; shown on each board's page and in the main board's remote list; build 122 |
+| 123 | 2026-10-17 | ce1b336 | PREREQUISITES: 3-board WiFi flash loop (.231/.232/.233, Expect: fix), serial and web setup commands; build 123 (no code change) |
+| 124 | 2026-10-17 | 292265c | EGT (placeholder CAN 0x7F0) and IAT (rusEFI BASE3 byte 3) signals, appended after the flags; half moons grow to fill their cell within the glass; 2-Up makes unset cells Half-Moons; tests updated; build 124 |
+| 125 | 2026-10-17 | c416027 | Display performance: fps and LVGL busy % (status, front page, /perf overlay, serial 'perf on/off'); ESP-NOW send 20/s; build 125 |
+| 126 | 2026-10-17 | 2d9e635 | Text alignment per gauge (Center/Left/Right) for caption, readout and units, kept inside the cell and the glass; build 126 |
+| 127 | 2026-10-17 | e65dd72 | Caption alignment only (readout and units always centred); dial readout re-centres as the number's width changes; build 127 |
+| 128 | 2026-10-17 | c666029 | Screen diameter per board (/diameter?set= or serial 'diameter N', 300-560, default 466): gauge layout and glass checks scale to it; build 128 |
+| 129 | 2026-10-18 | 076f2e7 | Default screen diameter for boards with no saved setting: 520; build 129 |
+| 130 | 2026-10-18 | e9c59d0 | Needle thickness per gauge; caption and readout placed by X/Y coordinates (units follow); Apply to ALL also sets needle gap, tip trim and thickness; build 130 |
+| 131 | 2026-10-18 | f7d9c42 | Apply to ALL: separate buttons for colors and for the needle; build 131 |
+| 132 | 2026-10-18 | 84dcdc0 | Apply to ALL: caption text size with its own button; build 132 |
+| 133 | 2026-10-18 | 217af81 | Apply to ALL caption size: options in the page markup (fixes host editor tests); build 133 |
+| 134 | 2026-10-18 | b3bf58e | 2-Up half moons come out the same size and position; remove the grey cell outline (the horizontal line); build 134 |
+| 135 | 2026-10-18 | d8aa53d | 2-Up half moons: match the partner using its own dial (bowl above dome stays full size); text by coordinates lets half moons use the whole cell; build 135 |
+| 136 | 2026-10-18 | b02d11d | Move dial X/Y per needle or half-moon gauge (nudge from its automatic spot); build 136 |
+| 137 | 2026-10-18 | 7021ec2 | Boot: quick WiFi scan, skip joining when the home network isn't there (ESP-NOW starts at once in the car); startup needle sweep on all pages; demo sweep on/off; both saved per board; build 137 |
+| 138 | 2026-10-18 | 5e6b435 | Board Settings page (/settings): name, startup sweep, demo, FPS overlay, diameter, static IP/DHCP, role; build 138 |
+| 139 | 2026-10-18 | 98116f7 | Peak hold per needle/half-moon gauge: shadow needle holds the highest reading for 1-10 s (default 3), on/off; build 139 |
+| 140 | 2026-10-18 | 71facd3 | Input board sketch (esp32-input: 2 buttons + brightness knob over ESP-NOW, IP .204, WiFi updates); screens accept page and brightness commands; build 140 |
+| 141 | 2026-10-18 | 230000a | esp32-input: Btn type in its own header (the Arduino builder put the pressed() prototype above the struct); no default argument; input build 2, screens build 141 (no screen change) |
+| 142 | 2026-10-18 | 996f448 | Input board: compile/upload with FlashFreq=40,FlashMode=dio (80 MHz boot-looped on the ESP32-D); docs only; build 142 |
+| 143 | 2026-10-18 | 5a3806b | Input board build 3: brightness from the car's lights-on and dimmer voltages (day %, night min..max % across the dimmer), settings page with live volts and calibration; screens build 143 (no change) |
+
+## Phase 6: the input board becomes the CAN hub
+
+| Build | Date | Commit | Change |
+|---|---|---|---|
+| 144 | 2026-10-18 | 8691820 | Hub: the input board reads CAN (GPIO 21/22) with the screens' decoder (copied in at compile time) and sends the data packet at 20/s; screens build 144 (no change) |
+| 145 | 2026-10-18 | 25ac852 | Hub: rename local F() helper, it clashed with Arduino's F() macro |
+| 146 | 2026-10-18 | 1e6035e | Hub build 5: raw CAN page /can (every ID, bytes, count, age, bus state) and /can.json |
+| 147 | 2026-10-18 | 68b8a0a | Hub build 5: include the CAN tracker before the web pages use it |
+| 148 | 2026-10-18 | (this commit) | Docs: CODE_GUIDE.md and TIMELINE.md |
