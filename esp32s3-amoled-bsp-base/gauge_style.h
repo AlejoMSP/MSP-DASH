@@ -61,6 +61,11 @@ static inline int32_t gauge_snap_caption_size(int32_t v) {
 #define GAUGE_VALIGN_BOTTOM 2
 static inline int32_t gauge_resolve_valign(int32_t v) { return (v == GAUGE_VALIGN_TOP || v == GAUGE_VALIGN_BOTTOM) ? v : GAUGE_VALIGN_CENTER; }
 
+// ---- needle thickness, and text placed by coordinates ----
+#define GAUGE_NEEDLE_W_DEFAULT 6
+static inline int32_t gauge_resolve_needle_w(int32_t v) { return (v >= 1 && v <= 20) ? v : GAUGE_NEEDLE_W_DEFAULT; }
+static inline int32_t gauge_resolve_text_xy(int32_t v) { return v < -300 ? -300 : (v > 300 ? 300 : v); }
+
 // ---- horizontal text alignment in a cell (caption, readout, units) ----
 #define GAUGE_HALIGN_CENTER 0
 #define GAUGE_HALIGN_LEFT   1

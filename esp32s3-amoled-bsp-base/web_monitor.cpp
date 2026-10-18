@@ -437,12 +437,17 @@ R"rawliteral(<div class="pad">
   <div id="boot">Page script has not started yet...</div>
 
   <div class="bulk">
-    <div class="bulk-title">Apply colors to ALL cells</div>
+    <div class="bulk-title">Apply to ALL cells</div>
     <div class="bulk-sub">Sets every cell on every page. Click Save afterward to keep it.</div>
     <div class="bulk-colors">
       <label>Needle<input type="color" id="bulkNeedle" value="#ffffff"></label>
       <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
       <label>Background<input type="color" id="bulkBg" value="#000000"></label>
+    </div>
+    <div class="bulk-colors">
+      <label>Needle gap at center %<input type="number" id="bulkHub" min="0" max="60" value="0"></label>
+      <label>Needle short of tip %<input type="number" id="bulkTip" min="0" max="60" value="0"></label>
+      <label>Needle thickness px<input type="number" id="bulkNw" min="1" max="20" value="6"></label>
     </div>
     <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply to All</button>
   </div>
@@ -474,7 +479,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -533,6 +538,15 @@ R"rawliteral(
             <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
           <label>Caption alignment
             <select onchange="setCellField(${pIdx},${cIdx},'h_align',parseInt(this.value))">${[[0,"Center"],[1,"Left"],[2,"Right"]].map(([v,n]) => `<option value="${v}" ${(c.h_align||0)===v?"selected":""}>${n}</option>`).join("")}</select></label>
+          <label><input type="checkbox" ${c.text_xy?"checked":""} onchange="setTextXY(${pIdx},${cIdx},this.checked)"> Place text by coordinates</label>
+          ${c.text_xy ? `<div class="row2">
+            <div><label>Caption X <input type="number" min="-300" max="300" value="${c.cap_x||0}" onchange="setCellField(${pIdx},${cIdx},'cap_x',parseInt(this.value)||0)"></label></div>
+            <div><label>Caption Y <input type="number" min="-300" max="300" value="${c.cap_y||0}" onchange="setCellField(${pIdx},${cIdx},'cap_y',parseInt(this.value)||0)"></label></div>
+          </div><div class="row2">
+            <div><label>Value X <input type="number" min="-300" max="300" value="${c.val_x||0}" onchange="setCellField(${pIdx},${cIdx},'val_x',parseInt(this.value)||0)"></label></div>
+            <div><label>Value Y <input type="number" min="-300" max="300" value="${c.val_y||0}" onchange="setCellField(${pIdx},${cIdx},'val_y',parseInt(this.value)||0)"></label></div>
+          </div>
+          <p class="hint">Pixels from the cell's centre: X to the right, Y down. Units sit under the value. Caption alignment is ignored while this is on.</p>` : ""}
           <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
           ${(c.gauge_type===0 || c.gauge_type===2) ? `
           <div class="row2">
@@ -570,6 +584,7 @@ R"rawliteral(
             <div><label>Needle gap at center (%) <input type="number" min="0" max="60" step="1" value="${c.needle_hub_pct||0}" oninput="setTrim(${pIdx},${cIdx},'needle_hub_pct',this.value)"></label></div>
             <div><label>Needle short of tip (%) <input type="number" min="0" max="60" step="1" value="${c.needle_tip_pct||0}" oninput="setTrim(${pIdx},${cIdx},'needle_tip_pct',this.value)"></label></div>
           </div>
+          <label>Needle thickness (px) <input type="number" min="1" max="20" step="1" value="${c.needle_w||6}" onchange="setCellField(${pIdx},${cIdx},'needle_w',Math.min(20,Math.max(1,parseInt(this.value)||6)))"></label>
           <p class="hint">Needle length trim, as a percent of the dial's radius. 0 and 0 is the normal needle. Both ends together can trim at most 85.</p>
           ` : ""}
           ${c.gauge_type===3 ? `
@@ -691,7 +706,7 @@ R"rawliteral(
         `<path d="M${f(a0[0])} ${f(a0[1])} A${R} ${R} 0 ${g.sweep > 180 ? 1 : 0} 1 ${f(a1[0])} ${f(a1[1])}" fill="none" stroke="#4dd0e1" stroke-width="3"/>` +
         bands +
         ticks +
-        `<line class="needle" x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needleColor}" stroke-width="2.2" stroke-linecap="round"/>` +
+        `<line class="needle" x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needleColor}" stroke-width="${((c.needle_w || 6) * 0.37).toFixed(2)}" stroke-linecap="round"/>` +
         (trim.hub === 0 ? `<circle class="hub" cx="48" cy="48" r="2.6" fill="#666"/>` : "") +
         `<circle cx="${f(a0[0])}" cy="${f(a0[1])}" r="3.5" fill="#2ecc71"/><circle cx="${f(a1[0])}" cy="${f(a1[1])}" r="3.5" fill="#e74c3c"/>` +
         `<text x="48" y="7" font-size="8" fill="#666" text-anchor="middle">0</text></svg>` +
@@ -745,6 +760,14 @@ R"rawliteral(
       c.gauge_type = type;
       if (type === 2 && c.start_deg === 225 && c.end_deg === 135) { c.start_deg = 270; c.end_deg = 90; }
       else if (type === 0 && c.start_deg === 270 && c.end_deg === 90) { c.start_deg = 225; c.end_deg = 135; }
+      renderPages();
+    }
+
+    // Turning coordinates on starts from a sensible spot: value at the centre, caption a bit lower.
+    function setTextXY(pIdx, cIdx, on) {
+      const c = pages[pIdx].cells[cIdx];
+      c.text_xy = on;
+      if (on && !c.cap_x && !c.cap_y && !c.val_x && !c.val_y) { c.cap_y = 70; c.val_y = 0; }
       renderPages();
     }
 
@@ -857,11 +880,15 @@ R"rawliteral(
       const needle = document.getElementById("bulkNeedle").value.substring(1);
       const tick = document.getElementById("bulkTick").value.substring(1);
       const bg = document.getElementById("bulkBg").value.substring(1);
+      const num = (id, lo, hi, d) => { const v = parseInt(document.getElementById(id).value); return isNaN(v) ? d : Math.min(hi, Math.max(lo, v)); };
+      const nw = num("bulkNw", 1, 20, 6), hub = num("bulkHub", 0, 60, 0), tip = Math.min(num("bulkTip", 0, 60, 0), 85 - hub);
       for (const p of pages) {
         for (const c of p.cells) {
           c.needle_color = parseInt(needle, 16);
           c.tick_color = parseInt(tick, 16);
           c.bg_color = parseInt(bg, 16);
+          c.needle_w = nw;
+          c.needle_hub_pct = hub; c.needle_tip_pct = tip;
         }
       }
       renderPages();

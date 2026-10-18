@@ -470,6 +470,32 @@ static void apply_text_halign(lv_obj_t *container, CellRect rect, int32_t halign
   }
 }
 
+// Text by coordinates: the caption (labels marked USER_1) and the readout (USER_2) are centred at the cell's settings,
+// in px from the cell's centre; the units (USER_3) sit centred under the readout. Nothing is clamped: the editor's
+// preview shows where it lands.
+static void apply_text_xy(lv_obj_t *container, const CellConfig *cfg) {
+  lv_obj_update_layout(container);
+  lv_obj_t *val = NULL;
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(container); i++) {
+    lv_obj_t *l = lv_obj_get_child(container, i);
+    if (lv_obj_has_flag(l, LV_OBJ_FLAG_USER_1)) {
+      lv_obj_set_width(l, LV_SIZE_CONTENT);
+      lv_obj_align(l, LV_ALIGN_CENTER, (lv_coord_t)gauge_resolve_text_xy(cfg->cap_x), (lv_coord_t)gauge_resolve_text_xy(cfg->cap_y));
+    } else if (lv_obj_has_flag(l, LV_OBJ_FLAG_USER_2)) {
+      val = l;
+      lv_obj_align(l, LV_ALIGN_CENTER, (lv_coord_t)gauge_resolve_text_xy(cfg->val_x), (lv_coord_t)gauge_resolve_text_xy(cfg->val_y));
+    }
+  }
+  if (!val) return;
+  lv_coord_t vh = lv_obj_get_height(val);
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(container); i++) {
+    lv_obj_t *l = lv_obj_get_child(container, i);
+    if (!lv_obj_has_flag(l, LV_OBJ_FLAG_USER_3)) continue;
+    lv_obj_align(l, LV_ALIGN_CENTER, (lv_coord_t)gauge_resolve_text_xy(cfg->val_x),
+                 (lv_coord_t)(gauge_resolve_text_xy(cfg->val_y) + vh / 2 + lv_obj_get_height(l) / 2 + 2));
+  }
+}
+
 static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRuntime *rt) {
   rt->enabled = cfg->enabled;
   rt->gauge_type = cfg->gauge_type;
@@ -535,6 +561,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     const lv_font_t *unitsFont = hasUnits ? pick_caption_font(cfg->caption_font_size, cfg->units, cellCx, numTopAbs + numH + 2.0f, ANCHOR_TOP, rect.w * 0.6f, rect.h * 0.25f) : NULL;
 
     lv_obj_t *numLabel = lv_label_create(container);
+    lv_obj_add_flag(numLabel, LV_OBJ_FLAG_USER_2);   // readout: placed by coordinates when the cell asks
     lv_obj_set_style_text_color(numLabel, lv_color_white(), 0);
     lv_obj_set_style_text_font(numLabel, numFont, 0);
     lv_label_set_text(numLabel, "--");
@@ -552,6 +579,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
     if (hasUnits) {
       lv_obj_t *unitsLabel = lv_label_create(container);
+      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_3);   // units: placed by coordinates when the cell asks
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -741,7 +769,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       }
     }
 
-    lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, 6, needleColor, -12);
+    lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, (uint16_t)gauge_resolve_needle_w(cfg->needle_w), needleColor, -12);
     lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
     rt->meter = meter;
     rt->needle = needle;
@@ -773,6 +801,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_t *unitsLabel = NULL;
     if (hasUnits) {
       unitsLabel = lv_label_create(container);
+      lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_3);   // units: placed by coordinates when the cell asks
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
       lv_label_set_text(unitsLabel, cfg->units);
@@ -783,6 +812,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     if (cfg->show_value) {
       // The readout sits just above the units (or the caption) at the bottom of the dial.
       lv_obj_t *valueLabel = lv_label_create(container);
+      lv_obj_add_flag(valueLabel, LV_OBJ_FLAG_USER_2);   // readout: placed by coordinates when the cell asks
       lv_obj_set_style_text_color(valueLabel, lv_color_white(), 0);
       lv_obj_set_style_text_font(valueLabel, valFont, 0);
       lv_label_set_text(valueLabel, "--");
@@ -795,7 +825,8 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     }
   }
 
-  apply_text_halign(container, rect, gauge_resolve_halign(cfg->h_align));
+  if (cfg->text_xy) apply_text_xy(container, cfg);
+  else apply_text_halign(container, rect, gauge_resolve_halign(cfg->h_align));
 
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
 

@@ -2116,3 +2116,11 @@ Larger: everything grows; anything past 466 falls off the real panel. Indicator 
 shows `diameter`. Tests: `test_dial_text diam400 | diam520`.
 
 Build 129: a board with no saved diameter now uses 520 (`GAUGE_DIAMETER_BOARD_DEFAULT`), the size chosen on the real panels.
+
+## Needle thickness, text by coordinates, Apply to ALL (build 130)
+
+New cell fields: `needle_w` (1-20 px, default 6), `text_xy` (bool) with `cap_x/cap_y` and `val_x/val_y` (px from the cell's
+centre, +x right, +y down, clamped to -300..300). With `text_xy` on, the caption and the readout are centred at those points
+and the units sit centred under the readout; caption alignment is ignored. The editor's "Apply to ALL cells" box now also
+sets needle gap at centre %, needle short of tip % (hub + tip <= 85) and needle thickness on every cell. Tests:
+`test_dial_text textxy`, `test_gauge_config`.

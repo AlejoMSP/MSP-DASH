@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -96,6 +96,9 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
       else if (!strncmp(mode, "diam", 4)) mkcell(cc, (p % 2) ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, (p % 2) ? 270 : 225, (p % 2) ? 90 : 135, true);
+      else if (!strcmp(mode, "textxy")) { mkcell(cc, p == 1 ? GAUGE_TYPE_NUMBER : GAUGE_TYPE_NEEDLE, 48, 28, 225, 135, true);
+        cc->text_xy = true; cc->cap_x = -40; cc->cap_y = 90; cc->val_x = 30; cc->val_y = -20; cc->needle_w = 11;
+        strcpy(cc->units, "F"); cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
       else if (!strcmp(mode, "halign")) { mkcell(cc, p == 2 ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NUMBER, 48, 28, 270, 90, true);
         cc->h_align = (p == 0) ? 1 : 2; cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
       else if (!strcmp(mode, "decimals")) { mkcell(cc, p == 3 ? GAUGE_TYPE_NEEDLE : GAUGE_TYPE_NUMBER, 120, 28, 225, 135, true);
@@ -265,6 +268,32 @@ int main(int argc, char **argv) {
         CHECK(inside_circle(&a, R), m);
       }
     }
+  }
+
+  if (!strcmp(mode, "textxy")) {
+    printf("textxy: caption and readout centred at their coordinates, units under the readout; needle thickness\n");
+    s_has[SIG_AFR] = true; s_val[SIG_AFR] = 123.4f; run_ms(150);
+    for (int p = 0; p < 2; p++) {
+      lv_obj_update_layout(s_pageScr[p]);
+      lv_obj_t *box = lv_obj_get_child(s_pageScr[p], 0);
+      lv_area_t bx; lv_obj_get_coords(box, &bx);
+      float cx = (bx.x1 + bx.x2 + 1) / 2.0f, cy = (bx.y1 + bx.y2 + 1) / 2.0f;
+      lv_area_t va = {0}, ua = {0}; bool cap = false, val = false, un = false; char m[160];
+      for (uint32_t i = 0; i < lv_obj_get_child_cnt(box); i++) {
+        lv_obj_t *k = lv_obj_get_child(box, i); lv_area_t a; lv_obj_get_coords(k, &a);
+        float mx = (a.x1 + a.x2 + 1) / 2.0f, my = (a.y1 + a.y2 + 1) / 2.0f;
+        if (lv_obj_has_flag(k, LV_OBJ_FLAG_USER_1)) { cap = true; snprintf(m, sizeof(m), "page %d caption at (-40, 90): got (%.0f, %.0f)", p, mx - cx, my - cy); CHECK(fabsf(mx - cx + 40) <= 1.5f && fabsf(my - cy - 90) <= 1.5f, m); }
+        if (lv_obj_has_flag(k, LV_OBJ_FLAG_USER_2)) { val = true; va = a; snprintf(m, sizeof(m), "page %d readout at (30, -20): got (%.0f, %.0f)", p, mx - cx, my - cy); CHECK(fabsf(mx - cx - 30) <= 1.5f && fabsf(my - cy + 20) <= 1.5f, m); }
+        if (lv_obj_has_flag(k, LV_OBJ_FLAG_USER_3)) { un = true; ua = a; }
+      }
+      snprintf(m, sizeof(m), "page %d: caption, readout and units all found", p); CHECK(cap && val && un, m);
+      snprintf(m, sizeof(m), "page %d: units centred just under the readout", p);
+      CHECK(un && val && ua.y1 >= va.y2 && ua.y1 - va.y2 <= 6 && fabsf((ua.x1 + ua.x2) / 2.0f - (va.x1 + va.x2) / 2.0f) <= 1.5f, m);
+    }
+    lv_obj_t *meter = meter_in(lv_obj_get_child(s_pageScr[0], 0));
+    lv_meter_indicator_t *ind; bool w11 = false;
+    _LV_LL_READ(&((lv_meter_t *)meter)->indicator_ll, ind) if (ind->type == LV_METER_INDICATOR_TYPE_NEEDLE_LINE && ind->type_data.needle_line.width == 11) w11 = true;
+    CHECK(w11, "the needle is drawn 11 px thick");
   }
 
   if (!strcmp(mode, "halign")) {

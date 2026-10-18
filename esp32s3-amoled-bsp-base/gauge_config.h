@@ -111,6 +111,10 @@ typedef struct {
   int32_t high_crit;
   int32_t zone_style;      // 1 = coloured bands behind the ticks, 2 = coloured tick marks, 3 = both (GAUGE_ZONE_BANDS / _TICKS)
   int32_t needle_hub_pct;  // gap between the dial's centre and where the needle starts, % of the dial radius (0-60)
+  int32_t needle_w;        // needle thickness, px (1-20, default 6)
+  bool text_xy;            // place the caption and the readout (+ units under it) by coordinates instead of automatically
+  int32_t cap_x, cap_y;    // caption centre, px from the cell's centre (+x right, +y down); -300..300
+  int32_t val_x, val_y;    // readout centre, same; the units follow under it
   int32_t needle_tip_pct;  // how far short of its normal tip the needle stops, % of the dial radius (0-60; hub + tip <= 85)
   bool has_warning;
   float warning_threshold;
