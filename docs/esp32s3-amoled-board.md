@@ -2180,3 +2180,11 @@ rule as the screens (scan, join home network or park on channel 1); fixed IP 192
 the same curl flashing. Screens: both roles accept commands (deduped by seq, filtered by target name); page commands use
 `g_page_nav_delta`; brightness is SH8601 command 0x51, sent from the LVGL task between frames. `/status.json` `brightness`.
 Brightness isn't saved: the input board's 2 s repeat restores it after a reboot.
+
+## Input board: brightness from the car's lights and dimmer (input build 3)
+
+Lights-on wire into GPIO 35 and the dash dimmer into GPIO 32, each through 47k / 10k (x5.7; 14.4 V -> 2.53 V), plus 10 uF
+on the dimmer pin if it's PWM. Mode auto: lights below "lights on" volts = day %; lights on = night min % at the dimmer's
+lowest volts, rising linearly to night max % at its highest. Mode knob: the potentiometer (bench). Settings and live
+volts on the input board's own page (`/`), saved in NVS `bri`; "Use now as lowest / highest" captures the dimmer's
+current voltage for calibration. Screen firmware unchanged.
