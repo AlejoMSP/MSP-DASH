@@ -22,7 +22,7 @@
 #include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
 #include "gauge_app.h"
 
-#define INPUT_BUILD 4
+#define INPUT_BUILD 5
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -164,12 +164,41 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a>";
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
 poll();setInterval(poll,1000);
 </script></body></html>)HTML");
+  });
+  // ---- raw CAN monitor: every ID seen, latest bytes, count, age ----
+  server.on("/can.json", HTTP_GET, []() {
+    CanMonEntry snap[CANMON_MAX]; int n; uint32_t tot;
+    portENTER_CRITICAL(&s_canMux); n = s_canMonN; tot = s_canTotal; memcpy(snap, s_canMon, sizeof(CanMonEntry) * n); portEXIT_CRITICAL(&s_canMux);
+    twai_status_info_t st; bool ok = twai_get_status_info(&st) == ESP_OK;
+    String j = "{\"total\":" + String(tot) + ",\"state\":" + String(ok ? (int)st.state : -1) +
+               ",\"rxerr\":" + String(ok ? st.rx_error_counter : 0) + ",\"missed\":" + String(ok ? st.rx_missed_count : 0) + ",\"ids\":[";
+    uint32_t now = millis();
+    for (int i = 0; i < n; i++) {
+      char b[96]; int k = snprintf(b, sizeof b, "%s{\"id\":%u,\"n\":%u,\"age\":%u,\"d\":\"", i ? "," : "", (unsigned)snap[i].id, (unsigned)snap[i].count, (unsigned)(now - snap[i].lastMs));
+      for (int x = 0; x < snap[i].len; x++) k += snprintf(b + k, sizeof b - k, "%02X ", snap[i].d[x]);
+      snprintf(b + k, sizeof b - k, "\"}");
+      j += b;
+    }
+    j += "]}";
+    server.send(200, "application/json", j);
+  });
+  server.on("/can", HTTP_GET, []() {
+    server.send(200, "text/html", F(
+      "<!doctype html><meta name=viewport content='width=device-width'><title>Hub CAN</title>"
+      "<style>body{font-family:sans-serif;background:#111;color:#eee}td,th{padding:3px 10px;font-family:monospace}th{text-align:left}.old{color:#666}</style>"
+      "<h3>Hub raw CAN</h3><div id=s></div><table><thead><tr><th>ID</th><th>Bytes</th><th>Count</th><th>Age ms</th></tr></thead><tbody id=t></tbody></table>"
+      "<p><a href='/'>Back</a></p><script>"
+      "const ST=['stopped','running','bus-off','recovering'];"
+      "async function u(){try{const r=await fetch('/can.json');const j=await r.json();"
+      "s.textContent='Frames: '+j.total+' | bus: '+(ST[j.state]||'?')+' | rx errors: '+j.rxerr+' | missed: '+j.missed;"
+      "j.ids.sort((a,b)=>a.id-b.id);t.innerHTML=j.ids.map(e=>'<tr class='+(e.age>2000?'old':'')+'><td>0x'+e.id.toString(16).toUpperCase().padStart(3,'0')+'</td><td>'+e.d+'</td><td>'+e.n+'</td><td>'+e.age+'</td></tr>').join('');}catch(e){}}"
+      "setInterval(u,500);u();</script>"));
   });
   server.on("/state", HTTP_GET, []() {
     auto liveCount = []() { int n = 0; for (int i = 1; i < SIG_COUNT; i++) if (gauge_config_signal_has_data((SignalId)i)) n++; return n; };
