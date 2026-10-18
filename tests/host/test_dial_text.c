@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy | sym2up466 | sym2up520 | mirror2up520 | startsweep | demooff
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy | sym2up466 | sym2up520 | mirror2up520 | startsweep | demooff | peakhold
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -96,6 +96,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
       else if (!strncmp(mode, "diam", 4)) mkcell(cc, (p % 2) ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, (p % 2) ? 270 : 225, (p % 2) ? 90 : 135, true);
+      else if (!strcmp(mode, "peakhold")) { mkcell(cc, p % 2 ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, p % 2 ? 270 : 225, p % 2 ? 90 : 135, true);
+        cc->signal = SIG_MAP; cc->min_val = 0; cc->max_val = 300; cc->warning_threshold = 1e9f; cc->peak_hold = p < 4; cc->peak_hold_s = 3; cc->refresh_hz = 50; }
       else if (!strcmp(mode, "startsweep") || !strcmp(mode, "demooff")) { mkcell(cc, GAUGE_TYPE_NEEDLE, 48, 28, 225, 135, true);
         cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 200; cc->warning_threshold = 1e9f; }
       else if (!strncmp(mode, "mirror2up", 9)) { mkcell(cc, GAUGE_TYPE_HALFMOON, 48, 28, c == 0 ? 90 : 270, c == 0 ? 270 : 90, false);
@@ -278,6 +280,24 @@ int main(int argc, char **argv) {
         CHECK(inside_circle(&a, R), m);
       }
     }
+  }
+
+  if (!strcmp(mode, "peakhold")) {
+    printf("peakhold: a shadow needle holds the highest reading for 3 s, then drops back; off = no shadow needle\n");
+    #define NEEDLES(pg, out) ({ int n_ = 0; lv_meter_indicator_t *ind_; lv_obj_t *mt_ = meter_in(lv_obj_get_child(s_pageScr[pg], 0)); \
+      _LV_LL_READ_BACK(&((lv_meter_t *)mt_)->indicator_ll, ind_) if (ind_->type == LV_METER_INDICATOR_TYPE_NEEDLE_LINE) { if (n_ < 2) out[n_] = ind_->end_value; n_++; } n_; })
+    int nv[2]; char m[160];
+    s_has[SIG_MAP] = true; s_val[SIG_MAP] = 100.0f; run_ms(300);
+    s_val[SIG_MAP] = 280.0f; run_ms(100);
+    s_val[SIG_MAP] = 120.0f; run_ms(1000);
+    for (int p = 0; p < s_nPage; p++) {
+      int n = NEEDLES(p, nv);
+      if (p < 4) { snprintf(m, sizeof(m), "page %d: 1 s after the spike the shadow holds 280, the live needle shows 120 (%d needles: %d, %d)", p, n, nv[0], nv[1]);
+        CHECK(n == 2 && ((nv[0] == 280 && nv[1] == 120) || (nv[0] == 120 && nv[1] == 280)), m); }
+      else { snprintf(m, sizeof(m), "page %d: peak hold off = one needle", p); CHECK(n == 1, m); }
+    }
+    run_ms(2500);
+    for (int p = 0; p < 4; p++) { NEEDLES(p, nv); snprintf(m, sizeof(m), "page %d: after 3 s the shadow drops back to the reading (%d, %d)", p, nv[0], nv[1]); CHECK(nv[0] == 120 && nv[1] == 120, m); }
   }
 
   if (!strcmp(mode, "startsweep") || !strcmp(mode, "demooff")) {

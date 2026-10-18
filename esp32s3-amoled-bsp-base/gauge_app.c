@@ -114,6 +114,8 @@ typedef struct {
   lv_obj_t *container;
   lv_obj_t *meter;         // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
+  lv_meter_indicator_t *peakNeedle; // shadow needle for peak hold; NULL when off
+  int32_t peak_val; uint32_t peak_ms; uint32_t peak_hold_ms;
   lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
   int32_t needleHubPct;         // needle trim, % of the dial radius: gap at the centre ...
   int32_t needleTipPct;         // ... and how far short of its normal tip it stops
@@ -516,6 +518,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->caption[sizeof(rt->caption) - 1] = '\0';
   rt->meter = NULL;
   rt->needle = NULL;
+  rt->peakNeedle = NULL;
   rt->numberLabel = NULL;
   rt->chart = NULL;
   rt->chartSeries = NULL;
@@ -793,6 +796,14 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       }
     }
 
+    // Peak hold: a dimmer shadow needle, added first so the live needle draws on top of it
+    rt->peakNeedle = NULL;
+    if (cfg->peak_hold) {
+      rt->peakNeedle = lv_meter_add_needle_line(meter, scale, (uint16_t)gauge_resolve_needle_w(cfg->needle_w),
+                                                lv_color_mix(needleColor, lv_color_hex(cfg->bg_color), 110), -12);
+      lv_meter_set_indicator_value(meter, rt->peakNeedle, cfg->rest_val);
+      rt->peak_val = cfg->min_val; rt->peak_ms = 0; rt->peak_hold_ms = (uint32_t)gauge_resolve_peak_s(cfg->peak_hold_s) * 1000u;
+    }
     lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, (uint16_t)gauge_resolve_needle_w(cfg->needle_w), needleColor, -12);
     lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
     rt->meter = meter;
@@ -1184,6 +1195,10 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
         }
       } else {
         if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
+        if (c->meter && c->peakNeedle) {   // peak hold: rises with the reading, holds the top for the set time, then drops back
+          if (!has_data || displayValue >= c->peak_val || (uint32_t)(now - c->peak_ms) >= c->peak_hold_ms) { c->peak_val = displayValue; c->peak_ms = now; }
+          lv_meter_set_indicator_value(c->meter, c->peakNeedle, c->peak_val);
+        }
         update_warning_flash(c, value, has_data);
         if (c->numberLabel) set_label_if_changed(c->numberLabel, buf); // the optional "show_value" readout for NEEDLE/HALFMOON
       }

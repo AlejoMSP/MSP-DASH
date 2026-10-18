@@ -77,6 +77,7 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.needle_hub_pct = 0; c.needle_tip_pct = 0;
   c.needle_w = GAUGE_NEEDLE_W_DEFAULT; c.text_xy = false; c.cap_x = c.cap_y = c.val_x = c.val_y = 0;
   c.dial_x = c.dial_y = 0;
+  c.peak_hold = false; c.peak_hold_s = GAUGE_PEAK_HOLD_S_DEFAULT;
   c.has_warning = hasWarning;
   c.warning_threshold = warnThresh;
   c.warning_above = warnAbove;
@@ -181,6 +182,7 @@ static void serializeCell(JsonObject o, const CellConfig *c) {
   o["needle_tip_pct"] = c->needle_tip_pct;
   o["needle_w"] = c->needle_w;
   o["dial_x"] = c->dial_x; o["dial_y"] = c->dial_y;
+  o["peak_hold"] = c->peak_hold; o["peak_hold_s"] = c->peak_hold_s;
   o["text_xy"] = c->text_xy;
   o["cap_x"] = c->cap_x; o["cap_y"] = c->cap_y; o["val_x"] = c->val_x; o["val_y"] = c->val_y;
   o["has_warning"] = c->has_warning;
@@ -251,6 +253,7 @@ static void deserializeCell(JsonObject o, CellConfig *c) {
   } else {
     c->zone_style = GAUGE_ZONE_BANDS;
   }
+  c->peak_hold = o["peak_hold"] | false; c->peak_hold_s = gauge_resolve_peak_s(o["peak_hold_s"] | GAUGE_PEAK_HOLD_S_DEFAULT);
   c->dial_x = gauge_resolve_text_xy(o["dial_x"] | 0); c->dial_y = gauge_resolve_text_xy(o["dial_y"] | 0);
   c->needle_w = gauge_resolve_needle_w(o["needle_w"] | GAUGE_NEEDLE_W_DEFAULT);
   c->text_xy = o["text_xy"] | false;

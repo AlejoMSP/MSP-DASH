@@ -2163,3 +2163,10 @@ signal has no data; off = the needle rests at its minimum. Both saved in NVS (`d
 sweep, demo, FPS overlay, screen diameter, static IP / DHCP, ESP-NOW role. Each section calls the existing endpoint
 (`/name`, `/display`, `/perf`, `/diameter`, `/net`, `/role`); settings that reboot ask first. `/status.json` adds `net`
 (saved ip/gw/mask when static) and `perf_overlay`. The page is in the compiler page check (dump_pages.cpp).
+
+## Peak hold (build 139)
+
+Needle / half-moon cells: `peak_hold` (default off) and `peak_hold_s` (1-10, default 3). A shadow needle (the needle colour
+mixed with the background, drawn under the live needle) rises with the reading, holds the highest value for the set time,
+then drops back to the live reading. It follows the gauge's refresh rate. Editor: "Peak hold" checkbox and seconds.
+Test: `test_dial_text peakhold`.

@@ -58,7 +58,7 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
       c.low_crit_on = (j % 2) == 0; c.low_crit = 10 + i; c.low_warn_on = (i % 2) == 0; c.low_warn = 30 + j; c.high_warn_on = (i + j) % 2 == 1; c.high_warn = 150 + i; c.high_crit_on = (i + j) % 3 == 0; c.high_crit = 200 + j; c.zone_style = 1 + (i + j) % 3;
       c.needle_hub_pct = 5 + j; c.needle_tip_pct = 3 + i;
-      c.dial_x = -7 + j; c.dial_y = 9 + i; c.needle_w = 2 + j; c.text_xy = (i + j) % 2; c.cap_x = -100 - j; c.cap_y = 120 + i; c.val_x = 33; c.val_y = -44;
+      c.dial_x = -7 + j; c.dial_y = 9 + i; c.peak_hold = (i + j) % 2 == 0; c.peak_hold_s = 1 + (i + j) % 10; c.needle_w = 2 + j; c.text_xy = (i + j) % 2; c.cap_x = -100 - j; c.cap_y = 120 + i; c.val_x = 33; c.val_y = -44;
       c.caption_font_size = GAUGE_CAPTION_SIZES[(i + j) % GAUGE_CAPTION_SIZE_COUNT]; c.caption_on_face = (i + j) % 2 == 0; snprintf(c.units, GAUGE_UNITS_MAXLEN, "u%d%d", i, j); c.v_align = (i + j) % 3;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;

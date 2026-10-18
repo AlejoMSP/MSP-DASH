@@ -61,6 +61,10 @@ static inline int32_t gauge_snap_caption_size(int32_t v) {
 #define GAUGE_VALIGN_BOTTOM 2
 static inline int32_t gauge_resolve_valign(int32_t v) { return (v == GAUGE_VALIGN_TOP || v == GAUGE_VALIGN_BOTTOM) ? v : GAUGE_VALIGN_CENTER; }
 
+// ---- peak hold (shadow needle) ----
+#define GAUGE_PEAK_HOLD_S_DEFAULT 3
+static inline int32_t gauge_resolve_peak_s(int32_t v) { return (v >= 1 && v <= 10) ? v : GAUGE_PEAK_HOLD_S_DEFAULT; }
+
 // ---- needle thickness, and text placed by coordinates ----
 #define GAUGE_NEEDLE_W_DEFAULT 6
 static inline int32_t gauge_resolve_needle_w(int32_t v) { return (v >= 1 && v <= 20) ? v : GAUGE_NEEDLE_W_DEFAULT; }

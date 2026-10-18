@@ -484,7 +484,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, dial_x:0, dial_y:0, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, dial_x:0, dial_y:0, peak_hold:false, peak_hold_s:3, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -593,6 +593,8 @@ R"rawliteral(
             <div><label>Needle gap at center (%) <input type="number" min="0" max="60" step="1" value="${c.needle_hub_pct||0}" oninput="setTrim(${pIdx},${cIdx},'needle_hub_pct',this.value)"></label></div>
             <div><label>Needle short of tip (%) <input type="number" min="0" max="60" step="1" value="${c.needle_tip_pct||0}" oninput="setTrim(${pIdx},${cIdx},'needle_tip_pct',this.value)"></label></div>
           </div>
+          <label><input type="checkbox" ${c.peak_hold?"checked":""} onchange="setCellField(${pIdx},${cIdx},'peak_hold',this.checked)"> Peak hold: a shadow needle stays at the highest reading</label>
+          ${c.peak_hold ? `<label>Hold for (seconds, 1 to 10) <input type="number" min="1" max="10" value="${c.peak_hold_s||3}" onchange="setCellField(${pIdx},${cIdx},'peak_hold_s',Math.min(10,Math.max(1,parseInt(this.value)||3)))"></label>` : ""}
           <label>Needle thickness (px) <input type="number" min="1" max="20" step="1" value="${c.needle_w||6}" onchange="setCellField(${pIdx},${cIdx},'needle_w',Math.min(20,Math.max(1,parseInt(this.value)||6)))"></label>
           <p class="hint">Needle length trim, as a percent of the dial's radius. 0 and 0 is the normal needle. Both ends together can trim at most 85.</p>
           ` : ""}
