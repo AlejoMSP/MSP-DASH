@@ -24,3 +24,6 @@ tests/host/package-lock.json
 
 # raw framebuffer dumps written by the host pixel tests
 *.rgb
+esp32-input/can_parsing.h
+esp32-input/can_flags.h
+esp32-input/gauge_config.h

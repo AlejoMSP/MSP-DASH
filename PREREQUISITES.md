@@ -142,7 +142,10 @@ network as the screens. First flash over USB, then over WiFi:
 
 ```powershell
 cls
+copy C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_parsing.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_flags.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\gauge_config.h C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input\
 arduino-cli compile --clean --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio --build-path C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
 arduino-cli upload -p COM6 --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio --input-dir C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
 curl.exe -s -H "Expect:" -F "firmware=@C:\esp32build-input\esp32-input.ino.bin" http://192.168.55.204/update
 ```
+
+The input board is also the hub: it reads CAN (SN65HVD230 on GPIO 21 TX, 22 RX) and sends the data to every screen, so all three screens are set to role remote. The copy line brings in the screens' CAN decoder, so there is one copy in the repo.

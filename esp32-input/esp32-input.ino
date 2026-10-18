@@ -18,8 +18,11 @@
 #include "wifi_config.h"
 #include "input_btn.h"
 #include <Preferences.h>
+#include "driver/twai.h"
+#include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
+#include "gauge_app.h"
 
-#define INPUT_BUILD 3
+#define INPUT_BUILD 4
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -28,7 +31,9 @@
 #define POT_PIN  34
 #define LIGHTS_PIN 35   // car's lights-on wire (12 V when the lights are on), through a 47k / 10k divider
 #define DIMMER_PIN 32   // dash dimmer output, through a 47k / 10k divider (+ 10 uF if it's PWM)
-#define DIVIDER (57.0f / 10.0f)   // (47k + 10k) / 10k: 14.4 V in -> 2.53 V at the pin
+#define DIVIDER (57.0f / 10.0f)
+#define CAN_TX_PIN GPIO_NUM_21   // SN65HVD230: CTX / D
+#define CAN_RX_PIN GPIO_NUM_22   // SN65HVD230: CRX / R   // (47k + 10k) / 10k: 14.4 V in -> 2.53 V at the pin
 
 // ---- network: this board's fixed address ----
 static const IPAddress MY_IP(192, 168, 55, 204), MY_GW(192, 168, 55, 1), MY_MASK(255, 255, 255, 0);
@@ -41,6 +46,30 @@ typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t c
 
 static const uint8_t BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static uint16_t s_seq = 0;
+static volatile uint32_t s_dataSent = 0;   // data packets sent to the screens
+
+// ---- the hub: CAN values (written by the decoder from can_parsing.h) and the data packet the screens read ----
+volatile float g_rpm, g_clt_f, g_boost_kpa, g_afr, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f;
+volatile bool g_rpm_has_data, g_clt_has_data, g_boost_has_data, g_afr_has_data, g_oilp_has_data, g_oilt_has_data,
+              g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data;
+volatile uint16_t g_flag_bits, g_flag_seen;
+static volatile uint32_t s_seenMs[SIG_COUNT];
+#define STALE_MS 2000   // same as the screens: a signal not heard for 2 s shows "--"
+
+extern "C" void gauge_config_mark_signal_active(SignalId sig) { if (sig > 0 && sig < SIG_COUNT) s_seenMs[sig] = millis() | 1; }
+extern "C" bool gauge_config_signal_has_data(SignalId sig) {
+  return sig > 0 && sig < SIG_COUNT && s_seenMs[sig] && millis() - s_seenMs[sig] < STALE_MS;
+}
+extern "C" float gauge_config_signal_value(SignalId sig) {
+  switch (sig) {
+    case SIG_RPM: return g_rpm;       case SIG_CLT: return g_clt_f;     case SIG_MAP: return g_boost_kpa;
+    case SIG_AFR: return g_afr;       case SIG_OILP: return g_oilp_kpa; case SIG_OILT: return g_oilt_f;
+    case SIG_FUELP: return g_fuelp_kpa; case SIG_FLEX: return g_flex_pct; case SIG_TPS: return g_tps;
+    case SIG_BATTV: return g_battv;   case SIG_EGT: return g_egt_f;     case SIG_IAT: return g_iat_f;
+    default: return gauge_signal_is_flag(sig) ? (((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f) : 0.0f;
+  }
+}
+
 static WebServer server(80);
 static char s_last[48] = "none yet";
 static int s_briPct = -1;
@@ -135,7 +164,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -143,11 +172,12 @@ poll();setInterval(poll,1000);
 </script></body></html>)HTML");
   });
   server.on("/state", HTTP_GET, []() {
-    char b[420];
+    auto liveCount = []() { int n = 0; for (int i = 1; i < SIG_COUNT; i++) if (gauge_config_signal_has_data((SignalId)i)) n++; return n; };
+    char b[520];
     snprintf(b, sizeof(b), "{\"lightsV\":%.2f,\"lightsOn\":%s,\"dimV\":%.2f,\"bri\":%d,\"build\":%d,\"ip\":\"%s\",\"ch\":%d,\"last\":\"%s\","
-             "\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
+             "\"live\":%d,\"sent\":%u,\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
              s_lightsV, s_lightsV >= s_cfg.lightsOnV ? "true" : "false", s_dimV, s_briPct, INPUT_BUILD, WiFi.localIP().toString().c_str(),
-             WiFi.channel(), s_last, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
+             WiFi.channel(), s_last, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
     server.send(200, "application/json", b);
   });
   server.on("/save", HTTP_GET, []() {
@@ -173,6 +203,25 @@ poll();setInterval(poll,1000);
     else if (u.status == UPLOAD_FILE_END) Update.end(true);
   });
   server.begin();
+}
+
+#include "can_parsing.h"   // copied in at compile time; uses the values and functions above
+
+// Same packet as the screens' espnow_link.cpp ("MSD1"): every signal plus a has-data mask, 20 times a second
+#define PKT_MAGIC 0x4D534431u
+typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint16_t count; uint32_t has_mask; float v[SIG_COUNT]; } LinkPacket;
+static void dataTask(void *) {
+  uint16_t seq = 0;
+  for (;;) {
+    LinkPacket p; p.magic = PKT_MAGIC; p.seq = seq++; p.count = SIG_COUNT; p.has_mask = 0;
+    for (int i = 0; i < SIG_COUNT; i++) {
+      bool has = i != SIG_NONE && gauge_config_signal_has_data((SignalId)i);
+      p.v[i] = has ? gauge_config_signal_value((SignalId)i) : 0.0f;
+      if (has) p.has_mask |= 1u << i;
+    }
+    if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_dataSent++;
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
 void setup() {
@@ -211,6 +260,15 @@ void setup() {
   memcpy(peer.peer_addr, BCAST, 6);
   peer.channel = 0; peer.ifidx = WIFI_IF_STA; peer.encrypt = false;
   esp_now_add_peer(&peer);
+
+  // CAN: the hub is now the only CAN reader; the screens are all remotes
+  twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+  g.rx_queue_len = 64;
+  twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();
+  twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+  if (twai_driver_install(&g, &t, &f) != ESP_OK || twai_start() != ESP_OK) Serial.println("CAN start FAILED");
+  else { can_start_task(); Serial.println("CAN running on GPIO 21 (TX) / 22 (RX)"); }
+  xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();
 }
