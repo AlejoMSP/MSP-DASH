@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 6
+#define INPUT_BUILD 7
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -126,6 +126,51 @@ static int wantedPct() {
 }
 
 // every 50 ms: smooth the inputs; send when the result moves 2 % or more, and every 2 s so a screen that reboots catches up
+// ---- EGT: MAX6675 + K-type thermocouple, read by hand (bit-banged SPI) ----
+// Wiring: SCK GPIO18, SO GPIO19, CS GPIO23, VCC 3V3. The chip needs ~220 ms per reading, so read every 250 ms.
+// Each good reading goes on the CAN bus as ID 0x7F0 (CAN_ID_EGT_PLACEHOLDER in can_parsing.h) for rusEFI:
+//   bytes 0-1 = EGT deg C, unsigned little endian; byte 2 = 1 if the thermocouple is open (not connected).
+#define EGT_SCK 18
+#define EGT_SO  19
+#define EGT_CS  23
+#define EGT_PERIOD_MS 250
+static volatile float s_egtC = 0; static volatile bool s_egtOpen = true; static volatile uint32_t s_egtSent = 0;
+static uint16_t max6675Read() {
+  uint16_t v = 0;
+  digitalWrite(EGT_CS, LOW); delayMicroseconds(2);
+  for (int i = 15; i >= 0; i--) {
+    digitalWrite(EGT_SCK, HIGH); delayMicroseconds(1);
+    if (digitalRead(EGT_SO)) v |= 1u << i;
+    digitalWrite(EGT_SCK, LOW); delayMicroseconds(1);
+  }
+  digitalWrite(EGT_CS, HIGH);
+  return v;
+}
+static void egtTask(void *) {
+  pinMode(EGT_CS, OUTPUT); digitalWrite(EGT_CS, HIGH);
+  pinMode(EGT_SCK, OUTPUT); digitalWrite(EGT_SCK, LOW);
+  pinMode(EGT_SO, INPUT);
+  vTaskDelay(pdMS_TO_TICKS(500));                   // first conversion after power-up
+  for (;;) {
+    uint16_t raw = max6675Read();
+    bool open = (raw & 0x0004) || raw == 0xFFFF;    // bit 2 = no thermocouple; all ones = chip missing
+    float c = (raw >> 3) * 0.25f;
+    s_egtOpen = open;
+    twai_message_t m = {};
+    m.identifier = CAN_ID_EGT_PLACEHOLDER; m.data_length_code = 3;
+    uint16_t ci = open ? 0 : (uint16_t)lroundf(c);
+    m.data[0] = ci & 0xFF; m.data[1] = ci >> 8; m.data[2] = open ? 1 : 0;
+    if (!open) {
+      s_egtC = c;
+      g_egt_f = c * 9.0f / 5.0f + 32.0f;            // the hub does not hear its own frame, so set the value here too
+      g_egt_has_data = true;
+      gauge_config_mark_signal_active(SIG_EGT);
+    }
+    if (twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
+    vTaskDelay(pdMS_TO_TICKS(EGT_PERIOD_MS));
+  }
+}
+
 static void readKnob() {
   int raw = analogRead(POT_PIN);
   s_potAvg = s_potAvg < 0 ? raw : s_potAvg * 0.85f + raw * 0.15f;
@@ -162,7 +207,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a>";
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a><br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -199,12 +244,13 @@ poll();setInterval(poll,1000);
       "setInterval(u,500);u();</script>"));
   });
   server.on("/state", HTTP_GET, []() {
+    char egtTxt[24]; if (s_egtOpen) strcpy(egtTxt, "open / not connected"); else snprintf(egtTxt, sizeof egtTxt, "%.0f C / %.0f F", s_egtC, s_egtC * 1.8f + 32);
     auto liveCount = []() { int n = 0; for (int i = 1; i < SIG_COUNT; i++) if (gauge_config_signal_has_data((SignalId)i)) n++; return n; };
-    char b[520];
+    char b[620];
     snprintf(b, sizeof(b), "{\"lightsV\":%.2f,\"lightsOn\":%s,\"dimV\":%.2f,\"bri\":%d,\"build\":%d,\"ip\":\"%s\",\"ch\":%d,\"last\":\"%s\","
-             "\"live\":%d,\"sent\":%u,\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
+             "\"egt\":\"%s\",\"egtsent\":%u,\"live\":%d,\"sent\":%u,\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
              s_lightsV, s_lightsV >= s_cfg.lightsOnV ? "true" : "false", s_dimV, s_briPct, INPUT_BUILD, WiFi.localIP().toString().c_str(),
-             WiFi.channel(), s_last, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
+             WiFi.channel(), s_last, egtTxt, (unsigned)s_egtSent, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
     server.send(200, "application/json", b);
   });
   server.on("/save", HTTP_GET, []() {
@@ -293,6 +339,7 @@ void setup() {
   twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
   if (twai_driver_install(&g, &t, &f) != ESP_OK || twai_start() != ESP_OK) Serial.println("CAN start FAILED");
   else { can_start_task(); Serial.println("CAN running on GPIO 21 (TX) / 22 (RX)"); }
+  xTaskCreatePinnedToCore(egtTask, "egt", 3072, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();

@@ -42,7 +42,7 @@
 #define RUSEFI_BASE3 0x203
 #define RUSEFI_BASE4 0x204
 #define RUSEFI_BASE7 0x207
-// PLACEHOLDER: no real CAN ID yet. Change this once the EGT source is known. Assumed: bytes 0-1, unsigned LE, deg C.
+// EGT frame sent by the hub (esp32-input, MAX6675): bytes 0-1 unsigned LE deg C, byte 2 = 1 if thermocouple open.
 #define CAN_ID_EGT_PLACEHOLDER 0x7F0
 
 // ---- MegaSquirt / LinkECU shared CAN IDs (base 1520 decimal / 0x5F0) ----
