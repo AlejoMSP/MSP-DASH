@@ -523,8 +523,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   lv_obj_set_pos(container, rect.x, rect.y);
   lv_obj_set_size(container, rect.w, rect.h);
   lv_obj_set_style_bg_color(container, lv_color_hex(cfg->bg_color), 0);
-  lv_obj_set_style_border_width(container, 1, 0);
-  lv_obj_set_style_border_color(container, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_border_width(container, 0, 0);   // no cell outline: it showed as a grey line between stacked gauges
   lv_obj_set_style_radius(container, 0, 0);
   lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
   rt->container = container;
@@ -703,16 +702,23 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       float span = hi - lo > 0.05f ? hi - lo : 0.05f;
       int16_t best = meterSize;
       int16_t cand = (int16_t)fminf(rect.w - 8.0f, 2.0f * ((areaBot - areaTop) / span + meterPad));
+      // 2-Up: the two half moons must come out the same size, so a size counts only if it also fits the other half
+      // (the same spot in the cell above or below), whose glass is narrower or wider in a different place.
+      bool twoUp = rect.w > rect.h + 4 && rect.h * 2 >= rect.w - 4;
+      float other = twoUp ? ((rect.y + rect.h / 2.0f) < 233.0f ? (float)rect.h : -(float)rect.h) : 0.0f;
       for (; cand > meterSize; cand -= 2) {
         float r = cand / 2.0f - meterPad;
         float cy = (valign == GAUGE_VALIGN_TOP) ? areaTop + hi * r
                  : (valign == GAUGE_VALIGN_BOTTOM) ? areaBot + lo * r
                  : (areaTop + areaBot) / 2.0f + (hi + lo) / 2.0f * r;   // centre the arc + hub in the free area
         bool ok = true;
-        for (int32_t a = 0; a <= dialSweep && ok; a += 3) {
-          float rad = (float)(dialStart + a) * 0.01745329f, R = cand / 2.0f;
-          float x = cellCx + sinf(rad) * R, y = cy - cosf(rad) * R, dx = x - 233.0f, dy = y - 233.0f;
-          if (dx * dx + dy * dy > (s_glassR - 2.0f) * (s_glassR - 2.0f) || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
+        for (int k = 0; k < (twoUp ? 2 : 1) && ok; k++) {
+          float cyk = cy + (k ? other : 0.0f);
+          for (int32_t a = 0; a <= dialSweep && ok; a += 3) {
+            float rad = (float)(dialStart + a) * 0.01745329f, R = cand / 2.0f;
+            float x = cellCx + sinf(rad) * R, y = cyk - cosf(rad) * R, dx = x - 233.0f, dy = y - 233.0f;
+            if (dx * dx + dy * dy > (s_glassR - 2.0f) * (s_glassR - 2.0f) || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
+          }
         }
         if (ok) { best = cand; break; }
       }

@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy | sym2up466 | sym2up520
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
 
   int nPages = 8; LayoutType layout = LAYOUT_1CELL; int nCells = 1;
   bool numberMode = !strncmp(mode, "num", 3), needleVal = !strncmp(mode, "needleval", 9);
-  if (!strcmp(mode, "num2up")) layout = LAYOUT_2UP, nCells = 2;
+  if (!strcmp(mode, "num2up") || !strncmp(mode, "sym2up", 6)) layout = LAYOUT_2UP, nCells = 2;
   if (!strcmp(mode, "num3up")) layout = LAYOUT_3UP, nCells = 3;
   if (!strcmp(mode, "num2x2") || !strcmp(mode, "needleval4") || !strncmp(mode, "angles", 6)) layout = LAYOUT_2X2, nCells = 4;
 
@@ -96,6 +96,7 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
       else if (!strncmp(mode, "diam", 4)) mkcell(cc, (p % 2) ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, (p % 2) ? 270 : 225, (p % 2) ? 90 : 135, true);
+      else if (!strncmp(mode, "sym2up", 6)) mkcell(cc, GAUGE_TYPE_HALFMOON, 48, 28, 270, 90, (p % 2) == 0);
       else if (!strcmp(mode, "textxy")) { mkcell(cc, p == 1 ? GAUGE_TYPE_NUMBER : GAUGE_TYPE_NEEDLE, 48, 28, 225, 135, true);
         cc->text_xy = true; cc->cap_x = -40; cc->cap_y = 90; cc->val_x = 30; cc->val_y = -20; cc->needle_w = 11;
         strcpy(cc->units, "F"); cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 250; cc->warning_threshold = 1e9f; }
@@ -107,6 +108,7 @@ int main(int argc, char **argv) {
     }
   }
   if (!strncmp(mode, "diam", 4)) gauge_app_set_diameter(atoi(mode + 4));
+  if (!strncmp(mode, "sym2up", 6)) gauge_app_set_diameter(atoi(mode + 6));
   build_gauge_app();
   index_pages();
   CHECK(s_nPage == nPages, "all pages built");
@@ -267,6 +269,20 @@ int main(int argc, char **argv) {
         snprintf(m, sizeof(m), "page %d: label '%s' inside the %d px circle", p, lv_label_get_text(k), d);
         CHECK(inside_circle(&a, R), m);
       }
+    }
+  }
+
+  if (!strncmp(mode, "sym2up", 6)) {
+    printf("%s: two stacked half moons come out the same size and sit the same in their cells; no cell outline\n", mode);
+    for (int p = 0; p < s_nPage; p++) {
+      lv_obj_update_layout(s_pageScr[p]);
+      lv_area_t m0, m1, b0, b1;
+      lv_obj_t *c0 = lv_obj_get_child(s_pageScr[p], 0), *c1 = lv_obj_get_child(s_pageScr[p], 1);
+      lv_obj_get_coords(meter_in(c0), &m0); lv_obj_get_coords(meter_in(c1), &m1); lv_obj_get_coords(c0, &b0); lv_obj_get_coords(c1, &b1);
+      char m[160];
+      snprintf(m, sizeof(m), "page %d: same size (%d vs %d)", p, m0.x2 - m0.x1, m1.x2 - m1.x1); CHECK(m0.x2 - m0.x1 == m1.x2 - m1.x1, m);
+      snprintf(m, sizeof(m), "page %d: same spot in the cell (%d vs %d)", p, m0.y1 - b0.y1, m1.y1 - b1.y1); CHECK(abs((m0.y1 - b0.y1) - (m1.y1 - b1.y1)) <= 1, m);
+      CHECK(lv_obj_get_style_border_width(c0, LV_PART_MAIN) == 0 && lv_obj_get_style_border_width(c1, LV_PART_MAIN) == 0, "no grey outline between the cells");
     }
   }
 

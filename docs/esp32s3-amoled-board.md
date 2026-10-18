@@ -2129,3 +2129,10 @@ Build 131: Apply to ALL has two buttons, "Apply colors to All" and "Apply needle
 
 Build 132: Apply to ALL also has "Caption text size" (Normal, 14-48; starts at 28) with its own button.
 Build 133: the caption-size choices are written into the page (the load listener in 132 broke the host editor tests).
+
+## Stacked half moons match, no cell outline (build 134)
+
+2-Up half moons: a growth size counts only if it also fits the other half (same spot in the cell above or below), so both
+come out the same size and sit the same in their cells (before: 308 vs 364 px at diameter 520). Cells no longer draw a
+1 px grey (0x333333) outline, which showed as a horizontal line between stacked gauges. Test: `test_dial_text sym2up466 |
+sym2up520` (fails on build 133).
