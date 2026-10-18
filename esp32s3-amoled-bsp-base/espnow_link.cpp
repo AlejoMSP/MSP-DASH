@@ -11,7 +11,6 @@
 #include "build_info.h"
 #include "lcd_perf.h"
 
-#define PKT_MAGIC 0x4D534431u   // "MSD1"
 #define HELLO_MAGIC 0x4D534831u // "MSH1"
 #define HELLO_MS 2000
 
@@ -21,13 +20,6 @@ typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[ESPNOW_N
 static BoardSlot s_boards[ESPNOW_MAX_BOARDS];
 static uint32_t s_lastHelloMs = 0;
 
-typedef struct __attribute__((packed)) {
-  uint32_t magic;
-  uint16_t seq;
-  uint16_t count;          // SIG_COUNT of the sender; a remote only reads what both builds know
-  uint32_t has_mask;       // bit s = signal s has data
-  float v[SIG_COUNT];
-} LinkPacket;
 
 static bool s_remote = false;
 static bool s_up = false;

@@ -21,9 +21,10 @@
 #include "driver/twai.h"
 #include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
 #include "gauge_app.h"
+#include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 5
+#define INPUT_BUILD 6
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -40,10 +41,6 @@
 static const IPAddress MY_IP(192, 168, 55, 204), MY_GW(192, 168, 55, 1), MY_MASK(255, 255, 255, 0);
 #define CAR_CHANNEL 1   // the screens park here when the home network isn't there; must match ESPNOW_CAR_CHANNEL
 
-// ---- the command packet: must match LinkCmdPacket in the screens' espnow_link.h ----
-#define LINK_CMD_MAGIC 0x4D534331u   // "MSC1"
-enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3 };
-typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
 
 static const uint8_t BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static uint16_t s_seq = 0;
@@ -238,8 +235,6 @@ poll();setInterval(poll,1000);
 #include "can_parsing.h"   // copied in at compile time; uses the values and functions above
 
 // Same packet as the screens' espnow_link.cpp ("MSD1"): every signal plus a has-data mask, 20 times a second
-#define PKT_MAGIC 0x4D534431u
-typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint16_t count; uint32_t has_mask; float v[SIG_COUNT]; } LinkPacket;
 static void dataTask(void *) {
   uint16_t seq = 0;
   for (;;) {

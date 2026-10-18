@@ -181,3 +181,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 147 | 2026-10-18 | 68b8a0a | Hub build 5: include the CAN tracker before the web pages use it |
 | 148 | 2026-10-18 | (this commit) | Docs: CODE_GUIDE.md and TIMELINE.md |
 | 149 | 2026-10-18 | (this commit) | Removed the old WROOM + Nextion firmware (esp32-main); still in git history |
+| 150 | 2026-10-18 | (this commit) | Shared link_packets.h for screens and hub, 32-signal compile check, PREREQUISITES cleanup |

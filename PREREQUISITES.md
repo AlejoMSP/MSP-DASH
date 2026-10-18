@@ -1,7 +1,7 @@
 # Prerequisites
 
 Setup steps for a new Windows machine to build/flash firmware in this
-repo. Both boards (esp32-main WROOM, esp32s3-amoled-bsp-base) use
+repo. Both firmwares (esp32s3-amoled-bsp-base screens, esp32-input hub) use
 arduino-cli.
 
 ## One-time environment setup
@@ -114,12 +114,6 @@ The same settings over WiFi: `/net?ip=&gw=&mask=`, `/net?dhcp=1`, `/role?set=rem
 (this once looked like an OTA firmware bug). `CDCOnBoot=cdc` puts Serial on the USB port. The partition scheme is
 explained below.
 
-The WROOM board (esp32-main) uses the plain default profile:
-```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32 esp32-main
-arduino-cli upload -p COMx --fqbn esp32:esp32:esp32 esp32-main
-```
-
 ## IMPORTANT: partition scheme required
 
 This board's default partition scheme is sized for 4MB flash chips,
@@ -142,7 +136,7 @@ network as the screens. First flash over USB, then over WiFi:
 
 ```powershell
 cls
-copy C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_parsing.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_flags.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\gauge_config.h C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input\
+copy C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_parsing.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_flags.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\gauge_config.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\link_packets.h C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input\
 arduino-cli compile --clean --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio --build-path C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
 arduino-cli upload -p COM6 --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio --input-dir C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
 curl.exe -s -H "Expect:" -F "firmware=@C:\esp32build-input\esp32-input.ino.bin" http://192.168.55.204/update
