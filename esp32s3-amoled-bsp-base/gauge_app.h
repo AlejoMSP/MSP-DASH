@@ -18,6 +18,9 @@ void build_gauge_app(void);
 #define GAUGE_DIAMETER_MIN 300
 #define GAUGE_DIAMETER_MAX 560
 void gauge_app_set_diameter(int d);
+// Startup sweep: every needle sweeps min -> max -> min once at boot (about 1.6 s), on every page.
+// Demo: while a signal has no data its needle sweeps back and forth; off = it rests at its minimum.
+void gauge_app_set_options(bool startupSweep, bool demo);
 
 // The actual number of active pages - the .ino's BOOT button handler
 // uses this instead of a hardcoded count, since the page count is now

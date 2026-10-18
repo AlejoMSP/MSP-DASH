@@ -1585,11 +1585,20 @@ void web_monitor_init(void) {
       Serial.printf("Static IP %s (gateway %s)\n", ip.toString().c_str(), gw.toString().c_str());
     }
   }
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Quick look for the home network first (about 1.5 s). Not in range (in the car): skip the join entirely, so ESP-NOW
+  // starts right away instead of after a 20 s wait. In range: join as before.
+  bool homeSeen = false;
+  {
+    int n = WiFi.scanNetworks(false, false, false, 100);
+    for (int i = 0; i < n && !homeSeen; i++) if (WiFi.SSID(i) == WIFI_SSID) homeSeen = true;
+    WiFi.scanDelete();
+    Serial.printf("WiFi scan: %d networks, \"%s\" %s\n", n, WIFI_SSID, homeSeen ? "found" : "not found - skipping WiFi");
+  }
+  if (homeSeen) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to WiFi network \"%s\"", WIFI_SSID);
 
   unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 20000) {
+  while (homeSeen && WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
     delay(500);
     Serial.print(".");
   }
@@ -1677,6 +1686,16 @@ void web_monitor_init(void) {
     s_rebootAtMs = millis() + 800;
   });
 
+  // Startup sweep and demo sweep: /display?sweep=1|0 and/or &demo=1|0. Saved; demo applies at once, sweep at next boot.
+  server.on("/display", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Preferences dp; dp.begin("disp", false);
+    if (request->hasParam("sweep")) dp.putBool("sweep", request->getParam("sweep")->value() == "1");
+    if (request->hasParam("demo")) dp.putBool("demo", request->getParam("demo")->value() == "1");
+    bool sw = dp.getBool("sweep", true), de = dp.getBool("demo", true); dp.end();
+    gauge_app_set_options(sw, de);
+    request->send(200, "text/plain", String("Startup sweep ") + (sw ? "ON" : "OFF") + ", demo " + (de ? "ON" : "OFF"));
+  });
+
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
@@ -1696,7 +1715,8 @@ void web_monitor_init(void) {
     doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["wifi_rssi"] = WiFi.RSSI();
     doc["ws_clients"] = ws.count();
-    { Preferences dp; dp.begin("disp", true); doc["diameter"] = dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT); dp.end(); }
+    { Preferences dp; dp.begin("disp", true); doc["diameter"] = dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT);
+      doc["startup_sweep"] = dp.getBool("sweep", true); doc["demo"] = dp.getBool("demo", true); dp.end(); }
     doc["fps"] = lcd_perf_fps();
     doc["lvgl_busy"] = lcd_perf_busy_pct();
     JsonObject link = doc["link"].to<JsonObject>();
@@ -2139,13 +2159,20 @@ void web_monitor_loop(void) {
         if (d < GAUGE_DIAMETER_MIN || d > GAUGE_DIAMETER_MAX) Serial.println("usage: diameter 466 (300 to 560)");
         else { Preferences dp; dp.begin("disp", false); dp.putInt("diam", d); dp.end(); Serial.printf("OK: diameter %d, rebooting\n", d); delay(100); ESP.restart(); }
       }
+      else if (!strcmp(cmd, "sweep") || !strcmp(cmd, "demo")) {
+        bool on = !strcmp(a, "on");
+        Preferences dp; dp.begin("disp", false); dp.putBool(cmd, on);
+        bool sw = dp.getBool("sweep", true), de = dp.getBool("demo", true); dp.end();
+        gauge_app_set_options(sw, de);
+        Serial.printf("OK: startup sweep %s, demo %s\n", sw ? "on" : "off", de ? "on" : "off");
+      }
       else if (!strcmp(cmd, "info")) {
         IPAddress i, g, m, x; bool st = netLoad(i, g, m, x);
         char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
         Serial.printf("%s | build %d | role %s | IP %s (%s) | MAC %s\n", nm, FW_BUILD_NUMBER, espnow_link_is_remote() ? "remote" : "main",
                       WiFi.localIP().toString().c_str(), st ? "static" : "DHCP", WiFi.macAddress().c_str());
       }
-      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text> | perf on|off | diameter <px>");
+      else Serial.println("commands: info | ip <ip> <gw> <mask> [dns] | dhcp | role main|remote | name <text> | perf on|off | diameter <px> | sweep on|off | demo on|off");
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 

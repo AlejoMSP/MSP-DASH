@@ -998,7 +998,13 @@ static void gesture_event_cb(lv_event_t *e) {
 }
 #endif
 
+static bool s_startupSweep = false, s_demo = true;   // the board turns the sweep on from its saved setting (default on); host tests start without it
+static uint32_t s_sweepStartMs = 0;   // first update tick; 0 = not started yet
+#define STARTUP_SWEEP_MS 1600
+void gauge_app_set_options(bool startupSweep, bool demo) { s_startupSweep = startupSweep; s_demo = demo; }
+
 static int32_t clamped_or_sweep(CellRuntime *c, float value, bool has_data) {
+  if (!has_data && !s_demo) return c->min_val;   // demo off: rest at the bottom of the scale
   if (has_data) {
     int32_t v = (int32_t)value;
     if (v < c->min_val) v = c->min_val;
@@ -1130,6 +1136,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
 
   if (s_flash_counter % 5 == 0) update_alert_overlay(now); // every ~100ms
 
+  if (s_sweepStartMs == 0) s_sweepStartMs = now ? now : 1;
   for (int p = 0; p < s_num_active_pages; p++) {
     if (pages[p].numLamps > 0) update_indicator_page(&pages[p]);
     for (int i = 0; i < pages[p].numCells; i++) {
@@ -1143,6 +1150,14 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
         bool hidden = lv_obj_has_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
         if (has_data && !hidden) lv_obj_add_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
         else if (!has_data && hidden) lv_obj_clear_flag(c->noDataLabel, LV_OBJ_FLAG_HIDDEN);
+      }
+
+      // Startup sweep: every needle on every page, min -> max -> min together, then normal
+      if (s_startupSweep && c->meter && (uint32_t)(now - s_sweepStartMs) < STARTUP_SWEEP_MS) {
+        uint32_t t = now - s_sweepStartMs, half = STARTUP_SWEEP_MS / 2;
+        float f = t < half ? (float)t / half : (float)(STARTUP_SWEEP_MS - t) / half;
+        lv_meter_set_indicator_value(c->meter, c->needle, c->min_val + (int32_t)lroundf(f * (c->max_val - c->min_val)));
+        continue;
       }
 
       bool shouldUpdate = !has_data || (now - c->last_update_ms >= c->refresh_interval_ms);

@@ -2147,3 +2147,12 @@ reserves space). Test: `test_dial_text mirror2up520`.
 Needle and half-moon cells: `dial_x`, `dial_y` (px, +x right, +y down, -300..300) nudge the dial from its automatic spot,
 applied last; nothing re-checks the glass. For a dial cut off at the top with diameter > 466 (cells start above the real
 panel edge). Editor: "Move dial X / Y" under "Gauge position in the cell". Test: `test_dial_text mirror2up520` page 7.
+
+## Faster boot in the car, startup sweep, demo on/off (build 137)
+
+Boot: a quick WiFi scan (about 1.5 s) looks for the home network first; not seen (in the car) = no join attempt, so
+ESP-NOW starts right away (was a 20 s wait). Seen = join, now with a 15 s limit. Startup sweep: every needle on every
+page sweeps min -> max -> min together once at boot (1.6 s), then shows data. Demo: the back-and-forth sweep while a
+signal has no data; off = the needle rests at its minimum. Both saved in NVS (`disp`/`sweep`, `disp`/`demo`, default on):
+`/display?sweep=0|1&demo=0|1` or serial `sweep on|off`, `demo on|off`; demo applies at once, sweep at the next boot.
+`/status.json`: `startup_sweep`, `demo`. Host tests start with the sweep off. Tests: `test_dial_text startsweep | demooff`.

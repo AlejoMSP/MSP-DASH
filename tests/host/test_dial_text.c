@@ -1,7 +1,7 @@
 /*
   Headless test for the readout text sizes, the dial-number size and the dial angles in gauge_app.c:
   the REAL file against LVGL 8.4. Each run builds ONE scenario (up to 8 pages x 4 cells) and checks it:
-      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy | sym2up466 | sym2up520 | mirror2up520
+      ./test_dial_text num1 | num2up | num3up | num2x2 | needleval | needleval4 | ticks | angles | angleshalf | nan | decimals | halign | diam400 | diam520 | textxy | sym2up466 | sym2up520 | mirror2up520 | startsweep | demooff
 */
 #include "lvgl.h"
 #include "gauge_config.h"
@@ -96,6 +96,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "angleshalf")) mkcell(cc, GAUGE_TYPE_HALFMOON, 28, 28, ANGLES[(p * 4 + c) % 16][0], ANGLES[(p * 4 + c) % 16][1], false);
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
       else if (!strncmp(mode, "diam", 4)) mkcell(cc, (p % 2) ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, (p % 2) ? 270 : 225, (p % 2) ? 90 : 135, true);
+      else if (!strcmp(mode, "startsweep") || !strcmp(mode, "demooff")) { mkcell(cc, GAUGE_TYPE_NEEDLE, 48, 28, 225, 135, true);
+        cc->signal = SIG_AFR; cc->min_val = 0; cc->max_val = 200; cc->warning_threshold = 1e9f; }
       else if (!strncmp(mode, "mirror2up", 9)) { mkcell(cc, GAUGE_TYPE_HALFMOON, 48, 28, c == 0 ? 90 : 270, c == 0 ? 270 : 90, false);
         if (p >= 4) { cc->text_xy = true; cc->cap_y = c == 0 ? -60 : 60; }
         if (p == 7 && c == 0) cc->dial_y = 25; }   // page 7: the top dial nudged 25 px down   // pages 4+: text by coordinates frees the bottom
@@ -111,6 +113,8 @@ int main(int argc, char **argv) {
     }
   }
   if (!strncmp(mode, "diam", 4)) gauge_app_set_diameter(atoi(mode + 4));
+  if (!strcmp(mode, "startsweep")) gauge_app_set_options(true, true);
+  if (!strcmp(mode, "demooff")) gauge_app_set_options(false, false);
   if (!strncmp(mode, "sym2up", 6)) gauge_app_set_diameter(atoi(mode + 6));
   if (!strncmp(mode, "mirror2up", 9)) gauge_app_set_diameter(atoi(mode + 9));
   build_gauge_app();
@@ -273,6 +277,30 @@ int main(int argc, char **argv) {
         snprintf(m, sizeof(m), "page %d: label '%s' inside the %d px circle", p, lv_label_get_text(k), d);
         CHECK(inside_circle(&a, R), m);
       }
+    }
+  }
+
+  if (!strcmp(mode, "startsweep") || !strcmp(mode, "demooff")) {
+    // the needle's value on every page
+    #define NEEDLE_VAL(pg) ({ lv_meter_indicator_t *ind_, *got_ = NULL; lv_obj_t *mt_ = meter_in(lv_obj_get_child(s_pageScr[pg], 0)); \
+      _LV_LL_READ(&((lv_meter_t *)mt_)->indicator_ll, ind_) if (ind_->type == LV_METER_INDICATOR_TYPE_NEEDLE_LINE) got_ = ind_; got_ ? got_->end_value : -1; })
+    char m[160];
+    if (!strcmp(mode, "startsweep")) {
+      printf("startsweep: every needle on every page sweeps min -> max -> min once at boot, then shows the data\n");
+      s_has[SIG_AFR] = true; s_val[SIG_AFR] = 50.0f;
+      int peak[8] = {0};
+      for (int k = 0; k < 40; k++) { run_ms(40); for (int p = 0; p < s_nPage; p++) if (NEEDLE_VAL(p) > peak[p]) peak[p] = NEEDLE_VAL(p); }
+      bool allHigh = true; for (int p = 0; p < s_nPage; p++) if (peak[p] < 190) allHigh = false;
+      snprintf(m, sizeof(m), "every page's needle reaches the top during the sweep (page 0 peak: %d)", peak[0]); CHECK(allHigh, m);
+      run_ms(600);
+      bool allData = true; for (int p = 0; p < s_nPage; p++) if (NEEDLE_VAL(p) != 50) allData = false;
+      snprintf(m, sizeof(m), "after the sweep every needle shows the reading (page 0: %d)", (int)NEEDLE_VAL(0)); CHECK(allData, m);
+    } else {
+      printf("demooff: no data and demo off -> needles rest at the minimum, no sweeping\n");
+      s_has[SIG_AFR] = false;
+      bool still = true;
+      for (int k = 0; k < 10; k++) { run_ms(100); for (int p = 0; p < s_nPage; p++) if (NEEDLE_VAL(p) != 0) still = false; }
+      CHECK(still, "every needle stays at its minimum for a second");
     }
   }
 
