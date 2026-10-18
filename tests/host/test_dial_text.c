@@ -97,7 +97,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(mode, "nan")) mkcell(cc, GAUGE_TYPE_NUMBER, 96, 0, 0, 0, false);
       else if (!strncmp(mode, "diam", 4)) mkcell(cc, (p % 2) ? GAUGE_TYPE_HALFMOON : GAUGE_TYPE_NEEDLE, 48, 28, (p % 2) ? 270 : 225, (p % 2) ? 90 : 135, true);
       else if (!strncmp(mode, "mirror2up", 9)) { mkcell(cc, GAUGE_TYPE_HALFMOON, 48, 28, c == 0 ? 90 : 270, c == 0 ? 270 : 90, false);
-        if (p >= 4) { cc->text_xy = true; cc->cap_y = c == 0 ? -60 : 60; } }   // pages 4+: text by coordinates frees the bottom
+        if (p >= 4) { cc->text_xy = true; cc->cap_y = c == 0 ? -60 : 60; }
+        if (p == 7 && c == 0) cc->dial_y = 25; }   // page 7: the top dial nudged 25 px down   // pages 4+: text by coordinates frees the bottom
       else if (!strncmp(mode, "sym2up", 6)) mkcell(cc, GAUGE_TYPE_HALFMOON, 48, 28, 270, 90, (p % 2) == 0);
       else if (!strcmp(mode, "textxy")) { mkcell(cc, p == 1 ? GAUGE_TYPE_NUMBER : GAUGE_TYPE_NEEDLE, 48, 28, 225, 135, true);
         cc->text_xy = true; cc->cap_x = -40; cc->cap_y = 90; cc->val_x = 30; cc->val_y = -20; cc->needle_w = 11;
@@ -283,6 +284,8 @@ int main(int argc, char **argv) {
       lv_obj_get_coords(meter_in(lv_obj_get_child(s_pageScr[p], 0)), &m0); lv_obj_get_coords(meter_in(lv_obj_get_child(s_pageScr[p], 1)), &m1);
       char m[120]; snprintf(m, sizeof(m), "page %d: same size (%d vs %d)", p, m0.x2 - m0.x1, m1.x2 - m1.x1);
       CHECK(m0.x2 - m0.x1 == m1.x2 - m1.x1, m);
+      if (p == 7) { lv_area_t a6; lv_obj_get_coords(meter_in(lv_obj_get_child(s_pageScr[6], 0)), &a6);
+        snprintf(m, sizeof(m), "page 7: Move dial Y 25 puts the top dial 25 px lower (%d vs %d)", m0.y1, a6.y1); CHECK(m0.y1 - a6.y1 == 25, m); }
       if (p >= 4) { lv_area_t a0; lv_obj_get_coords(meter_in(lv_obj_get_child(s_pageScr[0], 0)), &a0);
         snprintf(m, sizeof(m), "page %d: text by coordinates lets them grow (%d > %d)", p, m0.x2 - m0.x1, a0.x2 - a0.x1); CHECK(m0.x2 - m0.x1 > a0.x2 - a0.x1, m); }
     }

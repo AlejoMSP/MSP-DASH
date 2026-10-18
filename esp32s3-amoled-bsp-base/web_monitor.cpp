@@ -484,7 +484,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, dial_x:0, dial_y:0, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -519,6 +519,10 @@ R"rawliteral(
           </div>
           ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
             <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
+          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<div class="row2">
+            <div><label>Move dial X (px) <input type="number" min="-300" max="300" value="${c.dial_x||0}" onchange="setCellField(${pIdx},${cIdx},'dial_x',parseInt(this.value)||0)"></label></div>
+            <div><label>Move dial Y (px) <input type="number" min="-300" max="300" value="${c.dial_y||0}" onchange="setCellField(${pIdx},${cIdx},'dial_y',parseInt(this.value)||0)"></label></div>
+          </div><p class="hint">Nudges the dial from its automatic spot: X to the right, Y down. Negative moves left / up.</p>` : ""}
           ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<label><input type="checkbox" ${c.caption_on_face ? "checked" : ""} onchange="setCellField(${pIdx},${cIdx},'caption_on_face',this.checked)"> Show the caption on the dial face (above the hub)</label>` : ""}
           <div class="row2">
             <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>

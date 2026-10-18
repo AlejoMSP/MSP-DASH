@@ -2141,3 +2141,9 @@ Build 135: the 2-Up partner is checked with its OWN dial and alignment (a bowl 9
 134 checked the partner's spot with this cell's dial, which shrank the dome). A partner that isn't a half moon no longer
 limits. With "Place text by coordinates" on, a half moon may use the whole cell height (the bottom text stack no longer
 reserves space). Test: `test_dial_text mirror2up520`.
+
+## Move dial X / Y (build 136)
+
+Needle and half-moon cells: `dial_x`, `dial_y` (px, +x right, +y down, -300..300) nudge the dial from its automatic spot,
+applied last; nothing re-checks the glass. For a dial cut off at the top with diameter > 466 (cells start above the real
+panel edge). Editor: "Move dial X / Y" under "Gauge position in the cell". Test: `test_dial_text mirror2up520` page 7.

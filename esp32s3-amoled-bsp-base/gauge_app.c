@@ -753,7 +753,8 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     } else {
       dialShift = dial_aligned_shift(valign, dialStart, dialSweep, meterSize, meterRadius, rect.y + rect.h / 2.0f, rect.y + 4.0f, stackTop - 4.0f);
     }
-    lv_obj_align(meter, LV_ALIGN_CENTER, 0, dialShift);
+    // The user's nudge comes last, on top of the automatic placement (nothing re-checks the glass: the editor shows it)
+    lv_obj_align(meter, LV_ALIGN_CENTER, (lv_coord_t)gauge_resolve_text_xy(cfg->dial_x), (lv_coord_t)(dialShift + gauge_resolve_text_xy(cfg->dial_y)));
     lv_obj_set_style_bg_color(meter, lv_color_hex(cfg->bg_color), 0);
     lv_obj_set_style_border_width(meter, 0, 0);
 
