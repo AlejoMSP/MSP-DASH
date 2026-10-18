@@ -43,6 +43,8 @@ extern volatile float g_tps;
 extern volatile float g_battv;
 extern volatile float g_egt_f;
 extern volatile float g_iat_f;
+extern volatile float g_ambt_f;
+extern volatile float g_hum_pct;
 
 // Set true the first time a real CAN frame updates each signal - until
 // then, that cell's needle sweeps back and forth within its range
@@ -60,6 +62,8 @@ extern volatile bool g_tps_has_data;
 extern volatile bool g_battv_has_data;
 extern volatile bool g_egt_has_data;
 extern volatile bool g_iat_has_data;
+extern volatile bool g_ambt_has_data;
+extern volatile bool g_hum_has_data;
 // ECU on/off status flags: one bit per signal from SIG_FIRST_FLAG up (bit 0 = SIG_REVLIM ...). Written by the CAN task and the simulator.
 extern volatile uint16_t g_flag_bits;   // 1 = on
 extern volatile uint16_t g_flag_seen;   // 1 = a frame has carried this flag at least once

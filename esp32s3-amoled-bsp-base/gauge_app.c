@@ -48,6 +48,8 @@ volatile float g_tps = 0;
 volatile float g_battv = 0;
 volatile float g_egt_f = 0;
 volatile float g_iat_f = 0;
+volatile float g_ambt_f = 0;
+volatile float g_hum_pct = 0;
 
 volatile bool g_afr_has_data = false;
 volatile bool g_clt_has_data = false;
@@ -61,6 +63,8 @@ volatile bool g_tps_has_data = false;
 volatile bool g_battv_has_data = false;
 volatile bool g_egt_has_data = false;
 volatile bool g_iat_has_data = false;
+volatile bool g_ambt_has_data = false;
+volatile bool g_hum_has_data = false;
 volatile uint16_t g_flag_bits = 0;
 volatile uint16_t g_flag_seen = 0;
 

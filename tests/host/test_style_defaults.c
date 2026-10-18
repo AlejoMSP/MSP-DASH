@@ -14,7 +14,7 @@ int main(void) {
   { int32_t a = 7, b = 7;
     bool none = true;
     for (int s = 0; s < SIG_COUNT; s++) {
-      if (s == SIG_AFR || s == SIG_CLT || s == SIG_OILT || s == SIG_OILP || s == SIG_FUELP || s == SIG_EGT || s == SIG_IAT) continue;
+      if (s == SIG_AFR || s == SIG_CLT || s == SIG_OILT || s == SIG_OILP || s == SIG_FUELP || s == SIG_EGT || s == SIG_IAT || s == SIG_AMBT || s == SIG_HUM) continue;
       if (gauge_signal_default_range(s, &a, &b)) none = false;
     }
     CHECK(none, "every other signal has NO default scale (RPM, MAP/boost, ethanol, throttle, battery and the ECU flags keep whatever the gauge has)");

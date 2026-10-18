@@ -37,6 +37,8 @@ typedef enum {
   // Analog signals added after the flags: appended so the numbers saved in existing configs keep their meaning.
   SIG_EGT,         // exhaust gas temp, F (placeholder CAN ID until the real one is known)
   SIG_IAT,         // intake air temp, F
+  SIG_AMBT,        // ambient (cabin) temp, F - DHT22 on the hub
+  SIG_HUM,         // relative humidity, % - DHT22 on the hub
   SIG_COUNT
 } SignalId;
 

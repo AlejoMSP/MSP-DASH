@@ -183,3 +183,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 149 | 2026-10-18 | (this commit) | Removed the old WROOM + Nextion firmware (esp32-main); still in git history |
 | 150 | 2026-10-18 | (this commit) | Shared link_packets.h for screens and hub, 32-signal compile check, PREREQUISITES cleanup |
 | 151 | 2026-10-18 | (this commit) | Hub build 7: MAX6675 EGT on GPIO18/19/23, sent to CAN as 0x7F0 for rusEFI and to the screens |
+| 152 | 2026-10-18 | (this commit) | New signals Ambient Temp + Humidity; hub build 8 reads a DHT22 on GPIO4 |

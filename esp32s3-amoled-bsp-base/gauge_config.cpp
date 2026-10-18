@@ -550,6 +550,8 @@ const char *gauge_config_signal_name(SignalId sig) {
     case SIG_BATTV: return "Battery Voltage";
     case SIG_EGT: return "EGT";
     case SIG_IAT: return "Intake Air Temp";
+    case SIG_AMBT: return "Ambient Temp";
+    case SIG_HUM: return "Humidity";
     case SIG_REVLIM: return "Rev Limiter Active";
     case SIG_MAINRELAY: return "Main Relay";
     case SIG_FUELPUMP: return "Fuel Pump";
@@ -577,6 +579,8 @@ float gauge_config_signal_value(SignalId sig) {
     case SIG_BATTV: return g_battv;
     case SIG_EGT: return g_egt_f;
     case SIG_IAT: return g_iat_f;
+    case SIG_AMBT: return g_ambt_f;
+    case SIG_HUM: return g_hum_pct;
     default:
       if (gauge_signal_is_flag(sig)) return ((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f;
       return 0;
@@ -598,6 +602,8 @@ bool gauge_config_signal_has_data(SignalId sig) {
     case SIG_BATTV: seen = g_battv_has_data; break;
     case SIG_EGT: seen = g_egt_has_data; break;
     case SIG_IAT: seen = g_iat_has_data; break;
+    case SIG_AMBT: seen = g_ambt_has_data; break;
+    case SIG_HUM: seen = g_hum_has_data; break;
     default:
       seen = gauge_signal_is_flag(sig) && ((g_flag_seen >> (sig - SIG_FIRST_FLAG)) & 1u);
       break;

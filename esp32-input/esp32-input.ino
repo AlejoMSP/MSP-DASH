@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 7
+#define INPUT_BUILD 8
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -47,9 +47,9 @@ static uint16_t s_seq = 0;
 static volatile uint32_t s_dataSent = 0;   // data packets sent to the screens
 
 // ---- the hub: CAN values (written by the decoder from can_parsing.h) and the data packet the screens read ----
-volatile float g_rpm, g_clt_f, g_boost_kpa, g_afr, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f;
+volatile float g_rpm, g_clt_f, g_boost_kpa, g_afr, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct;
 volatile bool g_rpm_has_data, g_clt_has_data, g_boost_has_data, g_afr_has_data, g_oilp_has_data, g_oilt_has_data,
-              g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data;
+              g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data;
 volatile uint16_t g_flag_bits, g_flag_seen;
 static volatile uint32_t s_seenMs[SIG_COUNT];
 #define STALE_MS 2000   // same as the screens: a signal not heard for 2 s shows "--"
@@ -64,6 +64,7 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
     case SIG_AFR: return g_afr;       case SIG_OILP: return g_oilp_kpa; case SIG_OILT: return g_oilt_f;
     case SIG_FUELP: return g_fuelp_kpa; case SIG_FLEX: return g_flex_pct; case SIG_TPS: return g_tps;
     case SIG_BATTV: return g_battv;   case SIG_EGT: return g_egt_f;     case SIG_IAT: return g_iat_f;
+    case SIG_AMBT: return g_ambt_f;  case SIG_HUM: return g_hum_pct;
     default: return gauge_signal_is_flag(sig) ? (((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f) : 0.0f;
   }
 }
@@ -171,6 +172,49 @@ static void egtTask(void *) {
   }
 }
 
+// ---- DHT22 ambient temp + humidity on GPIO4 (3-pin module, pull-up built in), read every 2.5 s ----
+#define DHT_PIN 4
+#define DHT_PERIOD_MS 2500
+static volatile float s_dhtC = 0, s_dhtH = 0; static volatile bool s_dhtOk = false; static volatile uint32_t s_dhtFail = 0;
+static portMUX_TYPE s_dhtMux = portMUX_INITIALIZER_UNLOCKED;
+static int dhtWait(int level, int maxUs) {           // us spent while the line stays at 'level', -1 on timeout
+  uint32_t t0 = micros();
+  while (digitalRead(DHT_PIN) == level) if ((int)(micros() - t0) > maxUs) return -1;
+  return (int)(micros() - t0);
+}
+static bool dhtRead(float *c, float *h) {
+  uint8_t d[5] = {0};
+  pinMode(DHT_PIN, OUTPUT); digitalWrite(DHT_PIN, LOW); delay(2);   // start signal: low for at least 1 ms
+  bool ok = true;
+  portENTER_CRITICAL(&s_dhtMux);                     // ~5 ms with interrupts off so the bit timing is exact
+  digitalWrite(DHT_PIN, HIGH); delayMicroseconds(30);
+  pinMode(DHT_PIN, INPUT_PULLUP);
+  if (dhtWait(HIGH, 100) < 0 || dhtWait(LOW, 100) < 0 || dhtWait(HIGH, 100) < 0) ok = false;   // sensor answers low 80 / high 80
+  for (int i = 0; ok && i < 40; i++) {
+    if (dhtWait(LOW, 80) < 0) { ok = false; break; }
+    int hi = dhtWait(HIGH, 100); if (hi < 0) { ok = false; break; }
+    if (hi > 40) d[i / 8] |= 0x80 >> (i % 8);        // ~27 us high = 0, ~70 us high = 1
+  }
+  portEXIT_CRITICAL(&s_dhtMux);
+  if (!ok || (uint8_t)(d[0] + d[1] + d[2] + d[3]) != d[4]) return false;
+  *h = ((d[0] << 8) | d[1]) * 0.1f;
+  int16_t t = ((d[2] & 0x7F) << 8) | d[3];
+  *c = (d[2] & 0x80 ? -t : t) * 0.1f;
+  return *h <= 100.0f;
+}
+static void dhtTask(void *) {
+  vTaskDelay(pdMS_TO_TICKS(2000));                   // the sensor needs ~1 s after power-up
+  for (;;) {
+    float c, h;
+    if (dhtRead(&c, &h)) {
+      s_dhtC = c; s_dhtH = h; s_dhtOk = true;
+      g_ambt_f = c * 9.0f / 5.0f + 32.0f; g_ambt_has_data = true; gauge_config_mark_signal_active(SIG_AMBT);
+      g_hum_pct = h;                      g_hum_has_data = true;  gauge_config_mark_signal_active(SIG_HUM);
+    } else { s_dhtFail++; }
+    vTaskDelay(pdMS_TO_TICKS(DHT_PERIOD_MS));
+  }
+}
+
 static void readKnob() {
   int raw = analogRead(POT_PIN);
   s_potAvg = s_potAvg < 0 ? raw : s_potAvg * 0.85f + raw * 0.15f;
@@ -207,7 +251,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a><br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a><br>Ambient: "+st.dht+"<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -245,12 +289,13 @@ poll();setInterval(poll,1000);
   });
   server.on("/state", HTTP_GET, []() {
     char egtTxt[24]; if (s_egtOpen) strcpy(egtTxt, "open / not connected"); else snprintf(egtTxt, sizeof egtTxt, "%.0f C / %.0f F", s_egtC, s_egtC * 1.8f + 32);
+    char dhtTxt[40]; if (!s_dhtOk) snprintf(dhtTxt, sizeof dhtTxt, "no reading (fails %u)", (unsigned)s_dhtFail); else snprintf(dhtTxt, sizeof dhtTxt, "%.1f F, %.0f%% humidity", s_dhtC * 1.8f + 32, s_dhtH);
     auto liveCount = []() { int n = 0; for (int i = 1; i < SIG_COUNT; i++) if (gauge_config_signal_has_data((SignalId)i)) n++; return n; };
-    char b[620];
+    char b[700];
     snprintf(b, sizeof(b), "{\"lightsV\":%.2f,\"lightsOn\":%s,\"dimV\":%.2f,\"bri\":%d,\"build\":%d,\"ip\":\"%s\",\"ch\":%d,\"last\":\"%s\","
-             "\"egt\":\"%s\",\"egtsent\":%u,\"live\":%d,\"sent\":%u,\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
+             "\"egt\":\"%s\",\"dht\":\"%s\",\"egtsent\":%u,\"live\":%d,\"sent\":%u,\"cfg\":{\"mode\":%d,\"day\":%d,\"nmin\":%d,\"nmax\":%d,\"dlo\":%.1f,\"dhi\":%.1f,\"lon\":%.1f}}",
              s_lightsV, s_lightsV >= s_cfg.lightsOnV ? "true" : "false", s_dimV, s_briPct, INPUT_BUILD, WiFi.localIP().toString().c_str(),
-             WiFi.channel(), s_last, egtTxt, (unsigned)s_egtSent, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
+             WiFi.channel(), s_last, egtTxt, dhtTxt, (unsigned)s_egtSent, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
     server.send(200, "application/json", b);
   });
   server.on("/save", HTTP_GET, []() {
@@ -340,6 +385,7 @@ void setup() {
   if (twai_driver_install(&g, &t, &f) != ESP_OK || twai_start() != ESP_OK) Serial.println("CAN start FAILED");
   else { can_start_task(); Serial.println("CAN running on GPIO 21 (TX) / 22 (RX)"); }
   xTaskCreatePinnedToCore(egtTask, "egt", 3072, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(dhtTask, "dht", 3072, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();

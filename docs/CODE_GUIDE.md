@@ -71,6 +71,8 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - Brightness: Auto (lights wire GPIO35, dimmer GPIO32, both through 47k/10k dividers) or Knob (pot on GPIO34). Settings saved in NVS `bri`.
   - CAN: TWAI on GPIO21 (TX) and GPIO22 (RX) through an SN65HVD230, 500 kbit/s.
   - Data task: builds the same `MSD1` packet the screens already understand and broadcasts it every 50 ms.
+  - EGT: MAX6675 on GPIO18 (SCK), 19 (SO), 23 (CS), every 250 ms; sent on CAN as 0x7F0 for rusEFI.
+  - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Web: `/` status and brightness settings, `/can` raw CAN monitor, `/update` OTA.
 - `input_btn.h` - button struct (in a header because the Arduino builder moves prototypes above the sketch).
 - `gauge_app.h`, `web_monitor.h`, `simulator.h` - small hub versions of the screen files so the shared decoder compiles here.
