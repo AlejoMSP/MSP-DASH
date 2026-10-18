@@ -13,8 +13,9 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include "wifi_config.h"
+#include "input_btn.h"
 
-#define INPUT_BUILD 1
+#define INPUT_BUILD 2
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -39,7 +40,7 @@ static int s_briPct = -1;
 static bool s_wifiUp = false;
 
 // Each command goes out 3 times (broadcast has no acknowledgement); the screens act on the first copy only.
-static void sendCmd(uint8_t cmd, int16_t value, const char *target = "") {
+static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   LinkCmdPacket p = {};
   p.magic = LINK_CMD_MAGIC; p.seq = ++s_seq; p.cmd = cmd; p.value = value;
   strncpy(p.target, target, sizeof(p.target) - 1);
@@ -49,7 +50,6 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target = "") {
 }
 
 // ---- buttons: 30 ms debounce, act on press ----
-struct Btn { uint8_t pin; bool last; uint32_t changed; };
 static Btn s_next = {BTN_NEXT, true, 0}, s_prev = {BTN_PREV, true, 0};
 static bool pressed(Btn &b) {
   bool now = digitalRead(b.pin);
@@ -66,7 +66,7 @@ static void readKnob() {
   int pct = 5 + (int)lroundf(s_potAvg * 95.0f / 4095.0f);
   if (s_briPct < 0 || abs(pct - s_briPct) >= 2 || millis() - s_lastBriMs > 2000) {
     s_briPct = pct; s_lastBriMs = millis();
-    sendCmd(LINK_CMD_BRIGHTNESS, (int16_t)pct);
+    sendCmd(LINK_CMD_BRIGHTNESS, (int16_t)pct, "");
   }
 }
 
@@ -134,8 +134,8 @@ void setup() {
 }
 
 void loop() {
-  if (pressed(s_next)) sendCmd(LINK_CMD_PAGE_NEXT, 0);
-  if (pressed(s_prev)) sendCmd(LINK_CMD_PAGE_PREV, 0);
+  if (pressed(s_next)) sendCmd(LINK_CMD_PAGE_NEXT, 0, "");
+  if (pressed(s_prev)) sendCmd(LINK_CMD_PAGE_PREV, 0, "");
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   if (s_wifiUp) server.handleClient();
