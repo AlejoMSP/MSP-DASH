@@ -1647,7 +1647,7 @@ void web_monitor_init(void) {
     doc["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     doc["wifi_rssi"] = WiFi.RSSI();
     doc["ws_clients"] = ws.count();
-    { Preferences dp; dp.begin("disp", true); doc["diameter"] = dp.getInt("diam", GAUGE_DIAMETER_DEFAULT); dp.end(); }
+    { Preferences dp; dp.begin("disp", true); doc["diameter"] = dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT); dp.end(); }
     doc["fps"] = lcd_perf_fps();
     doc["lvgl_busy"] = lcd_perf_busy_pct();
     JsonObject link = doc["link"].to<JsonObject>();

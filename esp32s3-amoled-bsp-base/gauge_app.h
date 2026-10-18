@@ -13,7 +13,8 @@ extern "C" {
 void build_gauge_app(void);
 // Visible screen diameter in pixels (the panel is 466; less if a bezel covers the edge, more to push gauges past it).
 // Every gauge page is laid out in a circle of this size, centred on the panel. Set before build_gauge_app().
-#define GAUGE_DIAMETER_DEFAULT 466
+#define GAUGE_DIAMETER_DEFAULT 466        // the layout before any setting is applied (and in the host tests)
+#define GAUGE_DIAMETER_BOARD_DEFAULT 520  // what a board with no saved setting uses (chosen on the real panels)
 #define GAUGE_DIAMETER_MIN 300
 #define GAUGE_DIAMETER_MAX 560
 void gauge_app_set_diameter(int d);

@@ -2114,3 +2114,5 @@ reboots. Gauge pages are laid out in a square of that size centred on the panel 
 its radius (readout fit, trend-graph fit, half-moon growth, caption alignment). Smaller: everything shrinks inside a bezel.
 Larger: everything grows; anything past 466 falls off the real panel. Indicator pages are not affected. `/status.json`
 shows `diameter`. Tests: `test_dial_text diam400 | diam520`.
+
+Build 129: a board with no saved diameter now uses 520 (`GAUGE_DIAMETER_BOARD_DEFAULT`), the size chosen on the real panels.

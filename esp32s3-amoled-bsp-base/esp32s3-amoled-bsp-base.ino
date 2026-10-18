@@ -64,7 +64,7 @@ void setup()
   pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
 
   ecu_config_init();
-  { Preferences dp; dp.begin("disp", true); gauge_app_set_diameter(dp.getInt("diam", GAUGE_DIAMETER_DEFAULT)); dp.end(); }   // visible screen size
+  { Preferences dp; dp.begin("disp", true); gauge_app_set_diameter(dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT)); dp.end(); }   // visible screen size
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
   gauge_config_web_init(); // the separate, independent web-dashboard config
   gauge_config_log_init(); // which signals get logged to SD - independent of what's displayed
