@@ -452,7 +452,7 @@ R"rawliteral(<div class="pad">
     </div>
     <button type="button" class="bulk-apply" onclick="applyNeedleToAll()">Apply needle to All</button>
     <div class="bulk-colors" style="margin-top:12px">
-      <label>Caption text size<select id="bulkCap"></select></label>
+      <label>Caption text size<select id="bulkCap"><option value="0">Normal</option><option value="14">14 Small</option><option value="20">20</option><option value="28" selected>28 Medium</option><option value="36">36 Large</option><option value="48">48 XL</option></select></label>
     </div>
     <button type="button" class="bulk-apply" onclick="applyCaptionToAll()">Apply caption size to All</button>
   </div>
@@ -888,7 +888,6 @@ R"rawliteral(
       renderPages();
       document.getElementById("status").textContent = "Caption size applied locally - click Save to persist.";
     }
-    window.addEventListener("load", () => { const el = document.getElementById("bulkCap"); if (el && !el.options.length) el.innerHTML = captionSizeOptions(28); });
 
     // Needle length (gap + tip trim) and thickness on every cell, without touching colors.
     function applyNeedleToAll() {

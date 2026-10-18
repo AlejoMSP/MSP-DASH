@@ -2128,3 +2128,4 @@ sets needle gap at centre %, needle short of tip % (hub + tip <= 85) and needle 
 Build 131: Apply to ALL has two buttons, "Apply colors to All" and "Apply needle to All" (gap, tip trim, thickness); neither touches the other's fields.
 
 Build 132: Apply to ALL also has "Caption text size" (Normal, 14-48; starts at 28) with its own button.
+Build 133: the caption-size choices are written into the page (the load listener in 132 broke the host editor tests).
