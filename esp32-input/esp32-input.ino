@@ -182,11 +182,11 @@ poll();setInterval(poll,1000);
   });
   server.on("/save", HTTP_GET, []() {
     auto I = [](const char *k, int d) { return server.hasArg(k) ? server.arg(k).toInt() : d; };
-    auto F = [](const char *k, float d) { return server.hasArg(k) ? server.arg(k).toFloat() : d; };
+    auto rdF = [](const char *k, float d) { return server.hasArg(k) ? server.arg(k).toFloat() : d; };
     s_cfg.mode = I("mode", s_cfg.mode) == 1 ? 1 : 0;
     s_cfg.dayPct = clampPct(I("day", s_cfg.dayPct));
     s_cfg.nightMin = clampPct(I("nmin", s_cfg.nightMin)); s_cfg.nightMax = clampPct(I("nmax", s_cfg.nightMax));
-    s_cfg.dimLoV = F("dlo", s_cfg.dimLoV); s_cfg.dimHiV = F("dhi", s_cfg.dimHiV); s_cfg.lightsOnV = F("lon", s_cfg.lightsOnV);
+    s_cfg.dimLoV = rdF("dlo", s_cfg.dimLoV); s_cfg.dimHiV = rdF("dhi", s_cfg.dimHiV); s_cfg.lightsOnV = rdF("lon", s_cfg.lightsOnV);
     cfgSave();
     server.send(200, "text/plain", "Saved.");
   });
