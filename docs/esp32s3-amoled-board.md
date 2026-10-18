@@ -2136,3 +2136,8 @@ Build 133: the caption-size choices are written into the page (the load listener
 come out the same size and sit the same in their cells (before: 308 vs 364 px at diameter 520). Cells no longer draw a
 1 px grey (0x333333) outline, which showed as a horizontal line between stacked gauges. Test: `test_dial_text sym2up466 |
 sym2up520` (fails on build 133).
+
+Build 135: the 2-Up partner is checked with its OWN dial and alignment (a bowl 90-270 above a dome 270-90 is a mirror pair;
+134 checked the partner's spot with this cell's dial, which shrank the dome). A partner that isn't a half moon no longer
+limits. With "Place text by coordinates" on, a half moon may use the whole cell height (the bottom text stack no longer
+reserves space). Test: `test_dial_text mirror2up520`.

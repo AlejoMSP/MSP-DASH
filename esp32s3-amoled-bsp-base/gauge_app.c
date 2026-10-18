@@ -496,6 +496,8 @@ static void apply_text_xy(lv_obj_t *container, const CellConfig *cfg) {
   }
 }
 
+static const CellConfig *s_pairCfg = NULL;   // 2-Up: the other cell on the page while one is being built
+
 static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRuntime *rt) {
   rt->enabled = cfg->enabled;
   rt->gauge_type = cfg->gauge_type;
@@ -698,14 +700,23 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       // the round glass, never smaller than before.
       float hi, lo;
       dial_extent(dialStart, dialSweep, &hi, &lo);
-      float areaTop = rect.y + 4.0f, areaBot = stackTop - 4.0f, cellMid = rect.y + rect.h / 2.0f;
+      // With text placed by coordinates the caption/readout stack doesn't reserve the bottom of the cell: use all of it.
+      float areaTop = rect.y + 4.0f, areaBot = (cfg->text_xy ? rect.y + rect.h : stackTop) - 4.0f, cellMid = rect.y + rect.h / 2.0f;
       float span = hi - lo > 0.05f ? hi - lo : 0.05f;
       int16_t best = meterSize;
       int16_t cand = (int16_t)fminf(rect.w - 8.0f, 2.0f * ((areaBot - areaTop) / span + meterPad));
       // 2-Up: the two half moons must come out the same size, so a size counts only if it also fits the other half
       // (the same spot in the cell above or below), whose glass is narrower or wider in a different place.
-      bool twoUp = rect.w > rect.h + 4 && rect.h * 2 >= rect.w - 4;
-      float other = twoUp ? ((rect.y + rect.h / 2.0f) < 233.0f ? (float)rect.h : -(float)rect.h) : 0.0f;
+      // The partner is checked with ITS OWN dial (a bowl above a dome is a mirror pair) at its own spot; a partner that
+      // is not a half moon doesn't limit this one.
+      bool twoUp = s_pairCfg && s_pairCfg->enabled && s_pairCfg->gauge_type == GAUGE_TYPE_HALFMOON;
+      float other = (rect.y + rect.h / 2.0f) < 233.0f ? (float)rect.h : -(float)rect.h;
+      int32_t pStart = dialStart, pEnd, pSweep = dialSweep; float pHi = hi, pLo = lo; int32_t pAlign = valign;
+      if (twoUp) {
+        gauge_dial_resolve(true, s_pairCfg->start_deg, s_pairCfg->end_deg, &pStart, &pEnd, &pSweep);
+        dial_extent(pStart, pSweep, &pHi, &pLo);
+        pAlign = gauge_resolve_valign(s_pairCfg->v_align);
+      }
       for (; cand > meterSize; cand -= 2) {
         float r = cand / 2.0f - meterPad;
         float cy = (valign == GAUGE_VALIGN_TOP) ? areaTop + hi * r
@@ -713,9 +724,15 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
                  : (areaTop + areaBot) / 2.0f + (hi + lo) / 2.0f * r;   // centre the arc + hub in the free area
         bool ok = true;
         for (int k = 0; k < (twoUp ? 2 : 1) && ok; k++) {
-          float cyk = cy + (k ? other : 0.0f);
-          for (int32_t a = 0; a <= dialSweep && ok; a += 3) {
-            float rad = (float)(dialStart + a) * 0.01745329f, R = cand / 2.0f;
+          float cyk = cy;
+          int32_t ks = dialStart, kw = dialSweep;
+          if (k) {
+            float r2 = cand / 2.0f - meterPad, t2 = areaTop + other, b2 = areaBot + other;
+            cyk = (pAlign == GAUGE_VALIGN_TOP) ? t2 + pHi * r2 : (pAlign == GAUGE_VALIGN_BOTTOM) ? b2 + pLo * r2 : (t2 + b2) / 2.0f + (pHi + pLo) / 2.0f * r2;
+            ks = pStart; kw = pSweep;
+          }
+          for (int32_t a = 0; a <= kw && ok; a += 3) {
+            float rad = (float)(ks + a) * 0.01745329f, R = cand / 2.0f;
             float x = cellCx + sinf(rad) * R, y = cyk - cosf(rad) * R, dx = x - 233.0f, dy = y - 233.0f;
             if (dx * dx + dy * dy > (s_glassR - 2.0f) * (s_glassR - 2.0f) || x < rect.x + 2.0f || x > rect.x + rect.w - 2.0f) ok = false;
           }
@@ -867,7 +884,9 @@ static void build_page(int pageIndex, PageConfig *cfg) {
 
   for (int i = 0; i < numCells; i++) {
     CellRect rect = get_cell_rect(cfg->layout, i);
+    s_pairCfg = (cfg->layout == LAYOUT_2UP) ? &cfg->cells[1 - i] : NULL;   // the stacked partner, for matching half moons
     build_cell(page, rect, &cfg->cells[i], &pages[pageIndex].cells[i]);
+    s_pairCfg = NULL;
   }
 }
 
