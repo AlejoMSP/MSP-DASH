@@ -21,6 +21,7 @@
 #include "driver/twai.h"
 #include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
 #include "gauge_app.h"
+#include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
 #define INPUT_BUILD 5
 #define BOARD_NAME "Input"
