@@ -21,6 +21,12 @@ void espnow_link_peer_mac(char out[18]); // remote: the sender's MAC, "--" if no
 uint8_t espnow_link_channel(void);
 
 // Main board: the remotes it has heard. Each remote broadcasts a small "hello" (its IP and build) every 2 s.
+// Commands from the input board (esp32-input): page next/previous, brightness. target = board name, "" = every screen.
+// The input board keeps its own copy of this packet: keep them the same.
+#define LINK_CMD_MAGIC 0x4D534331u   // "MSC1"
+enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3 };
+typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
+
 #define ESPNOW_MAX_BOARDS 4
 #define ESPNOW_NAME_LEN 20
 typedef struct { char mac[18]; char ip[16]; char name[ESPNOW_NAME_LEN + 1]; uint16_t build; int32_t age_ms; } LinkBoard;

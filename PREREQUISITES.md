@@ -134,3 +134,15 @@ partition) or the build will fail once the sketch grows large enough:
 arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB esp32s3-amoled-bsp-base
 arduino-cli upload -p COMx --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc,PartitionScheme=app3M_fat9M_16MB esp32s3-amoled-bsp-base
 ```
+
+## Input board (esp32-input)
+
+Bench board ESP32-D at 192.168.55.204. Copy `esp32-input/wifi_config.h.example` to `wifi_config.h` and fill in the same
+network as the screens. First flash over USB, then over WiFi:
+
+```powershell
+cls
+arduino-cli compile --clean --fqbn esp32:esp32:esp32 --build-path C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
+arduino-cli upload -p COM6 --fqbn esp32:esp32:esp32 --input-dir C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
+curl.exe -s -H "Expect:" -F "firmware=@C:\esp32build-input\esp32-input.ino.bin" http://192.168.55.204/update
+```

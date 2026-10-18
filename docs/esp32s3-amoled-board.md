@@ -2170,3 +2170,13 @@ Needle / half-moon cells: `peak_hold` (default off) and `peak_hold_s` (1-10, def
 mixed with the background, drawn under the live needle) rises with the reading, holds the highest value for the set time,
 then drops back to the live reading. It follows the gauge's refresh rate. Editor: "Peak hold" checkbox and seconds.
 Test: `test_dial_text peakhold`.
+
+## Input board and brightness (build 140)
+
+New sketch `esp32-input/` (bench: ESP32-D, `esp32:esp32:esp32`; later the S2 Mini). Buttons on GPIO 25 / 26 (next /
+previous page, to GND), 10k knob on GPIO 34 (brightness 5-100 %). Sends `LinkCmdPacket` ("MSC1": seq, cmd, value, target
+name, "" = all) over ESP-NOW broadcast, each command 3 times; brightness when the knob moves 2 % or every 2 s. Same WiFi
+rule as the screens (scan, join home network or park on channel 1); fixed IP 192.168.55.204; `/` status, `/update` for
+the same curl flashing. Screens: both roles accept commands (deduped by seq, filtered by target name); page commands use
+`g_page_nav_delta`; brightness is SH8601 command 0x51, sent from the LVGL task between frames. `/status.json` `brightness`.
+Brightness isn't saved: the input board's 2 s repeat restores it after a reboot.

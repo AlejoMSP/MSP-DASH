@@ -53,6 +53,7 @@ void lcd_lvgl_Init(void)
                                                                EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES * LCD_BIT_PER_PIXEL / 8);
   ESP_ERROR_CHECK_WITHOUT_ABORT(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
   esp_lcd_panel_io_handle_t io_handle = NULL;
+  extern esp_lcd_panel_io_handle_t s_lcd_io;
 
   const esp_lcd_panel_io_spi_config_t io_config = SH8601_PANEL_IO_QSPI_CONFIG(EXAMPLE_PIN_NUM_LCD_CS,
                                                                               example_notify_lvgl_flush_ready,
@@ -77,6 +78,7 @@ void lcd_lvgl_Init(void)
   vendor_config.init_cmds = (READ_LCD_ID == SH8601_ID) ? sh8601_lcd_init_cmds : co5300_lcd_init_cmds;
   vendor_config.init_cmds_size = (READ_LCD_ID == SH8601_ID) ? sizeof(sh8601_lcd_init_cmds) / sizeof(sh8601_lcd_init_cmds[0]) : sizeof(co5300_lcd_init_cmds) / sizeof(co5300_lcd_init_cmds[0]);
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_new_panel_sh8601(io_handle, &panel_config, &panel_handle));
+  s_lcd_io = io_handle;
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_reset(panel_handle));
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_init(panel_handle));
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_disp_on_off(panel_handle, true));
@@ -141,6 +143,19 @@ static void example_lvgl_unlock(void)
   assert(lvgl_mux && "bsp_display_start must be called first");
   xSemaphoreGive(lvgl_mux);
 }
+// ---- brightness (lcd_perf.h): SH8601 command 0x51, sent from the LVGL task so it never cuts into a frame transfer ----
+esp_lcd_panel_io_handle_t s_lcd_io = NULL;
+static volatile int s_briPending = -1, s_briPct = 100;
+void lcd_set_brightness_pct(int pct) { if (pct < 5) pct = 5; if (pct > 100) pct = 100; s_briPct = pct; s_briPending = pct; }
+int lcd_get_brightness_pct(void) { return s_briPct; }
+static void brightness_apply(void) {
+  int p = s_briPending;
+  if (p < 0 || !s_lcd_io) return;
+  s_briPending = -1;
+  uint8_t v = (uint8_t)(p * 255 / 100);
+  esp_lcd_panel_io_tx_param(s_lcd_io, (0x02 << 24) | (0x51 << 8), &v, 1);
+}
+
 // ---- performance numbers (lcd_perf.h) ----
 static volatile uint32_t s_frames = 0, s_fps = 0, s_busyPct = 0;
 static volatile bool s_overlayWant = false;
@@ -171,6 +186,7 @@ static void example_lvgl_port_task(void *arg)
   {
     if (example_lvgl_lock(-1))
     {
+      brightness_apply();
       int64_t t0 = esp_timer_get_time();
       task_delay_ms = lv_timer_handler();
       busyUs += esp_timer_get_time() - t0;

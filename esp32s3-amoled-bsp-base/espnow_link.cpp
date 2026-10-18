@@ -9,6 +9,7 @@
 #include <esp_wifi.h>
 #include <string.h>
 #include "build_info.h"
+#include "lcd_perf.h"
 
 #define PKT_MAGIC 0x4D534431u   // "MSD1"
 #define HELLO_MAGIC 0x4D534831u // "MSH1"
@@ -63,7 +64,22 @@ static void sendTask(void *) {
   }
 }
 
+// Commands from the input board; every copy (it sends each 3 times) after the first is ignored by its seq
+static volatile uint32_t s_lastCmdSeq = 0xFFFFFFFFu;
+static bool handleCmd(const uint8_t *data, int len) {
+  if (len < (int)offsetof(LinkCmdPacket, target) || ((const LinkCmdPacket *)data)->magic != LINK_CMD_MAGIC) return false;
+  LinkCmdPacket c; memset(&c, 0, sizeof(c)); memcpy(&c, data, len < (int)sizeof(c) ? len : sizeof(c)); c.target[20] = 0;
+  if (c.seq == s_lastCmdSeq) return true;
+  s_lastCmdSeq = c.seq;
+  if (c.target[0]) { char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); if (strcasecmp(nm, c.target)) return true; }
+  if (c.cmd == LINK_CMD_PAGE_NEXT) g_page_nav_delta = 1;
+  else if (c.cmd == LINK_CMD_PAGE_PREV) g_page_nav_delta = -1;
+  else if (c.cmd == LINK_CMD_BRIGHTNESS) { if (c.value != lcd_get_brightness_pct()) lcd_set_brightness_pct(c.value); }
+  return true;
+}
+
 static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (handleCmd(data, len)) return;
   if (len < (int)offsetof(HelloPacket, name)) return;
   HelloPacket hb; memset(&hb, 0, sizeof(hb)); memcpy(&hb, data, len < (int)sizeof(hb) ? len : sizeof(hb));
   const HelloPacket *h = &hb;
@@ -85,6 +101,7 @@ static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int le
 }
 
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (handleCmd(data, len)) return;
   if (len < (int)offsetof(LinkPacket, v) || ((const LinkPacket *)data)->magic != PKT_MAGIC) return;
   portENTER_CRITICAL(&s_mux);
   memset(&s_rx, 0, sizeof(s_rx));

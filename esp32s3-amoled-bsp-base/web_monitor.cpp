@@ -1821,6 +1821,7 @@ void web_monitor_init(void) {
     { IPAddress i, g, m, d; bool st = netLoad(i, g, m, d); doc["static_ip"] = st; doc["ip"] = WiFi.localIP().toString();
       if (st) { JsonObject n = doc["net"].to<JsonObject>(); n["ip"] = i.toString(); n["gw"] = g.toString(); n["mask"] = m.toString(); } }
     doc["perf_overlay"] = lcd_perf_overlay_on();
+    doc["brightness"] = lcd_get_brightness_pct();
 
     JsonObject can = doc["can"].to<JsonObject>();
     uint32_t fps; int ids;
