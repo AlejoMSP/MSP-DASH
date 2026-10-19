@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 10
+#define INPUT_BUILD 11
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -137,7 +137,8 @@ static int wantedPct() {
 #define EGT_SO  19
 #define EGT_CS  23
 #define EGT_PERIOD_MS 250
-static volatile float s_egtC = 0; static volatile bool s_egtOpen = true; static volatile uint32_t s_egtSent = 0;
+#define EGT_HOLD_MS 1000   // send EGT only if the ECU was heard in the last second (an unanswered frame pushes the hub to bus-off)
+static volatile float s_egtC = 0; static volatile bool s_egtOpen = true; static volatile uint32_t s_egtSent = 0; static volatile bool s_egtHeld = true;
 static uint16_t max6675Read() {
   uint16_t v = 0;
   digitalWrite(EGT_CS, LOW); delayMicroseconds(2);
@@ -169,7 +170,8 @@ static void egtTask(void *) {
       g_egt_has_data = true;
       gauge_config_mark_signal_active(SIG_EGT);
     }
-    if (twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
+    s_egtHeld = !s_canLastRxMs || millis() - s_canLastRxMs > EGT_HOLD_MS;
+    if (!s_egtHeld && twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
     vTaskDelay(pdMS_TO_TICKS(EGT_PERIOD_MS));
   }
 }
@@ -303,7 +305,8 @@ poll();setInterval(poll,1000);
       "setInterval(u,500);u();</script>"));
   });
   server.on("/state", HTTP_GET, []() {
-    char egtTxt[24]; if (s_egtOpen) strcpy(egtTxt, "open / not connected"); else snprintf(egtTxt, sizeof egtTxt, "%.0f C / %.0f F", s_egtC, s_egtC * 1.8f + 32);
+    char egtTxt[56]; if (s_egtOpen) strcpy(egtTxt, "open / not connected"); else snprintf(egtTxt, sizeof egtTxt, "%.0f C / %.0f F", s_egtC, s_egtC * 1.8f + 32);
+    if (s_egtHeld) strcat(egtTxt, " (not sent: ECU not heard)");
     char dhtTxt[40]; if (!s_dhtOk) snprintf(dhtTxt, sizeof dhtTxt, "no reading (fails %u)", (unsigned)s_dhtFail); else snprintf(dhtTxt, sizeof dhtTxt, "%.1f F, %.0f%% humidity", s_dhtC * 1.8f + 32, s_dhtH);
     auto liveCount = []() { int n = 0; for (int i = 1; i < SIG_COUNT; i++) if (gauge_config_signal_has_data((SignalId)i)) n++; return n; };
     char b[700];

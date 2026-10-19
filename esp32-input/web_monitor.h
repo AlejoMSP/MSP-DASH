@@ -7,11 +7,13 @@ struct CanMonEntry { uint32_t id; uint8_t len; uint8_t d[8]; uint32_t count; uin
 static CanMonEntry s_canMon[CANMON_MAX];
 static volatile int s_canMonN = 0;
 static volatile uint32_t s_canTotal = 0;
+static volatile uint32_t s_canLastRxMs = 0;   // last frame heard from anyone else on the bus
 static portMUX_TYPE s_canMux = portMUX_INITIALIZER_UNLOCKED;
 static inline void web_monitor_track_can_frame(uint32_t id, const uint8_t *d, uint8_t len) {
   if (len > 8) len = 8;
   portENTER_CRITICAL(&s_canMux);
   s_canTotal++;
+  s_canLastRxMs = millis();
   int i = 0;
   while (i < s_canMonN && s_canMon[i].id != id) i++;
   if (i == s_canMonN && s_canMonN < CANMON_MAX) { s_canMon[i].id = id; s_canMon[i].count = 0; s_canMonN++; }

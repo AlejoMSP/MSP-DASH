@@ -186,3 +186,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 152 | 2026-10-18 | (this commit) | New signals Ambient Temp + Humidity; hub build 8 reads a DHT22 on GPIO4 |
 | 153 | 2026-10-18 | (this commit) | Hub build 9: fix compile (CAN decoder included before the EGT code), DHT22 start signal releases the line at once |
 | 154 | 2026-10-18 | (this commit) | New signal Fuel Level (%); hub build 10 reads a pot on GPIO36 as a mock fuel sender |
+| 155 | 2026-10-19 | (this commit) | Hub build 11: EGT frame sent only while the ECU is heard (avoids bus-off with the ECU off) |
