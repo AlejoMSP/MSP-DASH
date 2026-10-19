@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 8
+#define INPUT_BUILD 9
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -126,7 +126,8 @@ static int wantedPct() {
   return clampPct(s_cfg.nightMin + (int)lroundf(f * (s_cfg.nightMax - s_cfg.nightMin)));
 }
 
-// every 50 ms: smooth the inputs; send when the result moves 2 % or more, and every 2 s so a screen that reboots catches up
+#include "can_parsing.h"   // copied in at compile time; uses the values and functions above
+
 // ---- EGT: MAX6675 + K-type thermocouple, read by hand (bit-banged SPI) ----
 // Wiring: SCK GPIO18, SO GPIO19, CS GPIO23, VCC 3V3. The chip needs ~220 ms per reading, so read every 250 ms.
 // Each good reading goes on the CAN bus as ID 0x7F0 (CAN_ID_EGT_PLACEHOLDER in can_parsing.h) for rusEFI:
@@ -187,8 +188,7 @@ static bool dhtRead(float *c, float *h) {
   pinMode(DHT_PIN, OUTPUT); digitalWrite(DHT_PIN, LOW); delay(2);   // start signal: low for at least 1 ms
   bool ok = true;
   portENTER_CRITICAL(&s_dhtMux);                     // ~5 ms with interrupts off so the bit timing is exact
-  digitalWrite(DHT_PIN, HIGH); delayMicroseconds(30);
-  pinMode(DHT_PIN, INPUT_PULLUP);
+  pinMode(DHT_PIN, INPUT_PULLUP);                    // let go: the sensor answers 20-40 us after release
   if (dhtWait(HIGH, 100) < 0 || dhtWait(LOW, 100) < 0 || dhtWait(HIGH, 100) < 0) ok = false;   // sensor answers low 80 / high 80
   for (int i = 0; ok && i < 40; i++) {
     if (dhtWait(LOW, 80) < 0) { ok = false; break; }
@@ -215,6 +215,7 @@ static void dhtTask(void *) {
   }
 }
 
+// every 50 ms: smooth the inputs; send when the result moves 2 % or more, and every 2 s so a screen that reboots catches up
 static void readKnob() {
   int raw = analogRead(POT_PIN);
   s_potAvg = s_potAvg < 0 ? raw : s_potAvg * 0.85f + raw * 0.15f;
@@ -323,7 +324,6 @@ poll();setInterval(poll,1000);
   server.begin();
 }
 
-#include "can_parsing.h"   // copied in at compile time; uses the values and functions above
 
 // Same packet as the screens' espnow_link.cpp ("MSD1"): every signal plus a has-data mask, 20 times a second
 static void dataTask(void *) {
