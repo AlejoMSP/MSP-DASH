@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 11
+#define INPUT_BUILD 12
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -68,6 +68,29 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
     case SIG_FUEL: return g_fuel_pct;
     default: return gauge_signal_is_flag(sig) ? (((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f) : 0.0f;
   }
+}
+
+// ---- screen status: every remote screen sends a hello every 2 s; no hello for 6 s = offline (red) ----
+#define SCREEN_MAX 6
+#define SCREEN_OFFLINE_MS 6000
+typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; bool used; } ScreenSlot;
+static ScreenSlot s_screens[SCREEN_MAX];
+static portMUX_TYPE s_scrMux = portMUX_INITIALIZER_UNLOCKED;
+static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len < (int)offsetof(HelloPacket, name) || ((const HelloPacket *)data)->magic != HELLO_MAGIC) return;
+  HelloPacket h; memset(&h, 0, sizeof h); memcpy(&h, data, len < (int)sizeof h ? len : sizeof h);
+  portENTER_CRITICAL(&s_scrMux);
+  int slot = -1, oldest = 0;
+  for (int i = 0; i < SCREEN_MAX; i++) {
+    if (s_screens[i].used && !memcmp(s_screens[i].mac, info->src_addr, 6)) { slot = i; break; }
+    if (slot < 0 && !s_screens[i].used) slot = i;
+  }
+  if (slot < 0) { for (int i = 1; i < SCREEN_MAX; i++) if (s_screens[i].lastMs < s_screens[oldest].lastMs) oldest = i; slot = oldest; }
+  ScreenSlot *c = &s_screens[slot];
+  if (!c->used || memcmp(c->mac, info->src_addr, 6)) { memset(c, 0, sizeof *c); memcpy(c->mac, info->src_addr, 6); }
+  c->ip = h.ip; c->build = h.build; memcpy(c->name, h.name, LINK_NAME_LEN); c->name[LINK_NAME_LEN] = 0;
+  c->lastMs = millis(); c->hellos++; c->used = true;
+  portEXIT_CRITICAL(&s_scrMux);
 }
 
 static WebServer server(80);
@@ -247,12 +270,16 @@ static void readKnob() {
 // ---- web: status page and WiFi updates (curl -F "firmware=@...bin" http://192.168.55.204/update) ----
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
-    server.send(200, "text/html", R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Input</title>
+    server.send(200, "text/html", R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Hub</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:480px;margin:auto;padding:12px}h2{color:#4dd0e1}
 label{display:block;margin:10px 0 4px}input,select{width:100%;padding:6px;box-sizing:border-box;background:#111;color:#ddd;border:1px solid #333}
 button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.live{background:#111;padding:10px;border-radius:6px}
-.row{display:flex;gap:8px}.row>*{flex:1}.note{color:#999;font-size:13px}</style></head><body>
-<h2>MSP-DASH Input</h2><div class="live" id="live">Loading...</div>
+.row{display:flex;gap:8px}.row>*{flex:1}.note{color:#999;font-size:13px}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:middle}.on{background:#2e7d32}.off{background:#e53935}
+.scr{padding:4px 0}.scr a{color:#4dd0e1}</style></head><body>
+<h2>MSP-DASH Hub</h2>
+<h3 style="color:#4dd0e1;margin:8px 0">Screens</h3><div class="live" id="scr">Waiting for screens...</div>
+<h3 style="color:#4dd0e1;margin:8px 0">Hub</h3><div class="live" id="live">Loading...</div>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
 <div class="row"><label>Night, dimmer lowest (%)<input type="number" id="nmin" min="5" max="100"></label>
@@ -272,7 +299,13 @@ document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V (
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
-poll();setInterval(poll,1000);
+function ago(ms){return ms<60000?Math.round(ms/1000)+" s ago":Math.round(ms/60000)+" min ago";}
+async function scr(){try{const l=await (await fetch("/screens.json")).json();
+l.sort((a,b)=>a.ip<b.ip?-1:1);
+document.getElementById("scr").innerHTML=l.length?l.map(s=>'<div class="scr"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
+(s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+'<a href="http://'+s.ip+'/">'+s.ip+'</a> | build '+s.build+' | '+s.mac+'</span></div>').join(''):
+'No screens heard yet. Screens set to main do not say hello.';}catch(e){}}
+poll();setInterval(poll,1000);scr();setInterval(scr,1000);
 </script></body></html>)HTML");
   });
   // ---- raw CAN monitor: every ID seen, latest bytes, count, age ----
@@ -303,6 +336,28 @@ poll();setInterval(poll,1000);
       "s.textContent='Frames: '+j.total+' | bus: '+(ST[j.state]||'?')+' | rx errors: '+j.rxerr+' | missed: '+j.missed;"
       "j.ids.sort((a,b)=>a.id-b.id);t.innerHTML=j.ids.map(e=>'<tr class='+(e.age>2000?'old':'')+'><td>0x'+e.id.toString(16).toUpperCase().padStart(3,'0')+'</td><td>'+e.d+'</td><td>'+e.n+'</td><td>'+e.age+'</td></tr>').join('');}catch(e){}}"
       "setInterval(u,500);u();</script>"));
+  });
+  server.on("/screens.json", HTTP_GET, []() {
+    ScreenSlot snap[SCREEN_MAX];
+    portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
+    uint32_t now = millis();
+    String j = "[";
+    bool first = true;
+    for (int i = 0; i < SCREEN_MAX; i++) {
+      if (!snap[i].used) continue;
+      char nm[LINK_NAME_LEN + 1]; int k = 0;   // keep the name JSON-safe
+      for (int x = 0; snap[i].name[x] && k < LINK_NAME_LEN; x++) { char ch = snap[i].name[x]; if (ch >= 32 && ch != '"' && ch != '\\') nm[k++] = ch; }
+      nm[k] = 0;
+      uint32_t age = now - snap[i].lastMs;
+      char b[200];
+      snprintf(b, sizeof b, "%s{\"name\":\"%s\",\"ip\":\"%u.%u.%u.%u\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"build\":%u,\"age\":%u,\"online\":%s,\"hellos\":%u}",
+               first ? "" : ",", nm, (unsigned)(snap[i].ip & 255), (unsigned)(snap[i].ip >> 8 & 255), (unsigned)(snap[i].ip >> 16 & 255), (unsigned)(snap[i].ip >> 24),
+               snap[i].mac[0], snap[i].mac[1], snap[i].mac[2], snap[i].mac[3], snap[i].mac[4], snap[i].mac[5],
+               (unsigned)snap[i].build, (unsigned)age, age < SCREEN_OFFLINE_MS ? "true" : "false", (unsigned)snap[i].hellos);
+      j += b; first = false;
+    }
+    j += "]";
+    server.send(200, "application/json", j);
   });
   server.on("/state", HTTP_GET, []() {
     char egtTxt[56]; if (s_egtOpen) strcpy(egtTxt, "open / not connected"); else snprintf(egtTxt, sizeof egtTxt, "%.0f C / %.0f F", s_egtC, s_egtC * 1.8f + 32);
@@ -393,6 +448,7 @@ void setup() {
   memcpy(peer.peer_addr, BCAST, 6);
   peer.channel = 0; peer.ifidx = WIFI_IF_STA; peer.encrypt = false;
   esp_now_add_peer(&peer);
+  esp_now_register_recv_cb(onEspNowRecv);   // screen hellos, for the status lights
 
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);

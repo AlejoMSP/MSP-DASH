@@ -11,10 +11,8 @@
 #include "build_info.h"
 #include "lcd_perf.h"
 
-#define HELLO_MAGIC 0x4D534831u // "MSH1"
-#define HELLO_MS 2000
-
-typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[ESPNOW_NAME_LEN]; } HelloPacket;
+#include "link_packets.h"   // HelloPacket, HELLO_MAGIC, HELLO_MS
+static_assert(LINK_NAME_LEN == ESPNOW_NAME_LEN, "hello name length must match the board name length");
 
 typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[ESPNOW_NAME_LEN + 1]; uint32_t lastMs; bool used; } BoardSlot;
 static BoardSlot s_boards[ESPNOW_MAX_BOARDS];

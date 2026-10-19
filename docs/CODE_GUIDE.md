@@ -84,7 +84,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 | Magic | From | Contents |
 |---|---|---|
 | `MSD1` | hub (or a main screen) | seq, count, has-data mask, one float per signal |
-| `MSH1` | remote screens | IP and build, every 2 s |
+| `MSH1` | remote screens | IP, build and name, every 2 s; the hub shows a green/red light per screen (red after 6 s silent) |
 | `MSC1` | hub | seq, command, value, target name ("" = all) |
 
 ## 6. Saved settings (NVS)

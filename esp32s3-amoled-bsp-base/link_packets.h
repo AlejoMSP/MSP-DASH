@@ -20,3 +20,9 @@ static_assert(SIG_COUNT <= 32, "LinkPacket.has_mask holds 32 signals: make it ui
 #define LINK_CMD_MAGIC 0x4D534331u
 enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3 };
 typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
+
+// "MSH1": a screen in remote role says hello every 2 s (its IP, build and name); the hub uses it for the online lights
+#define HELLO_MAGIC 0x4D534831u
+#define HELLO_MS 2000
+#define LINK_NAME_LEN 20
+typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; } HelloPacket;
