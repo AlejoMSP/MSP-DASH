@@ -40,6 +40,7 @@ SimRange sim_range(int sig) {
     case SIG_IAT: return {0, 200, 1};
     case SIG_AMBT: return {0, 120, 1};
     case SIG_HUM: return {0, 100, 1};
+    case SIG_FUEL: return {0, 100, 1};
     default:        return gauge_signal_is_flag(sig) ? SimRange{0, 1, 1} : SimRange{0, 0, 1};   // an on/off flag: 0 or 1
   }
 }
@@ -84,6 +85,7 @@ void sim_demo_values(float t, float out[SIG_COUNT]) {
   out[SIG_IAT] = 95.0f + 15.0f * sinf(t * 0.15f);
   out[SIG_AMBT] = 85.0f + 5.0f * sinf(t * 0.05f);
   out[SIG_HUM] = 60.0f + 15.0f * sinf(t * 0.07f);
+  out[SIG_FUEL] = 50.0f + 45.0f * sinf(t * 0.03f);
 
   // On/off flags, so an indicators page has something to show. The check-engine light and lambda protection
   // never come on by themselves (use manual mode to test those).
@@ -114,6 +116,7 @@ static void writeValues(const float *v) {
   g_iat_f = v[SIG_IAT];       g_iat_has_data = true;   gauge_config_mark_signal_active(SIG_IAT);
   g_ambt_f = v[SIG_AMBT];     g_ambt_has_data = true;  gauge_config_mark_signal_active(SIG_AMBT);
   g_hum_pct = v[SIG_HUM];     g_hum_has_data = true;   gauge_config_mark_signal_active(SIG_HUM);
+  g_fuel_pct = v[SIG_FUEL];   g_fuel_has_data = true;  gauge_config_mark_signal_active(SIG_FUEL);
 
   uint16_t bits = 0;
   for (int i = 0; i < SIG_FLAG_COUNT; i++) {
@@ -143,7 +146,7 @@ void sim_stop(const char *why) {
   // Back to "never seen", so the gauges return to "--" instead of holding fake values.
   g_rpm_has_data = g_clt_has_data = g_boost_has_data = g_afr_has_data = g_oilp_has_data = false;
   g_oilt_has_data = g_fuelp_has_data = g_flex_has_data = g_tps_has_data = g_battv_has_data = false;
-  g_egt_has_data = g_iat_has_data = g_ambt_has_data = g_hum_has_data = false;
+  g_egt_has_data = g_iat_has_data = g_ambt_has_data = g_hum_has_data = g_fuel_has_data = false;
   g_flag_seen = 0;
   strncpy(s_stopReason, why ? why : "stopped", sizeof(s_stopReason) - 1);
   s_stopReason[sizeof(s_stopReason) - 1] = '\0';

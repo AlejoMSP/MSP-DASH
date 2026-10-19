@@ -39,6 +39,7 @@ typedef enum {
   SIG_IAT,         // intake air temp, F
   SIG_AMBT,        // ambient (cabin) temp, F - DHT22 on the hub
   SIG_HUM,         // relative humidity, % - DHT22 on the hub
+  SIG_FUEL,        // fuel level, % - sender (pot for now) on the hub
   SIG_COUNT
 } SignalId;
 

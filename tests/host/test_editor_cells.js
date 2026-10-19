@@ -41,7 +41,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   { const block = STYLE.match(/#define GAUGE_DEFAULT_RANGES\(X\)([\s\S]*?)\n\n/)[1];
     const fw = {}; for (const m of block.matchAll(/X\((SIG_[A-Z0-9]+),\s*(-?\d+),\s*(-?\d+)\)/g)) fw[ENUM.indexOf(m[1])] = [+m[2], +m[3]];
     const js = probe.run('JSON.stringify(SIGNAL_DEFAULT_RANGES)');
-    check(Object.keys(fw).length === 9 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's default scales are EXACTLY the firmware's list: " + js);
+    check(Object.keys(fw).length === 10 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's default scales are EXACTLY the firmware's list: " + js);
     check(fw[4] && fw[4].join() === "10,20" && fw[2].join() === "60,250" && fw[6].join() === "60,250" && fw[5].join() === "0,100" && fw[7].join() === "0,100", "AFR 10-20, coolant and oil temperature 60-250, oil and fuel pressure 0-100");
     check(!(3 in fw), "MAP/boost has no default scale (it reads above 100 under boost)"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());

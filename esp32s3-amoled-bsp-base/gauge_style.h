@@ -32,7 +32,8 @@
   X(SIG_EGT,   0,  1800) \
   X(SIG_IAT,   0,  200) \
   X(SIG_AMBT,  0,  120) \
-  X(SIG_HUM,   0,  100)
+  X(SIG_HUM,   0,  100) \
+  X(SIG_FUEL,  0,  100)
 
 static inline bool gauge_signal_default_range(int sig, int32_t *mn, int32_t *mx) {
 #define GAUGE_RANGE_CASE(S, A, B) if (sig == (S)) { *mn = (A); *mx = (B); return true; }
