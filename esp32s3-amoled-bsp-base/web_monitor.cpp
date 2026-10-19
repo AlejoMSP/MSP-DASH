@@ -133,33 +133,35 @@ R"rawliteral(<style>
     .lamp { container-type:inline-size; display:flex; align-items:center; justify-content:center; aspect-ratio:1.6 / 1; border-radius:14px;
             border:2px solid rgba(255,255,255,.25); font-weight:bold; text-align:center; overflow:hidden; }
     .lamp span { font-size:min(1.5em, 17cqw); padding:0 4px; }
+    .slist { padding:0 12px 16px; }
+    .spage { color:#4dd0e1; font-weight:bold; margin:14px 0 4px; }
+    .srow { display:flex; justify-content:space-between; gap:10px; padding:7px 4px; border-bottom:1px solid #223; }
+    .srow .nm { color:#ccc; }
+    .srow .nm small { color:#777; }
+    .srow .vv { font-family:monospace; font-weight:bold; white-space:nowrap; }
+    .srow .vv.warn { color:#ff4444; }
+    .srow .vv.on { color:#2ecc71; }
+    .srow .vv.off { color:#777; }
     .simbar { display:none; background:#f5a623; color:#000; font-weight:bold; text-align:center; padding:6px; margin:0 3px 6px; border-radius:6px; font-size:0.85em; }
     .simbar.on { display:block; }
   </style>)rawliteral" PH_OPEN
 R"rawliteral(
-    <div class="dash-nav">
-      <button onclick="changeWebPage(-1)">&larr; Prev</button>
-      <button onclick="changeWebPage(1)">Next &rarr;</button>
-    </div>
     <div class="statusline"><span id="dot"></span><span id="stext">Connecting...</span></div>
     <div class="simbar" id="simbar">SIMULATED DATA - not from the ECU</div>
-    <div class="cellgrid" id="cellgrid"></div>
+    <div id="cellgrid"></div>
 )rawliteral" PH_CLOSE
 R"rawliteral(
 <script>
     document.getElementById("build").textContent = "build ...";
-    // NOTE: cells currently render as plain text (caption + live
-    // number) regardless of configured gauge_type (needle/half-moon/
-    // number) - true graphical needle rendering for the web view is
-    // part of the separate HTML5 live-preview feature, not yet built.
-    const LAYOUT_CLASSES = ["layout-1", "layout-2up", "layout-3up", "layout-2x2"];
-    let webPages = [];
-    let currentWebPage = 0;
+    const CELLS_PER_LAYOUT = [1, 2, 3, 4];
+    const SIGNAL_NAMES = {1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol %",9:"Throttle Position",10:"Battery Voltage",
+      11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
+      20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level"};
+    let webPages = [];          // the round screen's own pages (/gauges.json)
     let signalValues = {};      // signals that currently have live data, keyed by signal id
 
 // ---- indicator lamps (an "indicators page" is a grid of on/off lamps) ----
 let lampOn = {};            // "page:lamp" -> is it on? Remembered between updates, for the hysteresis band
-let blinkPhase = true;      // flips about twice a second, for lamps set to flash while on
 const escHtml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const hex6 = n => "#" + ((Number(n) >>> 0) & 0xFFFFFF).toString(16).padStart(6, "0");
 
@@ -184,61 +186,47 @@ function updateLamps() {
   });
 }
 
-function renderIndicators(page, pageIdx) {
-  const lamps = page.indicators || [];
-  if (lamps.length === 0) return "<p class='empty-msg'>No indicators on this page.<br>Visit Web Dashboard Config in the menu.</p>";
-  const cols = Math.max(1, Math.min(4, page.cols || 2));
-  return `<div class="indgrid" style="--cols:${cols}">` + lamps.map((l, li) => {
-    const on = !!lampOn[pageIdx + ":" + li];
-    const look = on && (!l.blink || blinkPhase);      // a flashing lamp alternates between its on and off look
-    const text = look ? l.on_text : l.off_text;
-    return `<div class="lamp" data-on="${look ? 1 : 0}" style="background:${hex6(look ? l.on_color : l.off_color)};color:${hex6(look ? l.on_text_color : l.off_text_color)}"><span>${escHtml(text || "")}</span></div>`;
-  }).join("") + `</div>`;
-}
     let live = { fps: 0, ids: 0 };
     let ws = null;
     let lastMsg = 0;            // when the last message arrived (0 = none since this connection opened)
     let retryMs = 1000;
 
-    function render() {
-      const grid = document.getElementById("cellgrid");
-      if (webPages.length === 0) {
-        grid.className = "cellgrid";
-        grid.innerHTML = "<p class='empty-msg'>No web dashboard pages configured.<br>Visit Web Dashboard Config in the menu.</p>";
-        return;
-      }
-      updateLamps();
-      const page = webPages[currentWebPage];
-      if (page.kind === 1) {
-        grid.className = "cellgrid indhost";
-        grid.innerHTML = renderIndicators(page, currentWebPage);
-        return;
-      }
-      grid.className = "cellgrid " + LAYOUT_CLASSES[page.layout];
-      grid.innerHTML = page.cells.map((c, i) => {
-        if (!c.enabled) return `<div class="dcell c${i}"></div>`;
-        const raw = signalValues[c.signal];
-        const scaled = raw === undefined ? undefined : raw / c.value_divisor;
-        const dec = [0, 1, 2].includes(Number(c.decimals)) ? Number(c.decimals) : 1;   // the editor's Decimals, like the round display
-        const value = (raw === undefined) ? "--" : scaled.toFixed(dec);
-        const displayVal = raw === undefined ? value : scaled;
-        const isWarn = c.has_warning && raw !== undefined && (c.warning_above ? displayVal > c.warning_threshold : displayVal < c.warning_threshold);
-        const size = c.value_font_size || 28;   // the editor's Value Text Size; 28 renders as the 35px these numbers always were
-        // The editor's Caption size (0 = the normal 0.85em; a big caption shrinks to the cell's width), the Units line under the number,
-        // and Gauge position (Top / Bottom move the whole block; Center is as it always was).
-        const capPx = [14, 20, 28, 36, 48].includes(c.caption_font_size) ? c.caption_font_size : 0;
-        const capStyle = capPx ? ` style="font-size:${capPx}px;font-size:min(${capPx}px,14cqw)"` : "";
-        const unitsHtml = c.units ? `<div class="units"${capStyle}>${escHtml(c.units)}</div>` : "";
-        const justify = c.v_align === 1 ? "flex-start" : (c.v_align === 2 ? "flex-end" : "");
-        const cellStyle = justify ? ` style="justify-content:${justify}"` : "";
-        return `<div class="dcell c${i}"${cellStyle}><div class="cap"${capStyle}>${escHtml(c.caption)}</div><div class="val ${isWarn?'warn':''}" data-size="${size}" style="--fs:${Math.round(size * 1.25)}px">${value}</div>${unitsHtml}</div>`;
-      }).join("");
+    // Every sensor the round screen uses, one line each, grouped by page, live.
+    // Reads the screen's own pages (/gauges.json), so there is nothing extra to set up.
+    function cellValueText(c, raw) {
+      if (raw === undefined) return { text: "--", warn: false };
+      const div = c.value_divisor || 1;
+      const scaled = raw / div;
+      const dec = [0, 1, 2].includes(Number(c.decimals)) ? Number(c.decimals) : 1;
+      const warn = !!c.has_warning && (c.warning_above ? scaled > c.warning_threshold : scaled < c.warning_threshold);
+      return { text: scaled.toFixed(dec), warn };
     }
-
-    function changeWebPage(delta) {
-      if (webPages.length === 0) return;
-      currentWebPage = (currentWebPage + delta + webPages.length) % webPages.length;
-      render();
+    function render() {
+      const list = document.getElementById("cellgrid");
+      updateLamps();
+      const used = webPages.map((pg, pi) => ({ pg, pi })).filter(x => x.pg.enabled !== false);
+      if (used.length === 0) { list.className = "slist"; list.innerHTML = "<p class='empty-msg'>No pages on this screen yet.<br>Set them up in the Gauge Editor.</p>"; return; }
+      list.className = "slist";
+      list.innerHTML = used.map(({ pg, pi }) => {
+        let rows = "";
+        if (pg.kind === 1) {
+          rows = (pg.indicators || []).map((l, li) => {
+            const on = !!lampOn[pi + ":" + li];
+            const name = l.on_text || l.off_text || ("Lamp " + (li + 1));
+            return `<div class="srow"><span class="nm">${escHtml(name)} <small>lamp</small></span><span class="vv ${on ? "on" : "off"}">${on ? "ON" : "off"}</span></div>`;
+          }).join("");
+        } else {
+          const n = CELLS_PER_LAYOUT[pg.layout] || (pg.cells || []).length;
+          rows = (pg.cells || []).slice(0, n).filter(c => c.enabled && c.signal).map(c => {
+            const v = cellValueText(c, signalValues[c.signal]);
+            const name = c.caption || SIGNAL_NAMES[c.signal] || ("Signal " + c.signal);
+            const units = c.units || "";
+            return `<div class="srow"><span class="nm">${escHtml(name)}</span><span class="vv ${v.warn ? "warn" : ""}">${v.text}${units && v.text !== "--" ? " " + escHtml(units) : ""}</span></div>`;
+          }).join("");
+        }
+        if (!rows) rows = "<div class='srow'><span class='nm'><small>nothing set on this page</small></span></div>";
+        return `<div class="spage">Page ${pi + 1}</div>` + rows;
+      }).join("");
     }
 
     // The status line says WHY the numbers are or aren't updating, instead of
@@ -301,13 +289,6 @@ function renderIndicators(page, pageIdx) {
       updateStatus();
     }, 1000);
 
-    // Flashing lamps: flip the phase about twice a second and redraw - but only when the page on screen has one.
-    setInterval(() => {
-      blinkPhase = !blinkPhase;
-      const pg = webPages[currentWebPage];
-      if (pg && pg.kind === 1 && (pg.indicators || []).some(l => l.blink)) render();
-    }, 480);
-
     // A phone that was asleep or in another app comes back with a dead connection.
     document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
 
@@ -315,7 +296,7 @@ function renderIndicators(page, pageIdx) {
     // handles one at a time much more reliably.
     async function loadPages() {
       try {
-        const res = await fetch("/web-pages.json");
+        const res = await fetch("/gauges.json");
         webPages = await res.json();
         render();
       } catch (e) {
@@ -800,6 +781,10 @@ R"rawliteral(
       } else if (action === "copy") {
         const copy = JSON.parse(JSON.stringify(pages[pIdx]));
         pages.push(copy);
+      } else if (action === "up" || action === "down") {   // swap with the page before / after
+        const to = action === "up" ? pIdx - 1 : pIdx + 1;
+        if (to < 0 || to >= pages.length) return;
+        [pages[pIdx], pages[to]] = [pages[to], pages[pIdx]];
       }
       renderPages();
     }
@@ -824,6 +809,8 @@ R"rawliteral(
               <select onchange="changeLayout(${pIdx}, parseInt(this.value))">
                 ${LAYOUTS.map((l,v)=>`<option value="${v}" ${p.layout===v?"selected":""}>${l}</option>`).join("")}
               </select>
+              <button type="button" title="Move up" onclick="pageAction(${pIdx},'up')" ${pIdx === 0 ? "disabled" : ""}>&uarr;</button>
+              <button type="button" title="Move down" onclick="pageAction(${pIdx},'down')" ${pIdx === pages.length - 1 ? "disabled" : ""}>&darr;</button>
               <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
               <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
               <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>

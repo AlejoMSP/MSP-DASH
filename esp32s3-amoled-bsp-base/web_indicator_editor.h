@@ -140,6 +140,8 @@ R"rawliteral(
             <select onchange="setIndCols(${pIdx}, parseInt(this.value))" title="Indicators per row">
               ${[1, 2, 3, 4].map(n => `<option value="${n}" ${cols === n ? "selected" : ""}>${n} column${n > 1 ? "s" : ""}</option>`).join("")}
             </select>
+            <button type="button" title="Move up" onclick="pageAction(${pIdx},'up')" ${pIdx === 0 ? "disabled" : ""}>&uarr;</button>
+            <button type="button" title="Move down" onclick="pageAction(${pIdx},'down')" ${pIdx === pages.length - 1 ? "disabled" : ""}>&darr;</button>
             <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
             <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
             <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>
