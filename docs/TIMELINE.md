@@ -188,3 +188,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 154 | 2026-10-18 | (this commit) | New signal Fuel Level (%); hub build 10 reads a pot on GPIO36 as a mock fuel sender |
 | 155 | 2026-10-19 | (this commit) | Hub build 11: EGT frame sent only while the ECU is heard (avoids bus-off with the ECU off) |
 | 156 | 2026-10-19 | (this commit) | Hub build 12: Screens status on the hub page, green online / red offline per screen, from the screens' hello; hello packet moved to link_packets.h |
+| 157 | 2026-10-19 | (this commit) | Hub build 13: Sensors page (/sensors) lists every signal with value, age and source: hub sensor or ECU CAN frame |

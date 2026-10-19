@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 12
+#define INPUT_BUILD 13
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -54,7 +54,15 @@ volatile uint16_t g_flag_bits, g_flag_seen;
 static volatile uint32_t s_seenMs[SIG_COUNT];
 #define STALE_MS 2000   // same as the screens: a signal not heard for 2 s shows "--"
 
-extern "C" void gauge_config_mark_signal_active(SignalId sig) { if (sig > 0 && sig < SIG_COUNT) s_seenMs[sig] = millis() | 1; }
+// Where each signal last came from, for the /sensors page: a CAN ID, or one of the hub's own sensors.
+#define SRC_HUB_EGT  0xFFFF0001u   // MAX6675
+#define SRC_HUB_DHT  0xFFFF0002u   // DHT22
+#define SRC_HUB_FUEL 0xFFFF0003u   // fuel pot / sender
+static volatile uint32_t s_srcId[SIG_COUNT];
+// Called by the CAN decoder (can_parsing.h, can_flags.h) from the CAN task: the source is the frame being decoded.
+extern "C" void gauge_config_mark_signal_active(SignalId sig) { if (sig > 0 && sig < SIG_COUNT) { s_seenMs[sig] = millis() | 1; s_srcId[sig] = s_canCurId; } }
+// Called by the hub's own sensor tasks.
+static void markLocal(SignalId sig, uint32_t src) { if (sig > 0 && sig < SIG_COUNT) { s_seenMs[sig] = millis() | 1; s_srcId[sig] = src; } }
 extern "C" bool gauge_config_signal_has_data(SignalId sig) {
   return sig > 0 && sig < SIG_COUNT && s_seenMs[sig] && millis() - s_seenMs[sig] < STALE_MS;
 }
@@ -191,7 +199,7 @@ static void egtTask(void *) {
       s_egtC = c;
       g_egt_f = c * 9.0f / 5.0f + 32.0f;            // the hub does not hear its own frame, so set the value here too
       g_egt_has_data = true;
-      gauge_config_mark_signal_active(SIG_EGT);
+      markLocal(SIG_EGT, SRC_HUB_EGT);
     }
     s_egtHeld = !s_canLastRxMs || millis() - s_canLastRxMs > EGT_HOLD_MS;
     if (!s_egtHeld && twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
@@ -234,8 +242,8 @@ static void dhtTask(void *) {
     float c, h;
     if (dhtRead(&c, &h)) {
       s_dhtC = c; s_dhtH = h; s_dhtOk = true;
-      g_ambt_f = c * 9.0f / 5.0f + 32.0f; g_ambt_has_data = true; gauge_config_mark_signal_active(SIG_AMBT);
-      g_hum_pct = h;                      g_hum_has_data = true;  gauge_config_mark_signal_active(SIG_HUM);
+      g_ambt_f = c * 9.0f / 5.0f + 32.0f; g_ambt_has_data = true; markLocal(SIG_AMBT, SRC_HUB_DHT);
+      g_hum_pct = h;                      g_hum_has_data = true;  markLocal(SIG_HUM, SRC_HUB_DHT);
     } else { s_dhtFail++; }
     vTaskDelay(pdMS_TO_TICKS(DHT_PERIOD_MS));
   }
@@ -249,7 +257,7 @@ static void fuelTask(void *) {
     avg += (analogRead(FUEL_PIN) - avg) * 0.1f;      // slow filter: fuel sloshes, the gauge should not
     g_fuel_pct = avg * 100.0f / 4095.0f;
     g_fuel_has_data = true;
-    gauge_config_mark_signal_active(SIG_FUEL);
+    markLocal(SIG_FUEL, SRC_HUB_FUEL);
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
@@ -295,7 +303,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>CAN signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/can>Raw CAN</a><br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a><br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -336,6 +344,49 @@ poll();setInterval(poll,1000);scr();setInterval(scr,1000);
       "s.textContent='Frames: '+j.total+' | bus: '+(ST[j.state]||'?')+' | rx errors: '+j.rxerr+' | missed: '+j.missed;"
       "j.ids.sort((a,b)=>a.id-b.id);t.innerHTML=j.ids.map(e=>'<tr class='+(e.age>2000?'old':'')+'><td>0x'+e.id.toString(16).toUpperCase().padStart(3,'0')+'</td><td>'+e.d+'</td><td>'+e.n+'</td><td>'+e.age+'</td></tr>').join('');}catch(e){}}"
       "setInterval(u,500);u();</script>"));
+  });
+  // ---- sensors: every signal that has ever had data, its value, age and where it comes from ----
+  server.on("/sensors.json", HTTP_GET, []() {
+    uint32_t now = millis();
+    String j = "[";
+    bool first = true;
+    for (int i = 1; i < SIG_COUNT; i++) {
+      uint32_t seen = s_seenMs[i]; if (!seen) continue;
+      float v = gauge_config_signal_value((SignalId)i);
+      char b[120];
+      snprintf(b, sizeof b, "%s{\"sig\":%d,\"v\":%.2f,\"age\":%u,\"src\":%u}", first ? "" : ",", i, (v == v && v > -1e30f && v < 1e30f) ? (double)v : 0.0,
+               (unsigned)(now - seen), (unsigned)s_srcId[i]);
+      j += b; first = false;
+    }
+    j += "]";
+    server.send(200, "application/json", j);
+  });
+  server.on("/sensors", HTTP_GET, []() {
+    server.send(200, "text/html", R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:640px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
+table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #222}th{color:#999;font-weight:normal}
+.v{font-family:monospace;text-align:right}.tag{padding:1px 6px;border-radius:4px;font-size:12px}.hub{background:#1b5e20}.can{background:#0d47a1}
+.stale td{color:#666}.note{color:#999;font-size:13px}</style></head><body>
+<h2>Sensors</h2><div class="note" id="sum"></div>
+<table><thead><tr><th>Signal</th><th class="v">Value</th><th>Source</th><th class="v">Age</th></tr></thead><tbody id="t"></tbody></table>
+<p class="note">Hub = a sensor wired to this board. ECU = decoded from a CAN frame. Grey = not heard for 2 s.</p>
+<p><a href="/">Back</a> | <a href="/can">Raw CAN</a></p>
+<script>
+const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
+11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
+20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level"};
+const UNIT={1:"rpm",2:"F",3:"kPa",4:"",5:"kPa",6:"F",7:"kPa",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%"};
+const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0};
+const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)"};
+function ecu(id){return id>=0x200&&id<=0x20F?"rusEFI":id>=0x5F0&&id<=0x63F?"MegaSquirt/Link":"";}
+async function u(){try{const l=await (await fetch("/sensors.json")).json();let h=0,c=0,e=new Set();
+document.getElementById("t").innerHTML=l.map(s=>{const isHub=HUB[s.src]!==undefined;isHub?h++:c++;const k=ecu(s.src);if(!isHub&&k)e.add(k);
+const flag=s.sig>=11&&s.sig<=19;const val=flag?(s.v>0.5?"ON":"off"):s.v.toFixed(DEC[s.sig]??1)+" "+(UNIT[s.sig]||"");
+const src=isHub?'<span class="tag hub">Hub</span> '+HUB[s.src]:'<span class="tag can">ECU</span> CAN 0x'+s.src.toString(16).toUpperCase()+(k?" ("+k+")":"");
+return '<tr class="'+(s.age>2000?'stale':'')+'"><td>'+(NAME[s.sig]||("Signal "+s.sig))+'</td><td class="v">'+val+'</td><td>'+src+'</td><td class="v">'+(s.age<1000?s.age+" ms":(s.age/1000).toFixed(0)+" s")+'</td></tr>';}).join("");
+document.getElementById("sum").textContent=h+" from the hub, "+c+" from the ECU"+(e.size?" ("+[...e].join(", ")+")":"");}catch(x){}}
+u();setInterval(u,500);
+</script></body></html>)HTML");
   });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];

@@ -74,7 +74,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - EGT: MAX6675 on GPIO18 (SCK), 19 (SO), 23 (CS), every 250 ms; sent on CAN as 0x7F0 for rusEFI.
   - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Fuel level: pot (mock sender) on GPIO36, 0-100 %, signal Fuel Level.
-  - Web: `/` status and brightness settings, `/can` raw CAN monitor, `/update` OTA.
+  - Web: `/` screens status (green/red) and brightness settings, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.
 - `input_btn.h` - button struct (in a header because the Arduino builder moves prototypes above the sketch).
 - `gauge_app.h`, `web_monitor.h`, `simulator.h` - small hub versions of the screen files so the shared decoder compiles here.
 - `can_parsing.h`, `can_flags.h`, `gauge_config.h` - **not in the repo**; copied from the screen folder by the build command so there is only one decoder.
