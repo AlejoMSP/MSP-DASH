@@ -15,6 +15,9 @@ typedef struct __attribute__((packed)) {
 } LinkPacket;
 // has_mask has 32 bits, one per signal. Past 32 signals it needs to grow, or signals would silently drop.
 static_assert(SIG_COUNT <= 32, "LinkPacket.has_mask holds 32 signals: make it uint64_t before adding more");
+// Bit 0 of has_mask belongs to SIG_NONE, which never carries data, so it is used as a flag: the hub's bench simulator
+// is running and these values are FAKE. The screens show SIMULATED and the main screen does not log them.
+#define LINK_MASK_SIMULATED (1u << SIG_NONE)
 
 // "MSC1": a command from the hub (page next/prev, brightness); target "" = all screens
 #define LINK_CMD_MAGIC 0x4D534331u

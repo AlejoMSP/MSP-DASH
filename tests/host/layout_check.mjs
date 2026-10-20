@@ -19,7 +19,7 @@ async function chromePath() {
   return { exe: await mod.executablePath(), args: mod.args };
 }
 const outDir = process.argv[2] || '/tmp/layout_shots'; fs.mkdirSync(outDir, { recursive: true });
-const PAGES = [['/', 'front'], ['/gauges', 'gauges'], ['/sd', 'sd'], ['/update', 'update'], ['/log-channels', 'logchans'], ['/simulator', 'simulator']];
+const PAGES = [['/', 'front'], ['/gauges', 'gauges'], ['/sd', 'sd'], ['/update', 'update'], ['/log-channels', 'logchans']];
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const PROFILES = [
   { name: 'desktop', pointer: { type: 4, hover: 2 }, viewport: { width: 1280, height: 1000, deviceScaleFactor: 1 }, phone: false },

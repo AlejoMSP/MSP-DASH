@@ -19,7 +19,12 @@ static uint32_t s_lastTickMs = 0;
 static float s_values[SIG_COUNT];
 static char s_stopReason[64] = "";
 
-bool sim_is_active(void) { return s_active; }
+static volatile uint32_t s_remoteMs = 0;    // when a packet flagged "simulated" last arrived from the hub
+static volatile bool s_remoteSeen = false;   // a flagged packet has arrived at least once
+#define SIM_REMOTE_HOLD_MS 1000              // the hub sends 20 packets a second; one second without the flag = it stopped
+
+bool sim_is_active(void) { return s_active || (s_remoteSeen && (uint32_t)(millis() - s_remoteMs) < SIM_REMOTE_HOLD_MS); }
+void sim_note_remote(void) { s_remoteMs = millis(); s_remoteSeen = true; }
 bool sim_is_manual(void) { return s_manual; }
 const char *sim_last_stop_reason(void) { return s_stopReason; }
 float sim_value(int sig) { return (sig > 0 && sig < SIG_COUNT) ? s_values[sig] : 0.0f; }

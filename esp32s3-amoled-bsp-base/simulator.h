@@ -7,9 +7,13 @@
   decoder writes, so the gauges, trend graphs, alerts and web page can be
   tested at a desk with no ECU connected.
 
+  It runs on the HUB (build 162 on): the hub copies simulator.cpp/.h from this folder at compile time, runs it,
+  and flags its data packets as simulated. The screens no longer have a simulator page; they only
+  hear the flag (sim_note_remote) and treat it like their own simulator: SIMULATED on screen, no SD logging.
+
   Safety rules (each one is covered by the host tests):
     - Always OFF at boot. Nothing about it is saved.
-    - Switched on only from the /simulator web page.
+    - Switched on only from the hub's /simulator web page.
     - Stops itself after 10 minutes without a change on the page.
     - Stops itself the moment ANY real CAN frame arrives, so fake and real
       data can never mix, and refuses to start while real frames are arriving.
@@ -23,8 +27,12 @@
 extern "C" {
 #endif
 
-// True while fake data is being fed. (C-callable: gauge_app.c and sd_logging use it.)
+// True while fake data is being fed: by this board's own simulator, or (on a screen) by the hub's, as flagged in the
+// data packets heard in the last second. (C-callable: gauge_app.c and sd_logging use it.)
 bool sim_is_active(void);
+
+// A screen calls this for every hub data packet flagged LINK_MASK_SIMULATED.
+void sim_note_remote(void);
 
 #ifdef __cplusplus
 }

@@ -64,7 +64,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 **Storage**
 - `sd_storage.cpp/.h` - SD card mount and web file browser.
 - `sd_logging.cpp/.h` - CSV logging, only above 800 rpm, chosen channels.
-- `simulator.cpp/.h` - bench simulator (demo sweep or manual values). Stops when real CAN appears.
+- `simulator.cpp/.h` - bench simulator (demo sweep or manual values). Stops when real CAN appears. RUNS ON THE HUB (copied there at compile time); on a screen only `sim_note_remote` / `sim_is_active` matter.
 
 ## 4. Hub firmware (`esp32-input/`)
 
@@ -76,9 +76,10 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - EGT: MAX6675 on GPIO18 (SCK), 19 (SO), 23 (CS), every 250 ms; sent on CAN as 0x7F0 for rusEFI.
   - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Fuel level: pot (mock sender) on GPIO36, 0-100 %, signal Fuel Level.
-  - Web: `/` screens status (green/red) and brightness settings, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.
+  - Bench simulator (build 15 on): `simulator.cpp/.h` copied in from the screen folder at compile time. `/simulator` page; its data packets carry `LINK_MASK_SIMULATED` (bit 0 of `has_mask`), the screens show SIMULATED and the main screen does not log. The hub's own sensors stop writing their values while it runs.
+- Web: `/` screens status (green/red) and brightness settings, `/simulator`, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.
 - `input_btn.h` - button struct (in a header because the Arduino builder moves prototypes above the sketch).
-- `gauge_app.h`, `web_monitor.h`, `simulator.h` - small hub versions of the screen files so the shared decoder compiles here.
+- `gauge_app.h`, `web_monitor.h` - small hub versions of the screen files so the shared decoder compiles here. (`simulator.h/.cpp` are the real ones, copied in.)
 - `can_parsing.h`, `can_flags.h`, `gauge_config.h` - **not in the repo**; copied from the screen folder by the build command so there is only one decoder.
 
 ## 5. Packets (ESP-NOW broadcast)

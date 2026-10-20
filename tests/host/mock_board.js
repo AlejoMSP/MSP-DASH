@@ -5,7 +5,7 @@ const http = require('http');
 const { pageHtml } = require('./extract_page.js');
 let WebSocketServer; try { ({ WebSocketServer } = require('ws')); } catch (e) { console.error("npm install ws  (needed for the live connection)"); process.exit(1); }
 
-const PAGES = { '/': 'INDEX_HTML', '/gauges': 'GAUGES_HTML', '/sd': 'SD_HTML', '/update': 'OTA_HTML', '/log-channels': 'LOGCHANS_HTML', '/simulator': 'SIM_HTML' };
+const PAGES = { '/': 'INDEX_HTML', '/gauges': 'GAUGES_HTML', '/sd': 'SD_HTML', '/update': 'OTA_HTML', '/log-channels': 'LOGCHANS_HTML' };
 const SIGNALS = ['None', 'RPM', 'Coolant Temp', 'MAP/Boost', 'AFR', 'Oil Pressure', 'Oil Temp', 'Fuel Pressure', 'Ethanol %', 'Throttle Position', 'Battery Voltage',
   'Rev Limiter Active', 'Main Relay', 'Fuel Pump', 'Check Engine Light', 'O2 Heater', 'Lambda Protection', 'Fan 1', 'Fan 2', 'Brake Pedal'];   // 11..19 are the ECU on/off flags
 const cell = (o) => Object.assign({ enabled: true, signal: 1, gauge_type: 0, min: 0, max: 100, rest: 0, caption: 'RPM', needle_color: 0xFFFFFF, tick_color: 0xFFFFFF, bg_color: 0, value_divisor: 1, tick_count: 26, major_nth: 5, refresh_hz: 10, show_value: false, value_font_size: 28, tick_font_size: 28, caption_font_size: 0, caption_on_face: false, units: '', v_align: 0, start_deg: 225, end_deg: 135, low_crit_on: false, low_crit: 0, low_warn_on: false, low_warn: 0, high_warn_on: false, high_warn: 0, high_crit_on: false, high_crit: 0, zone_style: 1, needle_hub_pct: 0, needle_tip_pct: 0, has_warning: false, warning_threshold: 0, warning_above: false, alert_fullscreen: false, history_sec: 30, ref_enabled: false, ref_value: 0 }, o);

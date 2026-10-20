@@ -1,4 +1,5 @@
 // espnow_link.cpp - see espnow_link.h.
+#include "simulator.h"
 #include "espnow_link.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
@@ -104,6 +105,7 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
 
 // Writes the received values exactly the way the CAN decoder would.
 static void applyPacket(const LinkPacket *p) {
+  if (p->has_mask & LINK_MASK_SIMULATED) sim_note_remote();   // the hub's simulator is running: show SIMULATED, do not log
   int n = p->count < SIG_COUNT ? p->count : SIG_COUNT;
   #define PUT(sig, var, has) if (sig < n && (p->has_mask >> sig & 1u)) { var = p->v[sig]; has = true; gauge_config_mark_signal_active((SignalId)(sig)); }
   PUT(SIG_RPM, g_rpm, g_rpm_has_data)

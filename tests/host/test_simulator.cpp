@@ -148,6 +148,17 @@ int main() {
     CHECK(g_flag_seen == 0, "stopping clears the 'seen' bits so the lamps go back to no-data");
   }
 
+  printf("R the hub's simulator, as a screen hears it (packets flagged LINK_MASK_SIMULATED)\n");
+  sim_stop("test"); g_fake_millis += 1000;
+  CHECK(!sim_is_active(), "off before any flagged packet");
+  sim_note_remote();
+  CHECK(sim_is_active(), "a flagged packet: the screen counts as simulating (SIMULATED on screen, no SD logging)");
+  g_fake_millis += 999; CHECK(sim_is_active(), "still simulating 999 ms later");
+  g_fake_millis += 2;   CHECK(!sim_is_active(), "one second without the flag: back to real data");
+  sim_note_remote(); g_fake_millis = 0xFFFFFF00u; sim_note_remote(); g_fake_millis += 500;
+  CHECK(sim_is_active(), "correct across the 32-bit millis wrap");
+  g_fake_millis += 2000; CHECK(!sim_is_active(), "and ends after it");
+
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }
