@@ -96,7 +96,7 @@ typedef struct {
   int32_t value_font_size; // readout size: 14/28/36/48/64/80/96/120 (see gauge_style.h). Big readouts shrink to the biggest size that fits the cell.
   int32_t caption_font_size; // caption (and units) text: 14/20/28/36/48; 0 = never set, the display's default font. Big text shrinks to fit.
   bool caption_on_face;    // needle/half-moon only: the caption is printed ON the dial face, above the hub, instead of at the bottom of the cell
-  char units[GAUGE_UNITS_MAXLEN]; // e.g. "F", "kPa": printed under the readout (needle dials with Show value, and number cells)
+  char units[GAUGE_UNITS_MAXLEN]; // e.g. "F", "psi": printed under the readout (needle dials with Show value, and number cells)
   int32_t h_align;         // the caption in the cell: 0 centre, 1 left, 2 right (readout and units always centred)
   int32_t decimals;        // digits after the point in the readout: 0, 1 or 2 (configs saved before this existed: 1)
   int32_t v_align;         // where the gauge stands in its cell: 0 centre, 1 top, 2 bottom (needle, half-moon and number cells)
@@ -141,7 +141,7 @@ typedef enum { PAGE_GAUGES = 0, PAGE_INDICATORS = 1, PAGE_KIND_COUNT } PageKind;
 typedef struct {
   SignalId signal;
   int32_t op;                       // GAUGE_IND_ABOVE (0) or GAUGE_IND_BELOW (1)
-  float threshold;                  // in the signal's own units (rpm, degrees F, kPa, AFR, %, volts)
+  float threshold;                  // in the signal's own units (rpm, degrees F, psi, AFR, %, volts)
   float hysteresis;                 // >= 0: once on, stays on until the value is this far back past the threshold
   char on_text[IND_TEXT_MAXLEN];    // printable ASCII
   char off_text[IND_TEXT_MAXLEN];

@@ -28,11 +28,11 @@ SimRange sim_range(int sig) {
   switch (sig) {
     case SIG_RPM:   return {0, 9000, 50};
     case SIG_CLT:   return {50, 260, 1};
-    case SIG_MAP:   return {0, 250, 1};
+    case SIG_MAP:   return {-15, 30, 0.5f};   // boost psi
     case SIG_AFR:   return {8, 22, 0.1f};
-    case SIG_OILP:  return {0, 150, 1};
+    case SIG_OILP:  return {0, 100, 1};       // psi
     case SIG_OILT:  return {50, 300, 1};
-    case SIG_FUELP: return {0, 150, 1};
+    case SIG_FUELP: return {0, 100, 1};       // psi
     case SIG_FLEX:  return {0, 100, 1};
     case SIG_TPS:   return {0, 100, 1};
     case SIG_BATTV: return {8, 16, 0.1f};
@@ -72,7 +72,7 @@ void sim_demo_values(float t, float out[SIG_COUNT]) {
 
   for (int i = 0; i < SIG_COUNT; i++) out[i] = 0;
   out[SIG_RPM]   = rpm;
-  out[SIG_MAP]   = 35.0f + 155.0f * load + 3.0f * sinf(t * 5.0f);     // near vacuum at idle, boost at load
+  out[SIG_MAP]   = -10.0f + 22.0f * load + 0.4f * sinf(t * 5.0f);    // boost psi: vacuum at idle, about 12 psi at full load
   out[SIG_TPS]   = 3.0f + 90.0f * load;
   out[SIG_AFR]   = 14.7f - 2.7f * load + 0.2f * sinf(t * 3.1f);
   out[SIG_OILP]  = 50.0f + 35.0f * load + 1.5f * sinf(t * 2.0f);
@@ -104,11 +104,11 @@ void sim_demo_values(float t, float out[SIG_COUNT]) {
 static void writeValues(const float *v) {
   g_rpm = v[SIG_RPM];         g_rpm_has_data = true;   gauge_config_mark_signal_active(SIG_RPM);
   g_clt_f = v[SIG_CLT];       g_clt_has_data = true;   gauge_config_mark_signal_active(SIG_CLT);
-  g_boost_kpa = v[SIG_MAP];   g_boost_has_data = true; gauge_config_mark_signal_active(SIG_MAP);
+  g_boost_psi = v[SIG_MAP];   g_boost_has_data = true; gauge_config_mark_signal_active(SIG_MAP);
   g_afr = v[SIG_AFR];         g_afr_has_data = true;   gauge_config_mark_signal_active(SIG_AFR);
-  g_oilp_kpa = v[SIG_OILP];   g_oilp_has_data = true;  gauge_config_mark_signal_active(SIG_OILP);
+  g_oilp_psi = v[SIG_OILP];   g_oilp_has_data = true;  gauge_config_mark_signal_active(SIG_OILP);
   g_oilt_f = v[SIG_OILT];     g_oilt_has_data = true;  gauge_config_mark_signal_active(SIG_OILT);
-  g_fuelp_kpa = v[SIG_FUELP]; g_fuelp_has_data = true; gauge_config_mark_signal_active(SIG_FUELP);
+  g_fuelp_psi = v[SIG_FUELP]; g_fuelp_has_data = true; gauge_config_mark_signal_active(SIG_FUELP);
   g_flex_pct = v[SIG_FLEX];   g_flex_has_data = true;  gauge_config_mark_signal_active(SIG_FLEX);
   g_tps = v[SIG_TPS];         g_tps_has_data = true;   gauge_config_mark_signal_active(SIG_TPS);
   g_battv = v[SIG_BATTV];     g_battv_has_data = true; gauge_config_mark_signal_active(SIG_BATTV);

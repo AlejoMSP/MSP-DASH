@@ -13,19 +13,19 @@ R"rawliteral(
     // Signal numbers = the order of SignalId in gauge_config.h (tests/host/test_editor_indicators.js checks this table against that file).
     const SIG = { RPM:1, CLT:2, MAP:3, AFR:4, OILP:5, OILT:6, FUELP:7, FLEX:8, TPS:9, BATTV:10,
                   REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24 };
-    const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"kPa", 4:"AFR", 5:"kPa", 6:"F", 7:"kPa", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%" };
+    const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"psi", 4:"AFR", 5:"psi", 6:"F", 7:"psi", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%" };
     const IND_RED = 0xE53935, IND_AMBER = 0xFFB300, IND_GREEN = 0x43A047, IND_BLUE = 0x1E88E5, IND_OFF = 0x2A2A2A;
 
     // Ready-made lamps. A threshold lamp is "above" (op 0) or "below" (op 1) a value, in the signal's own units; an ECU on/off
     // flag is 1 or 0, so "flag on" is above 0.5. hyst = hysteresis: once on, the lamp stays on until the value is that far back.
     const IND_PRESETS = [
-      { name:"Low oil pressure",   signal:SIG.OILP,  op:1, threshold:40,   hyst:3,   text:"OIL",   color:IND_RED },
+      { name:"Low oil pressure",   signal:SIG.OILP,  op:1, threshold:10,   hyst:2,   text:"OIL",   color:IND_RED },
       { name:"High coolant temp",  signal:SIG.CLT,   op:0, threshold:220,  hyst:5,   text:"TEMP",  color:IND_RED },
       { name:"High oil temp",      signal:SIG.OILT,  op:0, threshold:240,  hyst:5,   text:"OIL T", color:IND_RED },
       { name:"Low battery",        signal:SIG.BATTV, op:1, threshold:12,   hyst:0.3, text:"BATT",  color:IND_AMBER },
       { name:"Lean mixture",       signal:SIG.AFR,   op:0, threshold:15.5, hyst:0.3, text:"LEAN",  color:IND_AMBER },
-      { name:"Low fuel pressure",  signal:SIG.FUELP, op:1, threshold:40,   hyst:3,   text:"FUEL",  color:IND_RED },
-      { name:"Boost",              signal:SIG.MAP,   op:0, threshold:100,  hyst:3,   text:"BOOST", color:IND_BLUE },
+      { name:"Low fuel pressure",  signal:SIG.FUELP, op:1, threshold:30,   hyst:2,   text:"FUEL",  color:IND_RED },
+      { name:"Boost",              signal:SIG.MAP,   op:0, threshold:0.5,  hyst:0.3,   text:"BOOST", color:IND_BLUE },
       { name:"High ethanol (E85)", signal:SIG.FLEX,  op:0, threshold:50,   hyst:2,   text:"E85",   color:IND_GREEN },
       { name:"Rev limit (by RPM)", signal:SIG.RPM,   op:0, threshold:6800, hyst:100, text:"REV",   color:IND_RED, blink:true },
       { name:"Check engine light", signal:SIG.CEL,        op:0, threshold:0.5, hyst:0, text:"CHECK ENG", color:IND_AMBER },
@@ -201,10 +201,10 @@ R"rawliteral(
     // =====================================================================================
     // Gauge templates: choosing a signal fills in its usual scale and warning. The same list as GAUGE_DEFAULT_RANGES in
     // gauge_style.h (tests/host/test_editor_cells.js reads that file and checks they agree).
-    // [min, max, warning on (1/0), warning level, 1 = warn above / 0 = warn below]. Temperatures F, pressures kPa.
+    // [min, max, warning on (1/0), warning level, 1 = warn above / 0 = warn below]. Temperatures F, pressures psi, MAP is boost psi.
     const SIGNAL_DEFAULT_RANGES = {
-      [SIG.RPM]: [0, 8000, 1, 7000, 1], [SIG.CLT]: [40, 300, 1, 230, 1], [SIG.MAP]: [0, 250, 0, 0, 1], [SIG.AFR]: [10, 20, 0, 0, 1],
-      [SIG.OILP]: [0, 700, 1, 70, 0], [SIG.OILT]: [40, 300, 1, 260, 1], [SIG.FUELP]: [0, 700, 0, 0, 0], [SIG.FLEX]: [0, 100, 0, 0, 1],
+      [SIG.RPM]: [0, 8000, 1, 7000, 1], [SIG.CLT]: [40, 300, 1, 230, 1], [SIG.MAP]: [-15, 30, 0, 0, 1], [SIG.AFR]: [10, 20, 0, 0, 1],
+      [SIG.OILP]: [0, 100, 1, 10, 0], [SIG.OILT]: [40, 300, 1, 260, 1], [SIG.FUELP]: [0, 100, 0, 0, 0], [SIG.FLEX]: [0, 100, 0, 0, 1],
       [SIG.TPS]: [0, 100, 0, 0, 1], [SIG.BATTV]: [8, 16, 1, 12, 0], [SIG.EGT]: [0, 1800, 1, 1600, 1], [SIG.IAT]: [0, 200, 1, 150, 1],
       [SIG.AMBT]: [0, 120, 0, 0, 1], [SIG.HUM]: [0, 100, 0, 0, 1], [SIG.FUEL]: [0, 100, 1, 15, 0] };
     // Caption / units text sizes. 0 = "Normal": the display's default font, as captions always looked. A size too big for the cell shrinks to the largest that fits.
@@ -214,7 +214,7 @@ R"rawliteral(
     // Digits after the point for a cell's readout; anything unset or unknown is 1, what readouts always showed.
     function decimalsOf(c) { const d = Number(c && c.decimals); return (d === 0 || d === 1 || d === 2) ? d : 1; }
 
-    // Choosing a signal starts the gauge from its template: scale, needle rest at the bottom (MAP at 100), and the warning (turned
+    // Choosing a signal starts the gauge from its template: scale, needle rest at the bottom (MAP at 0, zero boost), and the warning (turned
     // off when the template has none, so a warning left from the old signal does not carry over). Signals without a
     // template (the ECU on/off flags) keep whatever the cell has.
     function setCellSignal(pIdx, cIdx, sig) {
@@ -222,7 +222,7 @@ R"rawliteral(
       c.signal = sig;
       const r = SIGNAL_DEFAULT_RANGES[sig];
       if (!r) return;
-      c.min = r[0]; c.max = r[1]; c.rest = sig === SIG.MAP ? 100 : r[0];   // MAP rests at 100 kPa: the atmosphere, zero boost
+      c.min = r[0]; c.max = r[1]; c.rest = sig === SIG.MAP ? 0 : r[0];   // MAP rests at 0: the atmosphere, zero boost
       c.has_warning = !!r[2];
       if (r[2]) { c.warning_threshold = r[3]; c.warning_above = !!r[4]; }
       else c.alert_fullscreen = false;

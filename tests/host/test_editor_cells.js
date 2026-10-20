@@ -42,8 +42,8 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const fw = {}; for (const m of block.matchAll(/X\((SIG_[A-Z0-9]+),\s*(-?\d+),\s*(-?\d+),\s*(\d),\s*(-?\d+),\s*(\d)\)/g)) fw[ENUM.indexOf(m[1])] = [+m[2], +m[3], +m[4], +m[5], +m[6]];
     const js = probe.run('JSON.stringify(SIGNAL_DEFAULT_RANGES)');
     check(Object.keys(fw).length === 15 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's gauge templates are EXACTLY the firmware's list: " + js);
-    check(fw[4].join() === "10,20,0,0,1" && fw[2].join() === "40,300,1,230,1" && fw[10].join() === "8,16,1,12,0" && fw[5].join() === "0,700,1,70,0", "AFR 10-20; coolant 40-300 F warn above 230; battery 8-16 V warn below 12; oil pressure 0-700 kPa warn below 70");
-    check(fw[3].join() === "0,250,0,0,1", "MAP/boost 0-250 kPa absolute (it reads above 100 under boost)");
+    check(fw[4].join() === "10,20,0,0,1" && fw[2].join() === "40,300,1,230,1" && fw[10].join() === "8,16,1,12,0" && fw[5].join() === "0,100,1,10,0", "AFR 10-20; coolant 40-300 F warn above 230; battery 8-16 V warn below 12; oil pressure 0-100 psi warn below 10");
+    check(fw[3].join() === "-15,30,0,0,1", "MAP is boost psi: -15 (vacuum) to 30");
     check(Object.keys(fw).every(k => !(+k >= 11 && +k <= 19)), "the ECU on/off flags have no template"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
@@ -64,10 +64,10 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(warn().startsWith("false"), "AFR has no template warning, so the warning is off (got " + warn() + ")");
     R('setCellSignal(0, 0, 2)'); check(scale() === "2,40,300,40" && warn() === "true,230,true", "coolant: 40 to 300, warn above 230 (got " + scale() + " / " + warn() + ")");
     R('setCellSignal(0, 0, 6)'); check(scale() === "6,40,300,40" && warn() === "true,260,true", "oil temperature: 40 to 300, warn above 260");
-    R('setCellSignal(0, 0, 5)'); check(scale() === "5,0,700,0" && warn() === "true,70,false", "oil pressure: 0 to 700 kPa, warn BELOW 70");
+    R('setCellSignal(0, 0, 5)'); check(scale() === "5,0,100,0" && warn() === "true,10,false", "oil pressure: 0 to 100 psi, warn BELOW 10");
     R('setCellSignal(0, 0, 10)'); check(scale() === "10,8,16,8" && warn() === "true,12,false", "battery: 8 to 16 V, warn below 12");
     R('setCellSignal(0, 0, 1)'); check(scale() === "1,0,8000,0" && warn() === "true,7000,true", "RPM: 0 to 8000, warn above 7000");
-    R('setCellSignal(0, 0, 3)'); check(scale() === "3,0,250,100" && warn().startsWith("false"), "MAP: 0 to 250 kPa, resting at 100 (atmosphere), and the RPM warning does NOT carry over");
+    R('setCellSignal(0, 0, 3)'); check(scale() === "3,-15,30,0" && warn().startsWith("false"), "MAP: -15 to 30 psi boost, resting at 0 (atmosphere), and the RPM warning does NOT carry over");
     R('pages[0].cells[0].alert_fullscreen = true; setCellSignal(0, 0, 9)'); check(R('pages[0].cells[0].alert_fullscreen') === false, "switching to a signal with no warning also turns off the full-screen alert");
     R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; pages[0].cells[0].rest = 7; pages[0].cells[0].has_warning = true;'); R('setCellSignal(0, 0, 14)');
     check(scale() === "14,5,50,7" && warn().startsWith("true"), "an ECU on/off flag (no template): the signal changes, everything you set is left alone");

@@ -60,7 +60,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const L = R('pages[1].indicators');
     check(L.map(l => l.on_text).join("|") === "CHECK ENG|OIL|TEMP|BATT|REV LIM|FAN 1", "starting lamps: check engine, oil, temperature, battery, rev limiter, fan: " + L.map(l => l.on_text).join("|"));
     check(L[0].signal === 14 && L[0].op === 0 && L[0].threshold === 0.5 && L[0].on_color === 0xFFB300 && L[0].on_text_color === 0x000000, "check engine: an ECU flag, amber with black text (readable)");
-    check(L[1].signal === 5 && L[1].op === 1 && L[1].threshold === 40 && L[1].hysteresis === 3 && L[1].on_color === 0xE53935, "oil: oil pressure BELOW 40, hysteresis 3, red");
+    check(L[1].signal === 5 && L[1].op === 1 && L[1].threshold === 10 && L[1].hysteresis === 2 && L[1].on_color === 0xE53935, "oil: oil pressure BELOW 10 psi, hysteresis 2, red");
     check(L[4].blink === true && L[0].blink === false, "the rev limiter flashes, the others do not");
     check(L.every(l => l.off_color === 0x2A2A2A && l.off_text_color === 0x808080 && l.off_text === l.on_text), "every lamp has a dark off look that still shows its label, dimly");
 
@@ -69,11 +69,11 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(html.includes('class="badge">Indicators</span>') && (html.match(/class="cell lamp-card"/g) || []).length === 6 && (html.match(/class="chip"/g) || []).length === 12, "an Indicators badge, six lamp cards, an ON and an OFF preview chip on each");
     check(html.includes('<option value="2" selected>2 columns</option>') && html.includes('4 columns'), "the columns choice, with 2 selected");
     check(html.includes("Lamp is on while the ECU flag is") && (html.match(/Lamp is on while the ECU flag is/g) || []).length === 3, "flag lamps (check engine, rev limiter, fan) say 'on while the ECU flag is On/Off' instead of a threshold");
-    check(html.includes("Threshold (kPa)") && html.includes("Threshold (F)") && html.includes("Threshold (V)"), "analog lamps show their threshold with the signal's own unit (kPa, deg F, V)");
+    check(html.includes("Threshold (psi)") && html.includes("Threshold (F)") && html.includes("Threshold (V)"), "analog lamps show their threshold with the signal's own unit (psi, deg F, V)");
     check(html.includes('background:#e53935;color:#ffffff') && html.includes('background:#2a2a2a;color:#808080'), "the preview chips use the lamp's real colours");
     check(html.includes("12 is the most") === false && !/addlamp[^>]*disabled/.test(html), "with 6 lamps the add button is active");
     check(R('indicatorSignalOptions(14)').includes('<optgroup label="ECU on/off flags">') && R('indicatorSignalOptions(14)').includes('<option value="14" selected>Check Engine Light'), "the lamp signal list groups the ECU flags and selects the right one");
-    check(R('indicatorSignalOptions(0)').includes("Oil Pressure [kPa]"), "analog entries show their unit in brackets");
+    check(R('indicatorSignalOptions(0)').includes("Oil Pressure [psi]"), "analog entries show their unit in brackets");
     R('renderPages()');
     check(R('document.getElementById("pages").innerHTML').includes("Page 1") && R('document.getElementById("pages").innerHTML').includes("Page 2") && R('document.getElementById("pages").innerHTML').includes("lamp-card") && R('document.getElementById("pages").innerHTML').includes("page-header"), "renderPages draws the gauge page and the indicators page together, in order");
 

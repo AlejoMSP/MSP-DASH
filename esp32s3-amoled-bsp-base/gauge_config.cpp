@@ -95,11 +95,11 @@ static void applyDefaults(void) {
   // before.
   struct { SignalId sig; int32_t min, max, rest; const char *cap; bool warn; float thresh; bool above; } defs[8] = {
     { SIG_CLT,   65, 250, 65,  "CLT",        true,  220, true  },
-    { SIG_MAP,   0,  250, 100, "MAP",        false, 0,   false },
+    { SIG_MAP,   -15, 30, 0,  "BOOST",      false, 0,   false },
     { SIG_AFR,   10, 20,  10,  "AFR",        true,  15,  true  },
-    { SIG_OILP,  0,  100, 0,   "OIL PRESS",  true,  40,  false },
+    { SIG_OILP,  0,  100, 0,   "OIL PRESS",  true,  10,  false },
     { SIG_OILT,  65, 250, 65,  "OIL TEMP",   true,  220, true  },
-    { SIG_FUELP, 0,  100, 0,   "FUEL PRESS", true,  40,  false },
+    { SIG_FUELP, 0,  100, 0,   "FUEL PRESS", true,  30,  false },
     { SIG_FLEX,  0,  100, 0,   "ETH %",      false, 0,   false },
     { SIG_RPM,   1,  9,   1,   "RPM x1000",  false, 0,   false },
   };
@@ -551,11 +551,11 @@ float gauge_config_signal_value(SignalId sig) {
   switch (sig) {
     case SIG_RPM: return g_rpm;
     case SIG_CLT: return g_clt_f;
-    case SIG_MAP: return g_boost_kpa;
+    case SIG_MAP: return g_boost_psi;
     case SIG_AFR: return g_afr;
-    case SIG_OILP: return g_oilp_kpa;
+    case SIG_OILP: return g_oilp_psi;
     case SIG_OILT: return g_oilt_f;
-    case SIG_FUELP: return g_fuelp_kpa;
+    case SIG_FUELP: return g_fuelp_psi;
     case SIG_FLEX: return g_flex_pct;
     case SIG_TPS: return g_tps;
     case SIG_BATTV: return g_battv;

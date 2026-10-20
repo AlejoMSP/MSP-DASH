@@ -10,8 +10,8 @@ int main(void) {
   printf("1. gauge templates\n");
   CHECK(range(SIG_AFR, 10, 20), "AFR is 10 to 20");
   CHECK(range(SIG_CLT, 40, 300) && range(SIG_OILT, 40, 300), "coolant and oil temperature are 40 to 300 F");
-  CHECK(range(SIG_OILP, 0, 700) && range(SIG_FUELP, 0, 700), "oil and fuel pressure are 0 to 700 kPa (about 100 psi)");
-  CHECK(range(SIG_MAP, 0, 250), "MAP/boost is 0 to 250 kPa absolute");
+  CHECK(range(SIG_OILP, 0, 100) && range(SIG_FUELP, 0, 100), "oil and fuel pressure are 0 to 100 psi");
+  CHECK(range(SIG_MAP, -15, 30), "MAP is boost psi, -15 to 30");
   CHECK(range(SIG_BATTV, 8, 16) && range(SIG_RPM, 0, 8000), "battery 8 to 16 V, RPM 0 to 8000");
   { int32_t a = 7, b = 7; bool none = true;
     for (int s = SIG_FIRST_FLAG; s < SIG_FLAG_END; s++) if (gauge_signal_default_range(s, &a, &b)) none = false;
@@ -19,7 +19,7 @@ int main(void) {
   { float l = 0; bool up = false;
     CHECK(gauge_signal_default_warning(SIG_CLT, &l, &up) && l == 230 && up, "coolant warns above 230");
     CHECK(gauge_signal_default_warning(SIG_BATTV, &l, &up) && l == 12 && !up, "battery warns below 12");
-    CHECK(gauge_signal_default_warning(SIG_OILP, &l, &up) && l == 70 && !up, "oil pressure warns below 70 kPa");
+    CHECK(gauge_signal_default_warning(SIG_OILP, &l, &up) && l == 10 && !up, "oil pressure warns below 10 psi");
     CHECK(!gauge_signal_default_warning(SIG_AFR, &l, &up) && !gauge_signal_default_warning(SIG_CEL, &l, &up), "AFR and the flags have no template warning"); }
   CHECK(!gauge_signal_default_range(-1, &(int32_t){0}, &(int32_t){0}) && !gauge_signal_default_range(SIG_COUNT, &(int32_t){0}, &(int32_t){0}), "out-of-range signal numbers are safe");
 

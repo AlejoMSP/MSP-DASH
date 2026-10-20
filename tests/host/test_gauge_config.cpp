@@ -29,7 +29,7 @@ SerialClass Serial;
 bool g_ffat_mounts = true;
 FFatClass FFat;
 void *heap_caps_malloc(size_t n, int) { return malloc(n); }
-volatile float g_afr, g_clt_f, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_boost_kpa, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct;
+volatile float g_afr, g_clt_f, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_boost_psi, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct;
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
               g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data;
 volatile int g_requested_page = -1;
@@ -439,8 +439,8 @@ int main(int argc, char **argv) {
     CHECK(clt && clt->min_val == 40 && clt->max_val == 300, "the default coolant gauge uses the template: 40 to 300");
     CHECK(oilt && oilt->min_val == 40 && oilt->max_val == 300, "the default oil temperature gauge is 40 to 300");
     CHECK(afr && afr->min_val == 10 && afr->max_val == 20, "the default AFR gauge is 10 to 20");
-    CHECK(oilp && oilp->min_val == 0 && oilp->max_val == 700 && fuelp && fuelp->min_val == 0 && fuelp->max_val == 700, "the default oil and fuel pressure gauges are 0 to 700 kPa");
-    CHECK(map && map->min_val == 0 && map->max_val == 250 && map->rest_val == 100, "the default MAP/boost gauge is 0 to 250 and still rests at 100 (atmosphere)"); }
+    CHECK(oilp && oilp->min_val == 0 && oilp->max_val == 100 && fuelp && fuelp->min_val == 0 && fuelp->max_val == 100, "the default oil and fuel pressure gauges are 0 to 100 psi");
+    CHECK(map && map->min_val == -15 && map->max_val == 30 && map->rest_val == 0, "the default boost gauge is -15 to 30 psi and rests at 0 (atmosphere)"); }
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);

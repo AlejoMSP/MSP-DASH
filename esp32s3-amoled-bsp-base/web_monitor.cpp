@@ -459,7 +459,7 @@ R"rawliteral(
           <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
           <div class="row2">
             <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
-            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. kPa" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
+            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. psi" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
           </div>
           ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
             <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}

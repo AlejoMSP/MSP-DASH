@@ -33,11 +33,11 @@ int gauge_app_get_num_pages(void);
 // reads/writes are atomic in practice on this architecture. ----
 extern volatile float g_afr;
 extern volatile float g_clt_f;
-extern volatile float g_oilp_kpa;
+extern volatile float g_oilp_psi;
 extern volatile float g_oilt_f;
-extern volatile float g_fuelp_kpa;
+extern volatile float g_fuelp_psi;
 extern volatile float g_flex_pct;
-extern volatile float g_boost_kpa;
+extern volatile float g_boost_psi;
 extern volatile float g_rpm;
 extern volatile float g_tps;
 extern volatile float g_battv;

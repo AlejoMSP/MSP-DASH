@@ -20,18 +20,18 @@
 
 // ---- gauge templates: default scale and warning per signal ----
 // When a signal is chosen for a gauge, the gauge starts from the usual range for that kind of reading, plus a
-// warning where there is an obvious one. Units are the firmware's: temperatures F, pressures kPa (100 psi is about
-// 690 kPa), MAP is absolute kPa (100 = atmosphere, so 250 is about 22 psi of boost). Everything can still be changed.
+// warning where there is an obvious one. Units: temperatures F, pressures psi, MAP is boost psi (0 = the atmosphere,
+// negative under vacuum). Everything can still be changed.
 //   X(signal, min, max, warning on, warning level, 1 = warn ABOVE the level / 0 = warn BELOW it)
 // (The web editors keep the same table in JavaScript; a test reads THIS list and checks they agree.)
 #define GAUGE_DEFAULT_RANGES(X) \
   X(SIG_RPM,   0,  8000, 1, 7000, 1) \
   X(SIG_CLT,   40, 300,  1, 230,  1) \
-  X(SIG_MAP,   0,  250,  0, 0,    1) \
+  X(SIG_MAP,   -15, 30,  0, 0,    1) \
   X(SIG_AFR,   10, 20,   0, 0,    1) \
-  X(SIG_OILP,  0,  700,  1, 70,   0) \
+  X(SIG_OILP,  0,  100,  1, 10,   0) \
   X(SIG_OILT,  40, 300,  1, 260,  1) \
-  X(SIG_FUELP, 0,  700,  0, 0,    0) \
+  X(SIG_FUELP, 0,  100,  0, 0,    0) \
   X(SIG_FLEX,  0,  100,  0, 0,    1) \
   X(SIG_TPS,   0,  100,  0, 0,    1) \
   X(SIG_BATTV, 8,  16,   1, 12,   0) \

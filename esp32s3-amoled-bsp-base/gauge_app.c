@@ -38,11 +38,11 @@
 
 volatile float g_afr = 0;
 volatile float g_clt_f = 0;
-volatile float g_oilp_kpa = 0;
+volatile float g_oilp_psi = 0;
 volatile float g_oilt_f = 0;
-volatile float g_fuelp_kpa = 0;
+volatile float g_fuelp_psi = 0;
 volatile float g_flex_pct = 0;
-volatile float g_boost_kpa = 0;
+volatile float g_boost_psi = 0;
 volatile float g_rpm = 0;
 volatile float g_tps = 0;
 volatile float g_battv = 0;

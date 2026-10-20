@@ -57,6 +57,13 @@ static float cToF(float c) {
   return c * 9.0f / 5.0f + 32.0f;
 }
 
+// Pressures are shown in psi (build 161). The ECUs send kPa.
+#define KPA_TO_PSI 0.1450377f
+static float kpaToPsi(float kpa) { return kpa * KPA_TO_PSI; }
+// MAP arrives as ABSOLUTE kPa (101.3 = the atmosphere). Shown as boost: 0 at the atmosphere, negative under vacuum
+// (about -10 psi at idle), positive under boost.
+static float mapKpaToBoostPsi(float kpa) { return (kpa - 101.325f) * KPA_TO_PSI; }
+
 static uint16_t readU16LE(uint8_t *d, int offset) {
   return d[offset] | (d[offset + 1] << 8);
 }
@@ -90,7 +97,7 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
     case RUSEFI_BASE3: {
       uint16_t mapRaw = readU16LE(d, 0);
       float mapKpa = mapRaw * 0.0333333f;
-      g_boost_kpa = mapKpa; // raw MAP, no baro subtraction - gauge displays 0-250 with 100 as the "ambient/zero" reference point
+      g_boost_psi = mapKpaToBoostPsi(mapKpa); // boost psi: 0 = atmosphere (fixed 101.3 kPa, no baro sensor)
       g_boost_has_data = true;
       gauge_config_mark_signal_active(SIG_MAP);
       uint8_t cltRaw = d[2]; // CONFIRMED against rusEFI's actual DBC: unsigned (8@1+), offset -40
@@ -105,7 +112,7 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
     }
     case RUSEFI_BASE4: {
       uint16_t oilPressRaw = readU16LE(d, 2);
-      g_oilp_kpa = oilPressRaw * 0.0333333f;
+      g_oilp_psi = kpaToPsi(oilPressRaw * 0.0333333f);
       g_oilp_has_data = true;
       gauge_config_mark_signal_active(SIG_OILP);
       uint8_t oilTempRaw = d[4]; // same unsigned-vs-signed fix as CLT above
@@ -125,7 +132,7 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
       g_afr_has_data = true;
       gauge_config_mark_signal_active(SIG_AFR);
       uint16_t fpLowRaw = readU16LE(d, 4);
-      g_fuelp_kpa = fpLowRaw * 0.0333333f;
+      g_fuelp_psi = kpaToPsi(fpLowRaw * 0.0333333f);
       g_fuelp_has_data = true;
       gauge_config_mark_signal_active(SIG_FUELP);
       break;
@@ -149,7 +156,7 @@ static void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
     }
     case SEC_BLOCK2: {
       float map_ = readU16BE(d, 2) / 10.0f; // word1
-      g_boost_kpa = map_;
+      g_boost_psi = mapKpaToBoostPsi(map_);
       g_boost_has_data = true;
       gauge_config_mark_signal_active(SIG_MAP);
       float clt = cToF(readU16BE(d, 6) / 10.0f); // word3 - assumes Celsius source config, matching WROOM board's noted caveat
@@ -175,11 +182,11 @@ static void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
     }
     case SEC_BLOCK13: {
       float fuelp = readU16BE(d, 0) / 10.0f; // word0
-      g_fuelp_kpa = fuelp;
+      g_fuelp_psi = kpaToPsi(fuelp);
       g_fuelp_has_data = true;
       gauge_config_mark_signal_active(SIG_FUELP);
       float oilp = readU16BE(d, 2) / 10.0f; // word1
-      g_oilp_kpa = oilp;
+      g_oilp_psi = kpaToPsi(oilp);
       g_oilp_has_data = true;
       gauge_config_mark_signal_active(SIG_OILP);
       float oilt = cToF(readU16BE(d, 4) / 10.0f); // word2 - assumes Celsius source config, matching WROOM board's noted caveat

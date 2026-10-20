@@ -24,7 +24,7 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 
-#define INPUT_BUILD 13
+#define INPUT_BUILD 14
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -47,7 +47,7 @@ static uint16_t s_seq = 0;
 static volatile uint32_t s_dataSent = 0;   // data packets sent to the screens
 
 // ---- the hub: CAN values (written by the decoder from can_parsing.h) and the data packet the screens read ----
-volatile float g_rpm, g_clt_f, g_boost_kpa, g_afr, g_oilp_kpa, g_oilt_f, g_fuelp_kpa, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct;
+volatile float g_rpm, g_clt_f, g_boost_psi, g_afr, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct;
 volatile bool g_rpm_has_data, g_clt_has_data, g_boost_has_data, g_afr_has_data, g_oilp_has_data, g_oilt_has_data,
               g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data;
 volatile uint16_t g_flag_bits, g_flag_seen;
@@ -68,9 +68,9 @@ extern "C" bool gauge_config_signal_has_data(SignalId sig) {
 }
 extern "C" float gauge_config_signal_value(SignalId sig) {
   switch (sig) {
-    case SIG_RPM: return g_rpm;       case SIG_CLT: return g_clt_f;     case SIG_MAP: return g_boost_kpa;
-    case SIG_AFR: return g_afr;       case SIG_OILP: return g_oilp_kpa; case SIG_OILT: return g_oilt_f;
-    case SIG_FUELP: return g_fuelp_kpa; case SIG_FLEX: return g_flex_pct; case SIG_TPS: return g_tps;
+    case SIG_RPM: return g_rpm;       case SIG_CLT: return g_clt_f;     case SIG_MAP: return g_boost_psi;
+    case SIG_AFR: return g_afr;       case SIG_OILP: return g_oilp_psi; case SIG_OILT: return g_oilt_f;
+    case SIG_FUELP: return g_fuelp_psi; case SIG_FLEX: return g_flex_pct; case SIG_TPS: return g_tps;
     case SIG_BATTV: return g_battv;   case SIG_EGT: return g_egt_f;     case SIG_IAT: return g_iat_f;
     case SIG_AMBT: return g_ambt_f;  case SIG_HUM: return g_hum_pct;
     case SIG_FUEL: return g_fuel_pct;
@@ -375,7 +375,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
 20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level"};
-const UNIT={1:"rpm",2:"F",3:"kPa",4:"",5:"kPa",6:"F",7:"kPa",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%"};
+const UNIT={1:"rpm",2:"F",3:"psi",4:"",5:"psi",6:"F",7:"psi",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%"};
 const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0};
 const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)"};
 function ecu(id){return id>=0x200&&id<=0x20F?"rusEFI":id>=0x5F0&&id<=0x63F?"MegaSquirt/Link":"";}

@@ -191,3 +191,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 157 | 2026-10-19 | (this commit) | Hub build 13: Sensors page (/sensors) lists every signal with value, age and source: hub sensor or ECU CAN frame |
 | 159 | 2026-10-19 | (this commit) | Front page lists every sensor on the screen's own pages, live, one line each (replaces the separate web dashboard cards); up/down arrows to reorder pages in the gauge editor |
 | 160 | 2026-10-19 | (this commit) | Gauge templates (scale + warning per signal when picked); board name next to MSP-DASH and in the tab title on every page; removed Web Dashboard Config and Raw CAN Monitor from the screens |
+| 161 | 2026-10-19 | (this commit) | Pressures in psi; MAP shown as boost psi (0 = atmosphere, negative = vacuum). Templates, presets, simulator and factory pages updated. Hub build 14 (sends psi) - flash hub and screens together |

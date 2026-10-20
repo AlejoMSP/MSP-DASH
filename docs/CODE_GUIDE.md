@@ -58,7 +58,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 **Web**
 - `web_monitor.cpp/.h` - web server: front page (live list of the screen's own gauges), `/gauges` editor, `/settings`, `/status.json`, `/update` (OTA), net/name/diameter/role endpoints. The raw CAN monitor and the separate web dashboard editor were removed in build 160 (raw CAN lives on the hub).
 - `web_theme.h` - the frame every page shares; its script puts the board's name next to MSP-DASH and in the tab title.
-- `gauge_style.h` - `GAUGE_DEFAULT_RANGES`: the gauge template per signal (scale and warning) used when a signal is picked.
+- `gauge_style.h` - `GAUGE_DEFAULT_RANGES`: the gauge template per signal (scale and warning) used when a signal is picked. Pressures are psi and MAP is boost psi, converted in `can_parsing.h` (build 161).
 - `web_indicator_editor.h`, `web_theme.h` - indicator editor page and shared page style.
 
 **Storage**
