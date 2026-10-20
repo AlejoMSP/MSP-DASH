@@ -85,6 +85,9 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
       g_flex_pct = d[7];
       g_flex_has_data = true;
       gauge_config_mark_signal_active(SIG_FLEX);
+      g_vss_mph = d[6] * 0.621371f;   // DBC: VehicleSpeed 48|8@1+ (1,0) kph -> shown in mph
+      g_vss_has_data = true;
+      gauge_config_mark_signal_active(SIG_VSS);
       break;
     }
     case RUSEFI_BASE2: {

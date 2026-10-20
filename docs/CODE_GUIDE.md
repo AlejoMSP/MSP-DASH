@@ -63,7 +63,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 
 **Storage**
 - `sd_storage.cpp/.h` - SD card mount and web file browser.
-- `sd_logging.cpp/.h` - CSV logging, only above 800 rpm, chosen channels.
+- `sd_logging.cpp/.h` - CSV logging with start conditions (key on, engine running, moving, or a sensor above/below a level) and a stop delay; a new file per session; never while simulating. Set on the Logging page (`/log-channels`, `/log-trigger`).
 - `simulator.cpp/.h` - bench simulator (demo sweep or manual values). Stops when real CAN appears. RUNS ON THE HUB (copied there at compile time); on a screen only `sim_note_remote` / `sim_is_active` matter.
 
 ## 4. Hub firmware (`esp32-input/`)

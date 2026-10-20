@@ -10,9 +10,9 @@ uint32_t g_fake_millis = 0;
 uint32_t millis() { return g_fake_millis; }
 void delay(uint32_t) {}
 SerialClass Serial;
-volatile float g_afr, g_clt_f, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_boost_psi, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct;
+volatile float g_afr, g_clt_f, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_boost_psi, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph;
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
-              g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data;
+              g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data;
 volatile int g_requested_page = -1, g_page_nav_delta = 0;
 volatile uint16_t g_flag_bits = 0, g_flag_seen = 0;
 static int marks[SIG_COUNT];

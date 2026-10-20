@@ -66,9 +66,11 @@ for each page, and that a failed save shows the board's own explanation.
   touching a value), switches itself off on any real CAN frame (and a stray frame while off
   cannot kill the next run), manual values clamped, stopping clears the "has data" flags,
   and the demo never crosses the DEFAULT warning thresholds.
-- `test_sim_logging.cpp`: the real `sd_logging.cpp` writing to a temp folder: rows are written
-  for real data above 800 RPM and NEVER while the simulator runs. Build with
-  `-DSD_MOUNT_POINT='"/tmp/sdtest"'`.
+- `test_sim_logging.cpp`: the real `sd_logging.cpp` writing to a temp folder: each start condition (key on,
+  running, moving, a sensor above/below a level), the stop delay, a new file per session and no empty files,
+  nothing while the simulator runs, bad settings refused, settings kept across a reboot, no SD card.
+  Build: `g++ -std=c++17 -Istubs -I<sketch> -DSD_MOUNT_POINT='"/tmp/sdtest"' <sketch>/sd_logging.cpp test_sim_logging.cpp`
+- `test_logging_page.js`: the Logging page: start condition form, save, refusals, and the channel ticks.
 - `test_sim_page.js`: the /simulator page's script - modes, countdown, one slider request at
   a time (newest value wins), the board's refusal text shown. Set `WEB_MONITOR_CPP` to test a
   modified copy of web_monitor.cpp.

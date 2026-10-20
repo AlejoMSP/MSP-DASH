@@ -38,6 +38,7 @@
 #include "build_info.h"
 #include "gauge_config_json.h"
 #include "simulator.h"
+#include "sd_logging.h"
 #include "espnow_link.h"
 #include "lcd_perf.h"
 #include "web_theme.h"
@@ -155,7 +156,7 @@ R"rawliteral(
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const SIGNAL_NAMES = {1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol %",9:"Throttle Position",10:"Battery Voltage",
       11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-      20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level"};
+      20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed"};
     let webPages = [];          // the round screen's own pages (/gauges.json)
     let signalValues = {};      // signals that currently have live data, keyed by signal id
 
@@ -931,16 +932,41 @@ R"rawliteral(
 </html>
 )rawliteral";
 
-static const char LOGCHANS_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Log Channels</title>" PH_STYLE
+static const char LOGCHANS_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Logging</title>" PH_STYLE
 R"rawliteral(<style>
     label { display:flex; align-items:center; gap:10px; padding:10px; background:#111; border-radius:6px; margin-bottom:6px; }
     button { margin-top:10px; }
     #status, #boot { text-align:center; margin-top:10px; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
+    .trig { background:#111; border-radius:6px; padding:10px; margin-bottom:12px; }
+    .trig select, .trig input { width:100%; box-sizing:border-box; margin:4px 0 8px; }
+    .trig .lab { color:#4dd0e1; font-size:0.85em; }
+    .now { text-align:center; padding:8px; border-radius:6px; background:#111; margin-bottom:12px; color:#4dd0e1; }
+    #tmsg { text-align:center; color:#4dd0e1; min-height:1.2em; }
   </style>)rawliteral" PH_OPEN
 R"rawliteral(<div class="pad">
-  <h1>Log Channels</h1>
-  <p style="text-align:center; color:#888; font-size:0.9em;">Choose which signals get written to the SD card log - independent of what's shown on any display. Logging only writes rows once RPM exceeds 800.</p>
+  <h1>Logging</h1>
+  <div class="now" id="now">Loading...</div>
+  <h2>Start logging when</h2>
+  <div class="trig">
+    <select id="tmode" onchange="showTrig()">
+      <option value="0">The key is on (the ECU is sending data)</option>
+      <option value="1">The engine is running (RPM above 400)</option>
+      <option value="2">The car is moving (speed above 2 mph)</option>
+      <option value="3">A sensor goes above or below a level</option>
+    </select>
+    <div id="tsigbox">
+      <div class="lab">Sensor</div><select id="tsig"></select>
+      <div class="lab">Starts when it is</div><select id="tabove"><option value="1">above</option><option value="0">below</option></select>
+      <div class="lab">Level</div><input type="number" step="any" id="tlevel">
+    </div>
+    <div class="lab">Keep logging after it ends (seconds, 0 to 600)</div><input type="number" min="0" max="600" id="tstop">
+    <button onclick="saveTrig()">Save start condition</button>
+    <div id="tmsg"></div>
+  </div>
+  <p style="color:#888; font-size:0.9em;">Each time logging starts it makes a new file on the SD card (log_1.csv, log_2.csv, ...). Nothing is logged while the simulator runs.</p>
+  <h2>Channels</h2>
+  <p style="text-align:center; color:#888; font-size:0.9em;">Choose which signals get written to the log - independent of what's shown on any display.</p>
   <div id="channels"></div>
   <button onclick="save()">Save</button>
   <div id="status"></div>
@@ -954,8 +980,8 @@ R"rawliteral(
     let loaded = false;
     let channels = [];
     function render() {
-      document.getElementById("channels").innerHTML = channels.map(c => `
-        <label><input type="checkbox" ${c.enabled?"checked":""} onchange="channels[${c.id}].enabled=this.checked"> ${c.name}</label>
+      document.getElementById("channels").innerHTML = channels.map((c, i) => `
+        <label><input type="checkbox" ${c.enabled?"checked":""} onchange="channels[${i}].enabled=this.checked"> ${c.name}</label>
       `).join("");
     }
     async function load() {
@@ -979,7 +1005,33 @@ R"rawliteral(
         document.getElementById("status").textContent = "Saved.";
       } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
     }
-    load();
+    // ---- start condition ----
+    const $ = id => document.getElementById(id);
+    let trigLoaded = false;
+    function showTrig() { $("tsigbox").style.display = $("tmode").value === "3" ? "" : "none"; }
+    async function loadTrig() {
+      try {
+        const t = await (await fetch("/log-trigger.json")).json();
+        $("tsig").innerHTML = t.signals.map(s => `<option value="${s.id}">${s.name}</option>`).join("");
+        $("tmode").value = String(t.mode); $("tsig").value = String(t.sig); $("tabove").value = t.above ? "1" : "0";
+        $("tlevel").value = t.level; $("tstop").value = t.stop_delay_s;
+        showTrig(); trigLoaded = true;
+      } catch (e) { $("tmsg").textContent = "Could not load the start condition - " + e.message; }
+    }
+    async function saveTrig() {
+      if (!trigLoaded) { $("tmsg").textContent = "Not saved: the page has not finished loading."; return; }
+      const p = { mode: $("tmode").value, sig: $("tsig").value, above: $("tabove").value, level: $("tlevel").value, stop: $("tstop").value };
+      try {
+        const r = await fetch("/log-trigger", { method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(p).toString() });
+        const t = await r.text();
+        $("tmsg").textContent = r.ok ? "Saved." : "Not saved: " + t;
+      } catch (e) { $("tmsg").textContent = "Save FAILED: " + e.message; }
+    }
+    async function pollNow() {
+      try { const st = await (await fetch("/status.json")).json(); $("now").textContent = st.logging ? st.logging : "No status"; }
+      catch (e) { $("now").textContent = "Could not reach the board"; }
+    }
+    load(); loadTrig(); pollNow(); setInterval(pollNow, 2000);
   </script>
 </body>
 </html>
@@ -1351,6 +1403,7 @@ void web_monitor_init(void) {
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     JsonDocument doc;
     doc["build"] = FW_BUILD_NUMBER;
+    doc["logging"] = sd_logging_status_text();
     doc["compiled"] = FW_COMPILED;
     doc["uptime_s"] = (uint32_t)(millis() / 1000);
     doc["heap_internal_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -1591,6 +1644,34 @@ void web_monitor_init(void) {
       }
     }
   );
+
+  // ---- when logging starts (sd_logging.h) ----
+  server.on("/log-trigger.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    SdLogTrigger t; sd_logging_get_trigger(&t);
+    JsonDocument doc;
+    doc["mode"] = t.mode; doc["sig"] = t.sig; doc["above"] = t.above; doc["level"] = t.level; doc["stop_delay_s"] = t.stop_delay_s;
+    JsonArray arr = doc["signals"].to<JsonArray>();
+    for (int sig = 1; sig < SIG_COUNT; sig++) {
+      if (gauge_signal_is_flag(sig)) continue;   // on/off flags have no level
+      JsonObject o = arr.add<JsonObject>(); o["id"] = sig; o["name"] = gauge_config_signal_name((SignalId)sig);
+    }
+    String out; serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+  server.on("/log-trigger", HTTP_POST, [](AsyncWebServerRequest *request) {
+    auto P = [&](const char *k) { return request->hasParam(k, true) ? request->getParam(k, true)->value() : String(""); };
+    SdLogTrigger t; sd_logging_get_trigger(&t);
+    t.mode = (uint8_t)P("mode").toInt();
+    t.sig = (uint8_t)P("sig").toInt();
+    t.above = P("above") != "0";
+    t.level = P("level").length() ? P("level").toFloat() : NAN;
+    long stop = P("stop").toInt();
+    if (stop < 0 || stop > LOG_STOP_DELAY_MAX) { request->send(400, "text/plain", "Keep logging must be 0 to 600 seconds"); return; }
+    t.stop_delay_s = (uint16_t)stop;
+    if (t.mode != LOG_START_SIGNAL && !(t.level == t.level)) t.level = 90.0f;   // the level only matters for "a sensor"
+    if (!sd_logging_set_trigger(&t)) { request->send(400, "text/plain", "Pick a sensor and type a level"); return; }
+    request->send(200, "text/plain", "OK");
+  });
 
   server.on("/log-channels", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", LOGCHANS_HTML);

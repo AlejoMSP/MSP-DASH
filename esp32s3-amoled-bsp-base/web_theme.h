@@ -75,7 +75,7 @@
   "<div class='navmenu' id='navmenu'>" \
     "<a href='/'>Monitor</a>" \
     "<a href='/gauges'>Display Gauge Config</a>" \
-    "<a href='/log-channels'>Log Channels</a>" \
+    "<a href='/log-channels'>Logging</a>" \
     "<a href='/sd'>SD Card</a>" \
     "<a href='/settings'>Board Settings</a>" \
     "<a href='/update'>Firmware Update</a>" \

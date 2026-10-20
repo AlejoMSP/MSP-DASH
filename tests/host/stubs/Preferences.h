@@ -17,6 +17,13 @@ public:
     store()[ns + "/" + k] = v; return v.size(); }
   bool getBool(const char *k, bool def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : it->second == "1"; }
   size_t putBool(const char *k, bool v) { store()[ns + "/" + k] = v ? "1" : "0"; return 1; }
-  uint8_t getUChar(const char *, uint8_t def) { return def; } size_t putUChar(const char *, uint8_t) { return 1; }
-  int getInt(const char *, int def) { return def; } size_t putInt(const char *, int) { return 1; }
+  uint8_t getUChar(const char *k, uint8_t def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : (uint8_t)std::stoi(it->second); }
+  size_t putUChar(const char *k, uint8_t v) { store()[ns + "/" + k] = std::to_string(v); return 1; }
+  int getInt(const char *k, int def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : std::stoi(it->second); }
+  size_t putInt(const char *k, int v) { store()[ns + "/" + k] = std::to_string(v); return 4; }
+  uint16_t getUShort(const char *k, uint16_t def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : (uint16_t)std::stoi(it->second); }
+  size_t putUShort(const char *k, uint16_t v) { store()[ns + "/" + k] = std::to_string(v); return 2; }
+  float getFloat(const char *k, float def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : std::stof(it->second); }
+  size_t putFloat(const char *k, float v) { store()[ns + "/" + k] = std::to_string(v); return 4; }
+  static void wipeAll() { store().clear(); }   // tests: a board with empty NVS
 };
