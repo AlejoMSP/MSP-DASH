@@ -67,7 +67,7 @@ void setup()
   { Preferences dp; dp.begin("disp", true); gauge_app_set_diameter(dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT));
     gauge_app_set_options(dp.getBool("sweep", true), dp.getBool("demo", true)); dp.end(); }   // visible screen size
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
-  gauge_config_web_init(); // the separate, independent web-dashboard config
+  gauge_config_web_cleanup(); // deletes the old web-dashboard config file, if any
   gauge_config_log_init(); // which signals get logged to SD - independent of what's displayed
 
   Touch_Init();

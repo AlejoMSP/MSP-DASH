@@ -173,25 +173,16 @@ void gauge_config_init(void);
 // entries) - gauge_app.c reads this to build pages.
 PageConfig *gauge_config_get_pages(void);
 
-// ---- A fully SEPARATE page/cell configuration, specifically for the
-// web browser dashboard - independent of the physical display's pages
-// above. Same CellConfig/PageConfig/LayoutType/GaugeType types (the
-// data model is generic, not display-specific), just a different
-// in-memory array and NVS key, with its own defaults and load/save.
-// This lets you configure what shows on your phone's browser
-// completely differently from what shows on the physical gauge
-// cluster. ----
-void gauge_config_web_init(void);
-PageConfig *gauge_config_get_web_pages(void);
-bool gauge_config_web_save(void);
+// Deletes the file left by the old, separate web-dashboard config (removed in build 160). Safe to call every boot.
+void gauge_config_web_cleanup(void);
 
 // How many cells a given layout actually uses (1/2/3/4).
 int gauge_config_cells_for_layout(LayoutType layout);
 
 // Saves the current in-memory page/cell array to flash. Returns true only
 // if the data was really written; on failure gauge_config_last_error()
-// says why. Note: page add/delete/empty/copy for BOTH configs is handled
-// entirely client-side in the /gauges and /web-config editors (the whole
+// says why. Note: page add/delete/empty/copy/move is handled
+// entirely client-side in the /gauges editor (the whole
 // array is just re-POSTed on Save) - there's no server-side per-action API
 // for this.
 //

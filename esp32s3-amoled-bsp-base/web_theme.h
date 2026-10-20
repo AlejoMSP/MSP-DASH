@@ -75,15 +75,21 @@
   "<div class='navmenu' id='navmenu'>" \
     "<a href='/'>Monitor</a>" \
     "<a href='/gauges'>Display Gauge Config</a>" \
-    "<a href='/web-config'>Web Dashboard Config</a>" \
     "<a href='/log-channels'>Log Channels</a>" \
     "<a href='/simulator'>Bench Simulator</a>" \
-    "<a href='/can'>Raw CAN Monitor</a>" \
     "<a href='/sd'>SD Card</a>" \
     "<a href='/settings'>Board Settings</a>" \
     "<a href='/update'>Firmware Update</a>" \
   "</div>"
 
-#define PH_CLOSE "</div></div>"
+// After the page content: puts this board's name next to MSP-DASH in the header and at the front of the browser tab
+// title on EVERY page, so with three screens open you can tell which one you are on ("MSP-DASH Center",
+// tab "Center | MSP-DASH Gauge Config"). Boards with no name keep plain "MSP-DASH".
+#define PH_CLOSE "</div></div>" \
+  "<script data-shared>try{fetch('/status.json').then(function(r){return r.json();}).then(function(st){" \
+    "var n=st&&st.link&&st.link.name;if(!n)return;" \
+    "var b=document.querySelector('.brand');if(b)b.textContent='MSP-DASH '+n;" \
+    "if(document.title.indexOf(n+' | ')!==0)document.title=n+' | '+document.title;" \
+  "}).catch(function(){});}catch(e){}</script>"
 
 #endif

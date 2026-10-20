@@ -1,7 +1,7 @@
 const fs = require('fs');
 async function load(file, postStatus, postText) {
   // the editor's <script>, exactly as the board serves it
-  const script = require('./extract_page.js').pageScript(file.includes('GAUGES') ? 'GAUGES_HTML' : 'WEBCFG_HTML');
+  const script = require('./extract_page.js').pageScript('GAUGES_HTML');
   const els = {}; const posts = [];
   const getEl = id => els[id] || (els[id] = {id, innerHTML:"", textContent:"", value:"#ffffff"});
   global.document = { getElementById: getEl }; global.window = global; global.confirm = () => true;
@@ -20,13 +20,9 @@ let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; 
 (async () => {
   let r = await load('/tmp/GAUGES_HTML_0.js', 200, "OK");
   check(r.posts[0] === "/gauges" && /^Saved to the board's flash\. The round display shows it after a reboot/.test(r.status), "display editor success: " + r.status);
-  r = await load('/tmp/WEBCFG_HTML_0.js', 200, "OK");
-  check(r.posts[0] === "/web-pages" && /no reboot needed/.test(r.status) && !/Reboot the board/.test(r.status), "web editor success (no reboot wording): " + r.status);
   const boardMsg = "NOT saved to flash: flash filesystem (ffat) failed to mount. The change is active until the next reboot.";
   r = await load('/tmp/GAUGES_HTML_0.js', 500, boardMsg);
   check(r.status === "Save FAILED: " + boardMsg, "display editor shows the board's own explanation: " + r.status);
-  r = await load('/tmp/WEBCFG_HTML_0.js', 500, boardMsg);
-  check(r.status === "Save FAILED: " + boardMsg, "web editor shows the board's own explanation: " + r.status);
   r = await load('/tmp/GAUGES_HTML_0.js', 500, "");
   check(/Save FAILED: board returned 500/.test(r.status), "empty error body falls back to the status code: " + r.status);
   console.log(`\n${pass} passed, ${fail} failed`);

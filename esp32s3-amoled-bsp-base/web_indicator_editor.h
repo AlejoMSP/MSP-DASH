@@ -199,9 +199,14 @@ R"rawliteral(
     // =====================================================================================
     // Settings every gauge cell has, shared by both editors
     // =====================================================================================
-    // The usual scale for a signal: choosing the signal fills it in. The same list as GAUGE_DEFAULT_RANGES in gauge_style.h
-    // (tests/host/test_editor_cells.js reads that file and checks they agree). MAP/boost keeps its own range: it reads above 100 under boost.
-    const SIGNAL_DEFAULT_RANGES = { [SIG.AFR]: [10, 20], [SIG.CLT]: [60, 250], [SIG.OILT]: [60, 250], [SIG.OILP]: [0, 100], [SIG.FUELP]: [0, 100], [SIG.EGT]: [0, 1800], [SIG.IAT]: [0, 200], [SIG.AMBT]: [0, 120], [SIG.HUM]: [0, 100], [SIG.FUEL]: [0, 100] };
+    // Gauge templates: choosing a signal fills in its usual scale and warning. The same list as GAUGE_DEFAULT_RANGES in
+    // gauge_style.h (tests/host/test_editor_cells.js reads that file and checks they agree).
+    // [min, max, warning on (1/0), warning level, 1 = warn above / 0 = warn below]. Temperatures F, pressures kPa.
+    const SIGNAL_DEFAULT_RANGES = {
+      [SIG.RPM]: [0, 8000, 1, 7000, 1], [SIG.CLT]: [40, 300, 1, 230, 1], [SIG.MAP]: [0, 250, 0, 0, 1], [SIG.AFR]: [10, 20, 0, 0, 1],
+      [SIG.OILP]: [0, 700, 1, 70, 0], [SIG.OILT]: [40, 300, 1, 260, 1], [SIG.FUELP]: [0, 700, 0, 0, 0], [SIG.FLEX]: [0, 100, 0, 0, 1],
+      [SIG.TPS]: [0, 100, 0, 0, 1], [SIG.BATTV]: [8, 16, 1, 12, 0], [SIG.EGT]: [0, 1800, 1, 1600, 1], [SIG.IAT]: [0, 200, 1, 150, 1],
+      [SIG.AMBT]: [0, 120, 0, 0, 1], [SIG.HUM]: [0, 100, 0, 0, 1], [SIG.FUEL]: [0, 100, 1, 15, 0] };
     // Caption / units text sizes. 0 = "Normal": the display's default font, as captions always looked. A size too big for the cell shrinks to the largest that fits.
     const CAPTION_SIZES = [[0, "Normal"], [14, "14 Small"], [20, "20"], [28, "28 Medium"], [36, "36 Large"], [48, "48 XL"]];
     const VALIGNS = [[0, "Center"], [1, "Top"], [2, "Bottom"]];
@@ -209,13 +214,19 @@ R"rawliteral(
     // Digits after the point for a cell's readout; anything unset or unknown is 1, what readouts always showed.
     function decimalsOf(c) { const d = Number(c && c.decimals); return (d === 0 || d === 1 || d === 2) ? d : 1; }
 
-    // Choosing a signal also sets the scale to its usual range (AFR 10-20, temperatures 60-250, pressures 0-100), and the needle's
-    // rest position to the bottom of it. Signals without a usual range keep whatever the cell has.
+    // Choosing a signal starts the gauge from its template: scale, needle rest at the bottom (MAP at 100), and the warning (turned
+    // off when the template has none, so a warning left from the old signal does not carry over). Signals without a
+    // template (the ECU on/off flags) keep whatever the cell has.
     function setCellSignal(pIdx, cIdx, sig) {
       const c = pages[pIdx].cells[cIdx];
       c.signal = sig;
       const r = SIGNAL_DEFAULT_RANGES[sig];
-      if (r) { c.min = r[0]; c.max = r[1]; c.rest = r[0]; renderPages(); }
+      if (!r) return;
+      c.min = r[0]; c.max = r[1]; c.rest = sig === SIG.MAP ? 100 : r[0];   // MAP rests at 100 kPa: the atmosphere, zero boost
+      c.has_warning = !!r[2];
+      if (r[2]) { c.warning_threshold = r[3]; c.warning_above = !!r[4]; }
+      else c.alert_fullscreen = false;
+      renderPages();
     }
     function setCellField(pIdx, cIdx, key, value) { pages[pIdx].cells[cIdx][key] = value; }
     function captionSizeOptions(selected) {

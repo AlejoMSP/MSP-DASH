@@ -56,7 +56,7 @@ TWAI field name, a helper's arguments and the CAN task were each caught.
 of `web_monitor.cpp` and drives it with a fake WebSocket and a controllable clock:
 status messages, reconnect backoff, the silence watchdog, recovery.
 
-`test_editor_save.js` checks the /gauges and /web-config Save buttons: success wording
+`test_editor_save.js` checks the /gauges Save button: success wording
 for each page, and that a failed save shows the board's own explanation.
 
 ## Bench simulator tests
@@ -185,7 +185,8 @@ red), each switched on by itself, drawn as coloured arc BANDS behind the tick ma
 
 ## Caption size, units, title on the dial face, gauge position, default scales
 
-- `test_style_defaults.c`: the pure-C helpers in `gauge_style.h`: the default scale per signal (AFR 10-20, temperatures 60-250,
+- `test_board_name.js`: every page shows the board's name next to MSP-DASH and at the front of the tab title.
+- `test_style_defaults.c`: the pure-C helpers in `gauge_style.h`: the gauge template per signal (scale and warning; AFR 10-20, temperatures 40-300,
   pressures 0-100; MAP/boost and everything else have none), caption sizes (snap to the nearest of 14/20/28/36/48, ties go
   smaller, 0 = never set), and the vertical position (centre / top / bottom).
 - `test_caption_layout.c` (`./t capnum | capdial | caphist | units | face | valign | valignnum`): the real `gauge_app.c` against

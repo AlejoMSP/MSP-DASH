@@ -190,3 +190,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 156 | 2026-10-19 | (this commit) | Hub build 12: Screens status on the hub page, green online / red offline per screen, from the screens' hello; hello packet moved to link_packets.h |
 | 157 | 2026-10-19 | (this commit) | Hub build 13: Sensors page (/sensors) lists every signal with value, age and source: hub sensor or ECU CAN frame |
 | 159 | 2026-10-19 | (this commit) | Front page lists every sensor on the screen's own pages, live, one line each (replaces the separate web dashboard cards); up/down arrows to reorder pages in the gauge editor |
+| 160 | 2026-10-19 | (this commit) | Gauge templates (scale + warning per signal when picked); board name next to MSP-DASH and in the tab title on every page; removed Web Dashboard Config and Raw CAN Monitor from the screens |

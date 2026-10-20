@@ -18,27 +18,41 @@
 #include <stdbool.h>
 #include "gauge_config.h"   // SignalId, for the default scales
 
-// ---- default scales ----
-// When a signal is chosen for a gauge, its scale starts at the usual range for that kind of reading:
-// AFR 10-20, temperatures 60-250, pressures 0-100. MAP/boost is a pressure too, but it reads above 100 kPa under boost,
-// so a 0-100 scale would peg it: it keeps its own 0-250. (The web editors keep the same table in JavaScript; a test
-// reads THIS list and checks they agree.)
+// ---- gauge templates: default scale and warning per signal ----
+// When a signal is chosen for a gauge, the gauge starts from the usual range for that kind of reading, plus a
+// warning where there is an obvious one. Units are the firmware's: temperatures F, pressures kPa (100 psi is about
+// 690 kPa), MAP is absolute kPa (100 = atmosphere, so 250 is about 22 psi of boost). Everything can still be changed.
+//   X(signal, min, max, warning on, warning level, 1 = warn ABOVE the level / 0 = warn BELOW it)
+// (The web editors keep the same table in JavaScript; a test reads THIS list and checks they agree.)
 #define GAUGE_DEFAULT_RANGES(X) \
-  X(SIG_AFR,   10, 20) \
-  X(SIG_CLT,   60, 250) \
-  X(SIG_OILT,  60, 250) \
-  X(SIG_OILP,  0,  100) \
-  X(SIG_FUELP, 0,  100) \
-  X(SIG_EGT,   0,  1800) \
-  X(SIG_IAT,   0,  200) \
-  X(SIG_AMBT,  0,  120) \
-  X(SIG_HUM,   0,  100) \
-  X(SIG_FUEL,  0,  100)
+  X(SIG_RPM,   0,  8000, 1, 7000, 1) \
+  X(SIG_CLT,   40, 300,  1, 230,  1) \
+  X(SIG_MAP,   0,  250,  0, 0,    1) \
+  X(SIG_AFR,   10, 20,   0, 0,    1) \
+  X(SIG_OILP,  0,  700,  1, 70,   0) \
+  X(SIG_OILT,  40, 300,  1, 260,  1) \
+  X(SIG_FUELP, 0,  700,  0, 0,    0) \
+  X(SIG_FLEX,  0,  100,  0, 0,    1) \
+  X(SIG_TPS,   0,  100,  0, 0,    1) \
+  X(SIG_BATTV, 8,  16,   1, 12,   0) \
+  X(SIG_EGT,   0,  1800, 1, 1600, 1) \
+  X(SIG_IAT,   0,  200,  1, 150,  1) \
+  X(SIG_AMBT,  0,  120,  0, 0,    1) \
+  X(SIG_HUM,   0,  100,  0, 0,    1) \
+  X(SIG_FUEL,  0,  100,  1, 15,   0)
 
 static inline bool gauge_signal_default_range(int sig, int32_t *mn, int32_t *mx) {
-#define GAUGE_RANGE_CASE(S, A, B) if (sig == (S)) { *mn = (A); *mx = (B); return true; }
+#define GAUGE_RANGE_CASE(S, A, B, W, T, U) if (sig == (S)) { *mn = (A); *mx = (B); return true; }
   GAUGE_DEFAULT_RANGES(GAUGE_RANGE_CASE)
 #undef GAUGE_RANGE_CASE
+  return false;
+}
+
+// The template's warning for a signal. False when the signal has no template or the template has no warning.
+static inline bool gauge_signal_default_warning(int sig, float *level, bool *above) {
+#define GAUGE_WARN_CASE(S, A, B, W, T, U) if (sig == (S)) { if (!(W)) return false; *level = (float)(T); *above = (U) != 0; return true; }
+  GAUGE_DEFAULT_RANGES(GAUGE_WARN_CASE)
+#undef GAUGE_WARN_CASE
   return false;
 }
 

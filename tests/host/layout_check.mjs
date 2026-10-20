@@ -19,7 +19,7 @@ async function chromePath() {
   return { exe: await mod.executablePath(), args: mod.args };
 }
 const outDir = process.argv[2] || '/tmp/layout_shots'; fs.mkdirSync(outDir, { recursive: true });
-const PAGES = [['/', 'front'], ['/can', 'can'], ['/gauges', 'gauges'], ['/web-config', 'webcfg'], ['/sd', 'sd'], ['/update', 'update'], ['/log-channels', 'logchans'], ['/simulator', 'simulator']];
+const PAGES = [['/', 'front'], ['/gauges', 'gauges'], ['/sd', 'sd'], ['/update', 'update'], ['/log-channels', 'logchans'], ['/simulator', 'simulator']];
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const PROFILES = [
   { name: 'desktop', pointer: { type: 4, hover: 2 }, viewport: { width: 1280, height: 1000, deviceScaleFactor: 1 }, phone: false },
@@ -110,8 +110,8 @@ for (const prof of PROFILES) {
         if (d.w < 60 || Math.abs(d.w / d.h - 1.6) > 0.12) bad(`front page lamp ${i + 1} is the wrong size or shape (${d.w.toFixed(0)} x ${d.h.toFixed(0)})`);
       });
     });
-    if ((route === '/gauges' || route === '/web-config') && m.lampCards !== mockLamps.length) bad(`the editor should show ${mockLamps.length} lamp cards, shows ${m.lampCards}`);
-    if ((route === '/gauges' || route === '/web-config') && m.chips !== 2 * mockLamps.length) bad(`each lamp card should have an ON and an OFF preview chip (${2 * mockLamps.length} expected, ${m.chips} found)`);
+    if (route === '/gauges' && m.lampCards !== mockLamps.length) bad(`the editor should show ${mockLamps.length} lamp cards, shows ${m.lampCards}`);
+    if (route === '/gauges' && m.chips !== 2 * mockLamps.length) bad(`each lamp card should have an ON and an OFF preview chip (${2 * mockLamps.length} expected, ${m.chips} found)`);
     if (!m.nav) bad('missing the shared header / menu');
     if (errors.length) bad('script error: ' + errors.join('; '));
   }

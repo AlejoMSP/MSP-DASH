@@ -77,7 +77,6 @@ int main(int argc, char **argv) {
     CHECK(gauge_config_get_pages()[0].enabled, "still boots with the default pages");
     CHECK(gauge_config_save() == false, "save returns false");
     CHECK(strstr(gauge_config_last_error(), "mount") != NULL, "the reason mentions the mount failure");
-    CHECK(gauge_config_web_save() == false, "web save returns false too");
     printf("\n%d passed, %d failed\n", pass, fail); return fail ? 1 : 0;
   }
   if (mode == "baddir") {
@@ -115,14 +114,10 @@ int main(int argc, char **argv) {
   gauge_config_init();                                       // "reboot"
   p = gauge_config_get_pages();
   CHECK(p[0].cells[0].caption[0] == 'X', "the edit is still there after a reboot");
-  gauge_config_web_init();
-  PageConfig *w = gauge_config_get_web_pages();
-  w[0].cells[0].caption[0] = 'Y';
-  CHECK(gauge_config_web_save() == true, "web save reports success");
-  printf("   default web config is %zu bytes as JSON\n", gauge_config_saved_bytes(1));
-  gauge_config_web_init();
-  w = gauge_config_get_web_pages();
-  CHECK(w[0].cells[0].caption[0] == 'Y', "the web edit survives a reboot");
+  { FILE *f = fopen(path("cfg_web.json").c_str(), "w"); fputs("[]", f); fclose(f); }
+  gauge_config_web_cleanup();
+  CHECK(!exists(path("cfg_web.json")), "the old web dashboard config file is deleted at boot (that page was removed)");
+  gauge_config_web_cleanup(); CHECK(true, "and calling it again with no file is harmless");
   CHECK(strlen(gauge_config_last_error()) == 0, "no error recorded after good saves");
 
   printf("S3 worst case: all 8 pages x 4 cells, every field non-default\n");
@@ -441,14 +436,11 @@ int main(int argc, char **argv) {
   { wipe(); gauge_config_init(); p = gauge_config_get_pages();
     auto first = [&](SignalId sig) -> const CellConfig * { for (int i = 0; i < MAX_PAGES; i++) if (p[i].enabled && p[i].kind == PAGE_GAUGES && p[i].cells[0].signal == sig) return &p[i].cells[0]; return nullptr; };
     const CellConfig *clt = first(SIG_CLT), *oilt = first(SIG_OILT), *afr = first(SIG_AFR), *oilp = first(SIG_OILP), *fuelp = first(SIG_FUELP), *map = first(SIG_MAP);
-    CHECK(clt && clt->min_val == 60 && clt->max_val == 250 && clt->rest_val == 60, "the default coolant gauge is 60 to 250 (it was 65)");
-    CHECK(oilt && oilt->min_val == 60 && oilt->max_val == 250, "the default oil temperature gauge is 60 to 250");
+    CHECK(clt && clt->min_val == 40 && clt->max_val == 300, "the default coolant gauge uses the template: 40 to 300");
+    CHECK(oilt && oilt->min_val == 40 && oilt->max_val == 300, "the default oil temperature gauge is 40 to 300");
     CHECK(afr && afr->min_val == 10 && afr->max_val == 20, "the default AFR gauge is 10 to 20");
-    CHECK(oilp && oilp->min_val == 0 && oilp->max_val == 100 && fuelp && fuelp->min_val == 0 && fuelp->max_val == 100, "the default oil and fuel pressure gauges are 0 to 100");
-    CHECK(map && map->min_val == 0 && map->max_val == 250 && map->rest_val == 100, "the default MAP/boost gauge keeps 0 to 250 (boost reads above 100)");
-    PageConfig *w = gauge_config_get_web_pages(); gauge_config_web_init(); w = gauge_config_get_web_pages();
-    bool webClt = false; for (int i = 0; i < 4; i++) if (w[0].cells[i].signal == SIG_CLT) webClt = w[0].cells[i].min_val == 60;
-    CHECK(webClt, "the default web dashboard's coolant number uses 60 too"); }
+    CHECK(oilp && oilp->min_val == 0 && oilp->max_val == 700 && fuelp && fuelp->min_val == 0 && fuelp->max_val == 700, "the default oil and fuel pressure gauges are 0 to 700 kPa");
+    CHECK(map && map->min_val == 0 && map->max_val == 250 && map->rest_val == 100, "the default MAP/boost gauge is 0 to 250 and still rests at 100 (atmosphere)"); }
 
   wipe();
   printf("\n%d passed, %d failed\n", pass, fail);

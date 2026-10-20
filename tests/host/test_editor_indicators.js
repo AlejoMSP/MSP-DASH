@@ -47,7 +47,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   check(presets.filter(p => p.signal <= 10).every(p => unitMap[p.signal]), "every analog signal used by a preset has a unit shown in the editor");
   check(probe.run('IND_DEFAULT_PAGE').every(n => presets.some(p => p.name === n)), "the default page's six lamps all exist as presets");
 
-  for (const [label, pageName, postUrl, getUrl] of [["display editor", 'GAUGES_HTML', '/gauges', '/gauges.json'], ["web dashboard editor", 'WEBCFG_HTML', '/web-pages', '/web-pages.json']]) {
+  for (const [label, pageName, postUrl, getUrl] of [["display editor", 'GAUGES_HTML', '/gauges', '/gauges.json']]) {
     console.log(`\n=== ${label} ===`);
     const E = makeEditor(pageName, postUrl, getUrl); await settle();
     const R = E.run;

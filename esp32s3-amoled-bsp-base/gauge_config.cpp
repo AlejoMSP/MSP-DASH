@@ -7,7 +7,7 @@
   essentially the full per-gauge config from before this redesign, now
   scoped per-cell instead of per-page).
 
-  Persistence: each configuration (display, web dashboard) is one JSON file
+  Persistence: the display configuration is one JSON file
   on the board's FAT flash partition - see the Persistence section below for
   why this is NOT stored in NVS.
 */
@@ -29,7 +29,6 @@
 
 static Preferences logPrefs;
 static PageConfig s_pages[MAX_PAGES];
-static PageConfig s_webPages[MAX_PAGES];
 static uint32_t s_signalLastSeenMs[SIG_COUNT];
 static bool s_logEnabled[SIG_COUNT];
 
@@ -67,8 +66,8 @@ static CellConfig makeCell(bool enabled, SignalId signal, GaugeType type, int32_
   c.value_font_size = 28;
   c.decimals = GAUGE_DECIMALS_DEFAULT;
   c.h_align = GAUGE_HALIGN_CENTER;
-  { int32_t dmin, dmax;       // AFR 10-20, temperatures 60-250, pressures 0-100 (gauge_style.h)
-    if (gauge_signal_default_range(signal, &dmin, &dmax)) { c.min_val = dmin; c.max_val = dmax; c.rest_val = dmin; } }
+  { int32_t dmin, dmax;       // the signal's template scale (gauge_style.h)
+    if (gauge_signal_default_range(signal, &dmin, &dmax)) { c.min_val = dmin; c.max_val = dmax; c.rest_val = (rest >= dmin && rest <= dmax) ? rest : dmin; } }
   c.tick_font_size = 28;
   gauge_dial_defaults(0, &c.start_deg, &c.end_deg);
   c.low_crit_on = c.low_warn_on = c.high_warn_on = c.high_crit_on = false;
@@ -119,18 +118,6 @@ static void applyDefaults(void) {
   }
 }
 
-static void applyWebDefaults(void) {
-  memset(s_webPages, 0, sizeof(s_webPages));
-  // A simple glanceable default for a phone - one page, 2x2 grid of
-  // plain numbers (RPM, MAP/Boost, CLT, AFR) - independent of whatever
-  // the physical display's pages show.
-  s_webPages[0].enabled = true;
-  s_webPages[0].layout = LAYOUT_2X2;
-  s_webPages[0].cells[0] = makeCell(true, SIG_RPM, GAUGE_TYPE_NUMBER, 0, 9000, 0, "RPM", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, false, 0, false);
-  s_webPages[0].cells[1] = makeCell(true, SIG_MAP, GAUGE_TYPE_NUMBER, 0, 250, 100, "MAP", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, false, 0, false);
-  s_webPages[0].cells[2] = makeCell(true, SIG_CLT, GAUGE_TYPE_NUMBER, 65, 250, 65, "CLT", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 220, true);
-  s_webPages[0].cells[3] = makeCell(true, SIG_AFR, GAUGE_TYPE_NUMBER, 10, 20, 10, "AFR", 0xFFFFFF, 0xFFFFFF, 0x000000, 1.0f, 26, 5, 10, true, 15, true);
-}
 
 // Lamp text is drawn with the display's normal fonts, which cover printable ASCII: anything else (control
 // characters, emoji, other scripts) is dropped rather than shown as empty boxes.
@@ -520,16 +507,10 @@ bool gauge_config_save(void) {
   return saveConfig(CFG_DISPLAY_FILE, s_pages, 0);
 }
 
-void gauge_config_web_init(void) {
-  if (!loadConfig(CFG_WEB_FILE, s_webPages)) applyWebDefaults();
-}
-
-PageConfig *gauge_config_get_web_pages(void) {
-  return s_webPages;
-}
-
-bool gauge_config_web_save(void) {
-  return saveConfig(CFG_WEB_FILE, s_webPages, 1);
+// The old separate web-dashboard config (removed in build 160: the front page now lists the screen's own pages).
+// Delete its leftover file so it stops taking up flash.
+void gauge_config_web_cleanup(void) {
+  if (fsEnsure() && remove(CFG_WEB_FILE) == 0) Serial.println("Removed the old web dashboard config file");
 }
 
 bool gauge_config_storage_ok(void) { return s_fsOk; }

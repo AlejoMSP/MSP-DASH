@@ -5,7 +5,7 @@ const http = require('http');
 const { pageHtml } = require('./extract_page.js');
 let WebSocketServer; try { ({ WebSocketServer } = require('ws')); } catch (e) { console.error("npm install ws  (needed for the live connection)"); process.exit(1); }
 
-const PAGES = { '/': 'INDEX_HTML', '/can': 'CAN_HTML', '/gauges': 'GAUGES_HTML', '/web-config': 'WEBCFG_HTML', '/sd': 'SD_HTML', '/update': 'OTA_HTML', '/log-channels': 'LOGCHANS_HTML', '/simulator': 'SIM_HTML' };
+const PAGES = { '/': 'INDEX_HTML', '/gauges': 'GAUGES_HTML', '/sd': 'SD_HTML', '/update': 'OTA_HTML', '/log-channels': 'LOGCHANS_HTML', '/simulator': 'SIM_HTML' };
 const SIGNALS = ['None', 'RPM', 'Coolant Temp', 'MAP/Boost', 'AFR', 'Oil Pressure', 'Oil Temp', 'Fuel Pressure', 'Ethanol %', 'Throttle Position', 'Battery Voltage',
   'Rev Limiter Active', 'Main Relay', 'Fuel Pump', 'Check Engine Light', 'O2 Heater', 'Lambda Protection', 'Fan 1', 'Fan 2', 'Brake Pedal'];   // 11..19 are the ECU on/off flags
 const cell = (o) => Object.assign({ enabled: true, signal: 1, gauge_type: 0, min: 0, max: 100, rest: 0, caption: 'RPM', needle_color: 0xFFFFFF, tick_color: 0xFFFFFF, bg_color: 0, value_divisor: 1, tick_count: 26, major_nth: 5, refresh_hz: 10, show_value: false, value_font_size: 28, tick_font_size: 28, caption_font_size: 0, caption_on_face: false, units: '', v_align: 0, start_deg: 225, end_deg: 135, low_crit_on: false, low_crit: 0, low_warn_on: false, low_warn: 0, high_warn_on: false, high_warn: 0, high_crit_on: false, high_crit: 0, zone_style: 1, needle_hub_pct: 0, needle_tip_pct: 0, has_warning: false, warning_threshold: 0, warning_above: false, alert_fullscreen: false, history_sec: 30, ref_enabled: false, ref_value: 0 }, o);
@@ -31,12 +31,9 @@ webPages.push(indicatorPage);
 gaugePages.push(JSON.parse(JSON.stringify(indicatorPage)));
 
 const JSON_ROUTES = {
-  '/web-pages.json': () => webPages,
   '/gauges.json': () => gaugePages,
   '/signals.json': () => SIGNALS.map((n, i) => ({ id: i, name: n, age_ms: i === 0 ? 4294967295 : i * 40, flag: i >= 11 })),
   '/status.json': () => ({ build: 104, compiled: 'Oct  7 2026 06:43:44', uptime_s: 83, can: { frames_per_s: 412, ids_seen: 38, state: 'running' }, storage: { mounted: true } }),
-  '/can.json': () => [[0x201, 8, '5A 0B 00 00 00 00 00 1E', 20, 12], [0x202, 8, '00 00 E8 03 00 00 00 00', 20, 31], [0x203, 8, 'F4 0A 4B 00 52 00 00 00', 20, 8], [0x204, 8, '00 00 B4 00 00 00 36 35', 20, 44], [0x207, 8, 'FE 5C 00 00 3B 06 00 00', 20, 17], [0x190, 8, '12 34 56 78 9A BC DE F0', 99, 3], [0xEF50000, 8, '00 00 00 00 00 00 00 00', 10, 91]]
-    .map(([id, dlc, data, hz, ago]) => ({ id, dlc, data, hz, ago })),
   '/sd/list': () => [{ name: 'log_16.csv', size: 48213 }, { name: 'log_17.csv', size: 1530922 }, { name: 'a_rather_long_file_name_for_testing_overflow.csv', size: 12 }],
   '/log-channels.json': () => SIGNALS.slice(1).map((n, i) => ({ id: i + 1, name: n, enabled: i % 3 !== 2 })),
   '/sim.json': () => ({ active: true, manual: true, seconds_left: 543, stop_reason: '', signals: SIGNALS.slice(1).map((n, i) => ({ id: i + 1, name: n, min: 0, max: 9000, step: i === 3 ? 0.1 : 1, value: 100 * (i + 1) })) }),

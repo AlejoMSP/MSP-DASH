@@ -1,4 +1,4 @@
-// Settings every gauge cell has, shared by the display editor and the web dashboard editor: default scale per signal,
+// Settings every gauge cell has in the gauge editor: the template (scale and warning) per signal,
 // caption size, units text, gauge position (centre / top / bottom) and, in the display editor only, the caption on the dial face.
 const fs = require('fs');
 const path = require('path');
@@ -39,11 +39,12 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   console.log("0. CONTRACT with gauge_style.h (the firmware's own lists)");
   const probe = makeEditor('GAUGES_HTML', '/gauges.json'); await settle();
   { const block = STYLE.match(/#define GAUGE_DEFAULT_RANGES\(X\)([\s\S]*?)\n\n/)[1];
-    const fw = {}; for (const m of block.matchAll(/X\((SIG_[A-Z0-9]+),\s*(-?\d+),\s*(-?\d+)\)/g)) fw[ENUM.indexOf(m[1])] = [+m[2], +m[3]];
+    const fw = {}; for (const m of block.matchAll(/X\((SIG_[A-Z0-9]+),\s*(-?\d+),\s*(-?\d+),\s*(\d),\s*(-?\d+),\s*(\d)\)/g)) fw[ENUM.indexOf(m[1])] = [+m[2], +m[3], +m[4], +m[5], +m[6]];
     const js = probe.run('JSON.stringify(SIGNAL_DEFAULT_RANGES)');
-    check(Object.keys(fw).length === 10 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's default scales are EXACTLY the firmware's list: " + js);
-    check(fw[4] && fw[4].join() === "10,20" && fw[2].join() === "60,250" && fw[6].join() === "60,250" && fw[5].join() === "0,100" && fw[7].join() === "0,100", "AFR 10-20, coolant and oil temperature 60-250, oil and fuel pressure 0-100");
-    check(!(3 in fw), "MAP/boost has no default scale (it reads above 100 under boost)"); }
+    check(Object.keys(fw).length === 15 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's gauge templates are EXACTLY the firmware's list: " + js);
+    check(fw[4].join() === "10,20,0,0,1" && fw[2].join() === "40,300,1,230,1" && fw[10].join() === "8,16,1,12,0" && fw[5].join() === "0,700,1,70,0", "AFR 10-20; coolant 40-300 F warn above 230; battery 8-16 V warn below 12; oil pressure 0-700 kPa warn below 70");
+    check(fw[3].join() === "0,250,0,0,1", "MAP/boost 0-250 kPa absolute (it reads above 100 under boost)");
+    check(Object.keys(fw).every(k => !(+k >= 11 && +k <= 19)), "the ECU on/off flags have no template"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }
@@ -51,23 +52,26 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const js = probe.run('VALIGNS.map(v => v[0] + ":" + v[1]).join(",")');
     check(js === `${d("CENTER")}:Center,${d("TOP")}:Top,${d("BOTTOM")}:Bottom`, "Center / Top / Bottom use the firmware's numbers: " + js); }
 
-  for (const [label, pageName, getUrl, display] of [["display editor", 'GAUGES_HTML', '/gauges.json', true], ["web dashboard editor", 'WEBCFG_HTML', '/web-pages.json', false]]) {
+  for (const [label, pageName, getUrl, display] of [["display editor", 'GAUGES_HTML', '/gauges.json', true]]) {
     console.log(`\n=== ${label} ===`);
     const E = makeEditor(pageName, getUrl); await settle(); const R = E.run;
     R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; pages[0].cells[0].rest = 7;');
 
-    console.log("1. choosing a signal sets its usual scale");
+    console.log("1. choosing a signal starts it from its template");
     const scale = () => R('[pages[0].cells[0].signal, pages[0].cells[0].min, pages[0].cells[0].max, pages[0].cells[0].rest].join()');
+    const warn = () => R('[pages[0].cells[0].has_warning, pages[0].cells[0].warning_threshold, pages[0].cells[0].warning_above].join()');
     R('setCellSignal(0, 0, 4)'); check(scale() === "4,10,20,10", "AFR: 10 to 20, rest at 10 (got " + scale() + ")");
-    R('setCellSignal(0, 0, 2)'); check(scale() === "2,60,250,60", "coolant: 60 to 250 (got " + scale() + ")");
-    R('setCellSignal(0, 0, 6)'); check(scale() === "6,60,250,60", "oil temperature: 60 to 250");
-    R('setCellSignal(0, 0, 5)'); check(scale() === "5,0,100,0", "oil pressure: 0 to 100");
-    R('setCellSignal(0, 0, 7)'); check(scale() === "7,0,100,0", "fuel pressure: 0 to 100");
-    for (const [sig, nm] of [[3, "MAP/boost"], [1, "RPM"], [8, "ethanol"], [9, "throttle"], [10, "battery"]]) {
-      R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; pages[0].cells[0].rest = 7;'); R(`setCellSignal(0, 0, ${sig})`);
-      check(scale() === `${sig},5,50,7`, `${nm}: the signal changes but the scale you set is left alone (got ${scale()})`);
-    }
-    R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; setCellSignal(0, 0, 4)'); check(scale() === "4,10,20,10", "a custom scale IS replaced when you switch to AFR (the quantity changed)");
+    check(warn().startsWith("false"), "AFR has no template warning, so the warning is off (got " + warn() + ")");
+    R('setCellSignal(0, 0, 2)'); check(scale() === "2,40,300,40" && warn() === "true,230,true", "coolant: 40 to 300, warn above 230 (got " + scale() + " / " + warn() + ")");
+    R('setCellSignal(0, 0, 6)'); check(scale() === "6,40,300,40" && warn() === "true,260,true", "oil temperature: 40 to 300, warn above 260");
+    R('setCellSignal(0, 0, 5)'); check(scale() === "5,0,700,0" && warn() === "true,70,false", "oil pressure: 0 to 700 kPa, warn BELOW 70");
+    R('setCellSignal(0, 0, 10)'); check(scale() === "10,8,16,8" && warn() === "true,12,false", "battery: 8 to 16 V, warn below 12");
+    R('setCellSignal(0, 0, 1)'); check(scale() === "1,0,8000,0" && warn() === "true,7000,true", "RPM: 0 to 8000, warn above 7000");
+    R('setCellSignal(0, 0, 3)'); check(scale() === "3,0,250,100" && warn().startsWith("false"), "MAP: 0 to 250 kPa, resting at 100 (atmosphere), and the RPM warning does NOT carry over");
+    R('pages[0].cells[0].alert_fullscreen = true; setCellSignal(0, 0, 9)'); check(R('pages[0].cells[0].alert_fullscreen') === false, "switching to a signal with no warning also turns off the full-screen alert");
+    R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; pages[0].cells[0].rest = 7; pages[0].cells[0].has_warning = true;'); R('setCellSignal(0, 0, 14)');
+    check(scale() === "14,5,50,7" && warn().startsWith("true"), "an ECU on/off flag (no template): the signal changes, everything you set is left alone");
+    R('pages[0].cells[0].min = 5; pages[0].cells[0].max = 50; setCellSignal(0, 0, 4)'); check(scale() === "4,10,20,10", "a custom scale IS replaced when you pick a signal with a template");
     R('setCellSignal(0, 0, 4)'); check(E.els.pages && E.els.pages.innerHTML.includes('value="10"') && E.els.pages.innerHTML.includes('value="20"'), "the boxes on screen show the new Min and Max");
 
     console.log("2. the controls");

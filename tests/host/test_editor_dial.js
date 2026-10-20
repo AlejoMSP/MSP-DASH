@@ -142,10 +142,8 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
   reset({}); T.setPages([]); await T.save();
   check(board.posts.length === 1, "an empty page list still goes through the existing confirm-and-save path");
 
-  console.log("8. the web dashboard editor");
-  const web = pageHtml('WEBCFG_HTML');
-  check(web.includes("VALUE_SIZES") && /\[120,"120 Max"\]/.test(web), "has the same eight text sizes (the front page now uses them)");
-  check(!web.includes("setAngle") && !web.includes("dialSvg") && !web.includes("saveAndReboot") && !web.includes("Dial numbers"), "no dial angles, dial numbers or reboot button (a web page has no dial and needs no reboot)");
+  console.log("8. the web dashboard editor is gone (removed in build 160)");
+  check(!/WEBCFG_HTML/.test(require('fs').readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp', 'utf8')), "web_monitor.cpp no longer has the web dashboard editor page");
 
   console.log("9. warning zones: which ticks the picture colours (the SAME hand-written cases as the display's pixel test)");
   const OFF = null;
@@ -246,8 +244,6 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
   await T.save();
   const sent = JSON.parse(board.posts[0].body)[0].cells[0];
   check(sent.low_crit_on === true && sent.low_crit === 20 && sent.low_warn_on === true && sent.low_warn === 40 && sent.high_warn_on === true && sent.high_warn === 200 && sent.high_crit_on === true && sent.high_crit === 230 && sent.zone_style === 3 && sent.needle_hub_pct === 15 && sent.needle_tip_pct === 5, "the four thresholds, the style and the needle trim are all sent to the board when saving");
-  const web2 = pageHtml('WEBCFG_HTML');
-  check(!web2.includes("Warning zones") && !web2.includes("Needle gap") && !web2.includes("zoneOf"), "the web dashboard editor has none of this (a web page has no dial)");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -57,7 +57,7 @@ static char *allocPostBuf(size_t n) {
   return p;
 }
 
-// ---- Saving settings posted by the /gauges and /web-config editors ----
+// ---- Saving settings posted by the /gauges editor ----
 // The answer to the browser is the REAL outcome: 200 only if the settings
 // were written to flash, otherwise 500 with the reason, which the page shows.
 // (The page used to say "Saved" no matter what happened.)
@@ -67,12 +67,11 @@ static unsigned long s_rebootAtMs = 0;   // when the /reboot request asked the b
 
 struct SaveResult { bool ok; char msg[128]; };
 static SaveResult s_displaySave = { true, "" };
-static SaveResult s_webSave = { true, "" };
 
-static void applyConfigBody(const char *body, size_t total, bool isWeb) {
-  SaveResult &res = isWeb ? s_webSave : s_displaySave;
+static void applyConfigBody(const char *body, size_t total) {
+  SaveResult &res = s_displaySave;
   res.ok = false;
-  Serial.printf("%s config POST: %u bytes\n", isWeb ? "Web dashboard" : "Display", (unsigned)total);
+  Serial.printf("Display config POST: %u bytes\n", (unsigned)total);
   if (total >= CONFIG_POST_MAX) {
     snprintf(res.msg, sizeof(res.msg), "Settings too large (%u bytes, limit %u)", (unsigned)total, (unsigned)CONFIG_POST_MAX);
     return;
@@ -88,8 +87,8 @@ static void applyConfigBody(const char *body, size_t total, bool isWeb) {
     strlcpy(res.msg, "The settings were not a list of pages", sizeof(res.msg));
     return;
   }
-  gauge_config_pages_from_json(doc.as<JsonArray>(), isWeb ? gauge_config_get_web_pages() : gauge_config_get_pages());
-  bool saved = isWeb ? gauge_config_web_save() : gauge_config_save();
+  gauge_config_pages_from_json(doc.as<JsonArray>(), gauge_config_get_pages());
+  bool saved = gauge_config_save();
   if (saved) {
     res.ok = true;
     res.msg[0] = '\0';
@@ -313,7 +312,6 @@ function updateLamps() {
         const st = await res.json();
         let t = (st.link && st.link.name ? st.link.name + " | " : "") + "build " + st.build + " - " + st.compiled;
         if (st.fps !== undefined) t += " | " + st.fps + " fps, drawing " + st.lvgl_busy + "%";
-        if (st.link && st.link.name) document.title = "MSP-DASH - " + st.link.name;
         const L = st.link;
         if (L) {
           t += L.role === "remote"
@@ -344,41 +342,6 @@ function updateLamps() {
 </body>
 </html>
 )rawliteral";
-static const char CAN_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Raw CAN Monitor</title>" PH_STYLE
-R"rawliteral(<style>
-    .tablewrap { overflow-x:auto; }
-    table { width:100%; border-collapse:collapse; margin-top:8px; font-family:monospace; font-size:0.72em; }
-    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #333; }
-    th { color:#4dd0e1; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
-  </style>)rawliteral" PH_OPEN
-R"rawliteral(<div class="pad">
-  <h1>Raw CAN Monitor</h1>
-  <div class="tablewrap">
-  <table>
-    <thead><tr><th>ID (hex)</th><th>DLC</th><th>Data (hex)</th><th>Hz</th><th>Age (ms)</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  </div>
-  
-</div>)rawliteral" PH_CLOSE
-R"rawliteral(
-<script>
-    async function refresh() {
-      const res = await fetch("/can.json");
-      const rows = await res.json();
-      const now = Date.now();
-      const tbody = document.getElementById("rows");
-      tbody.innerHTML = rows.map(r =>
-        `<tr><td>0x${r.id.toString(16).toUpperCase().padStart(3,'0')}</td><td>${r.dlc}</td><td>${r.data}</td><td>${r.hz}</td><td>${r.ago}</td></tr>`
-      ).join("");
-    }
-    setInterval(refresh, 1000);
-    refresh();
-  </script>
-</body>
-</html>
-)rawliteral";
-
 static const char GAUGES_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Gauge Config</title>" PH_STYLE
 R"rawliteral(<style>
     h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
@@ -915,246 +878,6 @@ R"rawliteral(
 </html>
 )rawliteral";
 
-static const char WEBCFG_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Web Dashboard Config</title>" PH_STYLE
-R"rawliteral(<style>
-    h2 { font-size: 1em; color:#4dd0e1; margin:4px 0; }
-    .page-card { background:#0a0a0a; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:14px; }
-    .page-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
-    .cell { background:#111; border-radius:8px; padding:10px; margin-top:10px; }
-    .cell label { display:block; font-size:0.78em; color:#4dd0e1; margin-top:5px; }
-    .cell input, .cell select { width:100%; box-sizing:border-box; padding:4px; margin-top:2px; }
-    .cell input[type=checkbox] { width:auto; margin:0 6px 0 0; }
-    .row2 { display:flex; gap:8px; }
-    .row2 > div { flex:1; }
-    button { padding:8px 12px; background:#4dd0e1; color:#000; border:none; border-radius:6px; margin:2px; }
-    button.danger { background:#F44336; color:#fff; }
-    .bulk { background:#111; border-radius:8px; padding:14px; margin-bottom:14px; }
-    .bulk-title { font-weight:bold; }
-    .bulk-sub { font-size:0.78em; color:#888; margin:2px 0 12px; }
-    .bulk-colors { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
-    .bulk-colors label { display:flex; flex-direction:column; gap:5px; font-size:0.78em; color:#4dd0e1; }
-    .bulk-colors input[type=color] { width:100%; height:38px; padding:2px; border:1px solid #333; border-radius:6px; background:#000; }
-    .bulk-apply { width:100%; margin:0; }
-    .hint { font-size:0.75em; color:#888; margin:2px 0; }
-    .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
-    #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
-    #status:empty, #boot:empty { display:none; }
-  </style>)rawliteral" PH_OPEN
-R"rawliteral(<div class="pad">
-  <h1>Web Dashboard Configuration</h1>
-  <div id="status"></div>
-  <div id="boot">Page script has not started yet...</div>
-
-  <div class="bulk">
-    <div class="bulk-title">Apply colors to ALL cells</div>
-    <div class="bulk-sub">Sets every cell on every page. Click Save afterward to keep it.</div>
-    <div class="bulk-colors">
-      <label>Needle<input type="color" id="bulkNeedle" value="#ffffff"></label>
-      <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
-      <label>Background<input type="color" id="bulkBg" value="#000000"></label>
-    </div>
-    <button type="button" class="bulk-apply" onclick="applyColorsToAll()">Apply to All</button>
-  </div>
-
-  <button type="button" class="addpage" onclick="addPage()">+ Add Page</button>
-  <button type="button" class="addpage" onclick="addIndicatorPage()">+ Add Indicators Page</button>
-  <div id="pages"></div>
-  <button onclick="save()">Save (reboot required to apply)</button>
-
-  
-</div>)rawliteral" PH_CLOSE
-R"rawliteral(
-<script>
-    window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
-    document.getElementById("boot").textContent = "";
-    const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
-    const LAYOUTS = ["1 Cell (full screen)","2-Up (stacked)","3-Up (1 top, 2 bottom)","2x2 Grid"];
-    const CELLS_PER_LAYOUT = [1, 2, 3, 4];
-    const GAUGE_TYPES = ["Needle Meter", "Number", "Half-Moon", "Trend Graph"];
-    // Readout text sizes (px). Must match GAUGE_VALUE_SIZES in gauge_style.h. A size too big for its cell shrinks to the biggest that fits.
-    const VALUE_SIZES = [[14,"14 Small"],[28,"28 Medium"],[36,"36 Large"],[48,"48 XL"],[64,"64 2XL"],[80,"80 3XL"],[96,"96 4XL"],[120,"120 Max"]];
-    let loaded = false;
-    let pages = [];
-    let signalActivity = []; // [{id, name, age_ms}], sorted most-active first
-
-    function emptyCell() {
-      return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
-        needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
-        tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        has_warning:false, warning_threshold:0, warning_above:false };
-    }
-
-    function signalOptionsHtml(selected) {
-      // Sorted by activity (lowest age_ms first = most live), "never seen" last, name as secondary sort.
-      const sorted = signalActivity.slice().sort((a, b) => {
-        if (a.age_ms !== b.age_ms) return a.age_ms - b.age_ms;
-        return a.name.localeCompare(b.name);
-      });
-      let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
-      for (const s of sorted) {
-        if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
-        const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
-        html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
-      }
-      return html;
-    }
-
-    function renderCell(pIdx, cIdx, c) {
-      return `
-        <div class="cell">
-          <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
-          ${!c.enabled ? "" : `
-          <label>Signal <select onchange="setCellSignal(${pIdx},${cIdx},parseInt(this.value))">${signalOptionsHtml(c.signal)}</select></label>
-          <label>Gauge Type <select onchange="pages[${pIdx}].cells[${cIdx}].gauge_type=parseInt(this.value)">
-            ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
-          </select></label>
-          <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
-          <div class="row2">
-            <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
-            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. kPa" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
-          </div>
-          ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
-            <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
-          <div class="row2">
-            <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
-            <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>
-            <div><label>Rest <input type="number" value="${c.rest}" onchange="pages[${pIdx}].cells[${cIdx}].rest=parseInt(this.value)"></label></div>
-          </div>
-          <div class="row2">
-            <div><label>Value Divisor <input type="number" step="any" value="${c.value_divisor}" onchange="pages[${pIdx}].cells[${cIdx}].value_divisor=parseFloat(this.value)"></label></div>
-            <div><label>Tick Count <input type="number" value="${c.tick_count}" onchange="pages[${pIdx}].cells[${cIdx}].tick_count=parseInt(this.value)"></label></div>
-            <div><label>Major Every Nth <input type="number" value="${c.major_nth}" onchange="pages[${pIdx}].cells[${cIdx}].major_nth=parseInt(this.value)"></label></div>
-          </div>
-          <div class="row2">
-            <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
-            <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
-          </div>
-          <label>Value Text Size
-            <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
-              ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
-            </select>
-          </label>
-          <label>Decimals
-            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
-          <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
-          <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
-          <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
-          <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
-          <label><input type="checkbox" ${c.has_warning?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].has_warning=this.checked"> Warning enabled</label>
-          <div class="row2">
-            <div><label>Threshold <input type="number" value="${c.warning_threshold}" onchange="pages[${pIdx}].cells[${cIdx}].warning_threshold=parseFloat(this.value)"></label></div>
-            <div><label>Direction
-              <select onchange="pages[${pIdx}].cells[${cIdx}].warning_above=(this.value==='1')">
-                <option value="1" ${c.warning_above?"selected":""}>Above</option>
-                <option value="0" ${!c.warning_above?"selected":""}>Below</option>
-              </select>
-            </label></div>
-          </div>
-          `}
-        </div>
-      `;
-    }
-
-    function changeLayout(pIdx, newLayout) {
-      pages[pIdx].layout = newLayout;
-      const needed = CELLS_PER_LAYOUT[newLayout];
-      while (pages[pIdx].cells.length < needed) pages[pIdx].cells.push(emptyCell());
-      renderPages();
-    }
-
-    function pageAction(pIdx, action) {
-      if (action === "delete") {
-        pages.splice(pIdx, 1);
-      } else if (action === "empty") {
-        if (pages[pIdx].kind === 1) pages[pIdx].indicators = [];
-        else pages[pIdx].cells = pages[pIdx].cells.map(() => emptyCell());
-      } else if (action === "copy") {
-        const copy = JSON.parse(JSON.stringify(pages[pIdx]));
-        pages.push(copy);
-      }
-      renderPages();
-    }
-
-    function addPage() {
-      pages.push({ enabled:true, layout:0, cells:[emptyCell()] });
-      renderPages();
-    }
-
-    function renderPages() {
-      const container = document.getElementById("pages");
-      container.innerHTML = pages.map((p, pIdx) => {
-        if (p.kind === 1) return renderIndicatorPage(pIdx, p);
-        const needed = CELLS_PER_LAYOUT[p.layout];
-        while (p.cells.length < needed) p.cells.push(emptyCell());
-        let cellsHtml = "";
-        for (let c = 0; c < needed; c++) cellsHtml += renderCell(pIdx, c, p.cells[c]);
-        return `
-          <div class="page-card">
-            <div class="page-header">
-              <strong>Page ${pIdx + 1}</strong>
-              <select onchange="changeLayout(${pIdx}, parseInt(this.value))">
-                ${LAYOUTS.map((l,v)=>`<option value="${v}" ${p.layout===v?"selected":""}>${l}</option>`).join("")}
-              </select>
-              <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
-              <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
-              <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>
-            </div>
-            ${cellsHtml}
-          </div>
-        `;
-      }).join("");
-    }
-
-    async function load() {
-      document.getElementById("status").textContent = "Loading...";
-      try {
-        const pagesRes = await fetch("/web-pages.json");
-        pages = await pagesRes.json();
-        const signalsRes = await fetch("/signals.json");
-        signalActivity = await signalsRes.json();
-        renderPages();
-        loaded = true;
-        document.getElementById("status").textContent = "";
-      } catch (e) {
-        document.getElementById("status").innerHTML = "Failed to load - " + e.message + ' <button type="button" onclick="load()">Retry</button>';
-      }
-    }
-
-    async function save() {
-      // Never save a list that failed to load - an empty array would wipe every page on the board.
-      if (!loaded) { document.getElementById("status").textContent = "Not saved: page has not finished loading. Reload and try again."; return; }
-      if (pages.length === 0 && !confirm("This will remove ALL pages. Save anyway?")) return;
-      document.getElementById("status").textContent = "Saving...";
-      try {
-        const r = await fetch("/web-pages", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(pages) });
-        if (!r.ok) throw new Error((await r.text()) || ("board returned " + r.status));
-        document.getElementById("status").textContent = "Saved to the board's flash. Open the front page to see it - no reboot needed.";
-      } catch (e) { document.getElementById("status").textContent = "Save FAILED: " + e.message; }
-    }
-
-    async function applyColorsToAll() {
-      const needle = document.getElementById("bulkNeedle").value.substring(1);
-      const tick = document.getElementById("bulkTick").value.substring(1);
-      const bg = document.getElementById("bulkBg").value.substring(1);
-      for (const p of pages) {
-        for (const c of p.cells) {
-          c.needle_color = parseInt(needle, 16);
-          c.tick_color = parseInt(tick, 16);
-          c.bg_color = parseInt(bg, 16);
-        }
-      }
-      renderPages();
-      document.getElementById("status").textContent = "Applied locally - click Save to persist.";
-    }
-
-)rawliteral"
-#include "web_indicator_editor.h"
-R"rawliteral(
-    load();
-  </script>
-</body>
-</html>
-)rawliteral";
 static const char SD_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH SD Card</title>" PH_STYLE
 R"rawliteral(<style>
     .tablewrap { overflow-x:auto; }
@@ -1547,7 +1270,7 @@ static const unsigned long BROADCAST_INTERVAL_MS = 500;
 // (can_parsing.h), read by the web server task, and has its Hz values
 // recomputed from loop() - so every access goes through this short
 // spinlock. Without it, the once-a-second Hz reset could race with a
-// frame increment and briefly show a doubled rate on the /can page.
+// frame increment and briefly show a doubled rate in the frames/s count.
 static portMUX_TYPE s_canTableMux = portMUX_INITIALIZER_UNLOCKED;
 
 void web_monitor_track_can_frame(uint32_t id, uint8_t *data, uint8_t dlc) {
@@ -1601,34 +1324,6 @@ static void recomputeCanHz() {
   portEXIT_CRITICAL(&s_canTableMux);
 }
 
-static String buildCanJson() {
-  // Copy the table under the lock, then build the JSON from the copy -
-  // string building is too slow to do while holding a spinlock.
-  CanMonitorEntry snapshot[MAX_CAN_IDS];
-  int count;
-  portENTER_CRITICAL(&s_canTableMux);
-  count = s_canTableCount;
-  memcpy(snapshot, s_canTable, sizeof(CanMonitorEntry) * count);
-  portEXIT_CRITICAL(&s_canTableMux);
-
-  unsigned long now = millis();
-  String json = "[";
-  for (int i = 0; i < count; i++) {
-    if (i > 0) json += ",";
-    CanMonitorEntry *e = &snapshot[i];
-    char dataHex[25] = {0};
-    for (int b = 0; b < e->dlc; b++) {
-      char byteStr[4];
-      snprintf(byteStr, sizeof(byteStr), "%02X ", e->data[b]);
-      strcat(dataHex, byteStr);
-    }
-    json += "{\"id\":" + String(e->id) + ",\"dlc\":" + String(e->dlc) +
-            ",\"data\":\"" + String(dataHex) + "\",\"hz\":" + String(e->hz) +
-            ",\"ago\":" + String(now - e->lastSeen) + "}";
-  }
-  json += "]";
-  return json;
-}
 
 // ---- static IP (per board, saved in NVS "net"; empty = DHCP) ----
 // Set: /net?ip=192.168.55.103&gw=192.168.55.1&mask=255.255.255.0 (&dns= optional, default = gw). Back to DHCP: /net?dhcp=1
@@ -1690,13 +1385,7 @@ void web_monitor_init(void) {
     request->send_P(200, "text/html", INDEX_HTML);
   });
 
-  server.on("/can", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", CAN_HTML);
-  });
 
-  server.on("/can.json", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", buildCanJson());
-  });
 
   server.on("/ecu", HTTP_GET, [](AsyncWebServerRequest *request) {
     String json = "{\"ecu\":" + String((int)ecu_config_get()) + "}";
@@ -1839,7 +1528,6 @@ void web_monitor_init(void) {
     store["mounted"] = gauge_config_storage_ok();
     store["last_error"] = gauge_config_last_error();
     store["display_cfg_bytes"] = (uint32_t)gauge_config_saved_bytes(0);
-    store["web_cfg_bytes"] = (uint32_t)gauge_config_saved_bytes(1);
     store["flash_free"] = (uint32_t)FFat.freeBytes();
 
     JsonArray sigs = doc["signals"].to<JsonArray>();
@@ -1928,40 +1616,8 @@ void web_monitor_init(void) {
     request->send_P(200, "text/html", GAUGES_HTML);
   });
 
-  server.on("/web-config", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", WEBCFG_HTML);
-  });
 
-  server.on("/web-pages.json", HTTP_GET, [](AsyncWebServerRequest *request) {
-    JsonDocument doc;
-    gauge_config_pages_to_json(gauge_config_get_web_pages(), doc);
-    String out;
-    serializeJson(doc, out);
-    request->send(200, "application/json", out);
-  });
 
-  server.on("/web-pages", HTTP_POST,
-    [](AsyncWebServerRequest *request) {
-      // Runs after the whole body has been received and handled below, so the
-      // answer can say whether the settings were REALLY saved.
-      request->send(s_webSave.ok ? 200 : 500, "text/plain", s_webSave.ok ? "OK" : s_webSave.msg);
-    },
-    NULL,
-    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      static char *buf = NULL;
-      if (!buf) buf = allocPostBuf(CONFIG_POST_MAX);
-      if (index == 0) {
-        s_webSave.ok = false;
-        strlcpy(s_webSave.msg, "The board did not finish receiving the settings", sizeof(s_webSave.msg));
-      }
-      if (!buf) { strlcpy(s_webSave.msg, "Out of memory on the board", sizeof(s_webSave.msg)); return; }
-      if (index + len < CONFIG_POST_MAX) memcpy(buf + index, data, len);
-      if (index + len == total) {
-        if (total < CONFIG_POST_MAX) buf[total] = '\0';
-        applyConfigBody(buf, total, true);
-      }
-    }
-  );
 
 
   server.on("/signals.json", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -2009,7 +1665,7 @@ void web_monitor_init(void) {
       if (index + len < CONFIG_POST_MAX) memcpy(buf + index, data, len);
       if (index + len == total) {
         if (total < CONFIG_POST_MAX) buf[total] = '\0';
-        applyConfigBody(buf, total, false);
+        applyConfigBody(buf, total);
       }
     }
   );
