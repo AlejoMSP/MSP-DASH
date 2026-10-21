@@ -7,12 +7,16 @@ Pins are GPIO numbers with the Freenove breakout terminal (L = left row, R = rig
 |---|---|
 | Brown (+) | 5 V, L24 (anything 5-30 V works) |
 | Blue (-) | ground |
-| Black (signal) | GPIO 27 = L16, plus a 10k resistor from L16 to 3.3 V (L6) |
+| Black (signal) | through a Schottky diode to GPIO 27 = L16: diode stripe (cathode) on the black wire, other end on L16 |
+| 10k resistor | from L16 to 3.3 V (L6) |
 
-The sensor pulls the signal to ground when the magnet passes and lets go otherwise, so GPIO 27 never sees more
-than 3.3 V. Check first: power the sensor with the black wire connected to nothing and measure black to ground.
-About 0 V or floating = open collector, wire it as above. If it reads the supply voltage, this one has a built-in
-pull-up: then add a divider (10k from black to GPIO 27, 20k from GPIO 27 to ground) and leave out the 10k to 3.3 V.
+Why the diode: with nothing connected, this sensor's black wire measured 3.58 V (powered at 5 V). It has a
+built-in pull-up (or its indicator LED) to its supply, so a plain 10k to 3.3 V would let more than 3.3 V into the
+pin, and a divider would bring the high level below what the ESP32 reads as HIGH. The diode blocks anything above
+3.3 V: magnet away = the 10k holds L16 at 3.3 V (HIGH); magnet there = the sensor pulls black to ground and L16
+drops to about 0.3 V (LOW). Use a Schottky (1N5817, BAT43, BAT85, 1N5819): its small drop keeps LOW well under the
+ESP32's 0.8 V limit. A 1N4148 also works but lands near 0.8 V, so check it. This also stays safe if the sensor is
+later powered from the car's 12 V.
 
 Speed = pulses per second / pulses per mile x 3600. Pulses per mile is set on the hub page (default 4000).
 "Calibrate from GPS": drive steady above 10 mph with a GPS fix, press it, and it sets pulses per mile so the hall
