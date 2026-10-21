@@ -8,7 +8,7 @@ let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; 
 const ENUM = (() => {            // the SignalId enum in gauge_config.h, in order
   const h = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32s3-amoled-bsp-base', 'gauge_config.h'), 'utf8');
   const body = h.match(/typedef enum \{\s*SIG_NONE = 0,([\s\S]*?)SIG_COUNT\s*\} SignalId;/)[1];
-  return ['SIG_NONE', ...[...body.matchAll(/\b(SIG_[A-Z0-9]+)\b/g)].map(m => m[1])];
+  return ['SIG_NONE', ...[...body.matchAll(/\b(SIG_[A-Z0-9_]+)\b/g)].map(m => m[1])];
 })();
 const NAMES = ["None", "RPM", "Coolant Temp", "MAP/Boost", "AFR", "Oil Pressure", "Oil Temp", "Fuel Pressure", "Ethanol %", "Throttle Position", "Battery Voltage",
   "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal"];
@@ -39,7 +39,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   const SIGMAP = probe.run('SIG');
   let ok = true; for (const [k, v] of Object.entries(SIGMAP)) if (ENUM[v] !== 'SIG_' + k) { ok = false; console.log("   mismatch:", k, v, ENUM[v]); }
   check(ok && Object.keys(SIGMAP).length === ENUM.length - 1, "every JS signal number matches its enum position in gauge_config.h (" + Object.keys(SIGMAP).length + " signals)");
-  check(ENUM.length === 26 && ENUM[25] === 'SIG_VSS' && ENUM[11] === 'SIG_REVLIM' && ENUM[19] === 'SIG_BRAKE' && ENUM[20] === 'SIG_EGT' && ENUM[21] === 'SIG_IAT' && ENUM[22] === 'SIG_AMBT' && ENUM[23] === 'SIG_HUM' && ENUM[24] === 'SIG_FUEL', "the enum has the ten analog signals, the nine flags, then EGT and IAT (appended so saved numbers keep their meaning)");
+  check(ENUM.length === 28 && ENUM[25] === 'SIG_VSS' && ENUM[26] === 'SIG_GPS_SPD' && ENUM[27] === 'SIG_GPS_SATS' && ENUM[11] === 'SIG_REVLIM' && ENUM[19] === 'SIG_BRAKE' && ENUM[20] === 'SIG_EGT' && ENUM[21] === 'SIG_IAT' && ENUM[22] === 'SIG_AMBT' && ENUM[23] === 'SIG_HUM' && ENUM[24] === 'SIG_FUEL', "the enum has the ten analog signals, the nine flags, then EGT and IAT (appended so saved numbers keep their meaning)");
   const presets = probe.run('IND_PRESETS'); const unitMap = probe.run('SIGNAL_UNITS');
   check(presets.length === 18 && new Set(presets.map(p => p.name)).size === 18, "18 presets with unique names");
   check(presets.every(p => p.signal >= 1 && p.signal <= 19 && (p.op === 0 || p.op === 1) && Number.isFinite(p.threshold) && p.text.length <= 11 && /^[\x20-\x7E]+$/.test(p.text)), "every preset: a real signal, a valid condition, text of at most 11 printable ASCII characters (what the display accepts)");

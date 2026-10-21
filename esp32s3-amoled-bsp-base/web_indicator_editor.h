@@ -12,8 +12,8 @@ R"rawliteral(
     const IND_MAX = 12;
     // Signal numbers = the order of SignalId in gauge_config.h (tests/host/test_editor_indicators.js checks this table against that file).
     const SIG = { RPM:1, CLT:2, MAP:3, AFR:4, OILP:5, OILT:6, FUELP:7, FLEX:8, TPS:9, BATTV:10,
-                  REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24, VSS:25 };
-    const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"psi", 4:"AFR", 5:"psi", 6:"F", 7:"psi", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%", 25:"mph" };
+                  REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24, VSS:25, GPS_SPD:26, GPS_SATS:27 };
+    const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"psi", 4:"AFR", 5:"psi", 6:"F", 7:"psi", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%", 25:"mph", 26:"mph", 27:"sats" };
     const IND_RED = 0xE53935, IND_AMBER = 0xFFB300, IND_GREEN = 0x43A047, IND_BLUE = 0x1E88E5, IND_OFF = 0x2A2A2A;
 
     // Ready-made lamps. A threshold lamp is "above" (op 0) or "below" (op 1) a value, in the signal's own units; an ECU on/off
@@ -207,7 +207,7 @@ R"rawliteral(
       [SIG.RPM]: [0, 8000, 1, 7000, 1], [SIG.CLT]: [40, 300, 1, 230, 1], [SIG.MAP]: [-15, 30, 0, 0, 1], [SIG.AFR]: [10, 20, 0, 0, 1],
       [SIG.OILP]: [0, 100, 1, 10, 0], [SIG.OILT]: [40, 300, 1, 260, 1], [SIG.FUELP]: [0, 100, 0, 0, 0], [SIG.FLEX]: [0, 100, 0, 0, 1],
       [SIG.TPS]: [0, 100, 0, 0, 1], [SIG.BATTV]: [8, 16, 1, 12, 0], [SIG.EGT]: [0, 1800, 1, 1600, 1], [SIG.IAT]: [0, 200, 1, 150, 1],
-      [SIG.AMBT]: [0, 120, 0, 0, 1], [SIG.HUM]: [0, 100, 0, 0, 1], [SIG.FUEL]: [0, 100, 1, 15, 0], [SIG.VSS]: [0, 160, 0, 0, 1] };
+      [SIG.AMBT]: [0, 120, 0, 0, 1], [SIG.HUM]: [0, 100, 0, 0, 1], [SIG.FUEL]: [0, 100, 1, 15, 0], [SIG.VSS]: [0, 160, 0, 0, 1], [SIG.GPS_SPD]: [0, 160, 0, 0, 1], [SIG.GPS_SATS]: [0, 20, 1, 4, 0] };
     // Caption / units text sizes. 0 = "Normal": the display's default font, as captions always looked. A size too big for the cell shrinks to the largest that fits.
     const CAPTION_SIZES = [[0, "Normal"], [14, "14 Small"], [20, "20"], [28, "28 Medium"], [36, "36 Large"], [48, "48 XL"]];
     const VALIGNS = [[0, "Center"], [1, "Top"], [2, "Bottom"]];

@@ -71,6 +71,7 @@ for each page, and that a failed save shows the board's own explanation.
   nothing while the simulator runs, bad settings refused, settings kept across a reboot, no SD card.
   Build: `g++ -std=c++17 -Istubs -I<sketch> -DSD_MOUNT_POINT='"/tmp/sdtest"' <sketch>/sd_logging.cpp test_sim_logging.cpp`
 - `test_logging_page.js`: the Logging page: start condition form, save, refusals, the channel ticks, alphabetical lists.
+- `test_speed_sensors.cpp`: hub hall speed math, GPS calibration, NMEA reading (checksums, RMC/GGA, junk). Build: `g++ -std=c++17 -I../../esp32-input test_speed_sensors.cpp`
 - `test_hub_sensors_page.js`: the hub's /sensors page: alphabetical, and CAN frames no sensor reads listed by themselves.
 - `test_sim_page.js`: the /simulator page's script - modes, countdown, one slider request at
   a time (newest value wins), the board's refusal text shown. Set `WEB_MONITOR_CPP` to test a

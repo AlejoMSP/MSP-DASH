@@ -156,7 +156,7 @@ R"rawliteral(
     const CELLS_PER_LAYOUT = [1, 2, 3, 4];
     const SIGNAL_NAMES = {1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol %",9:"Throttle Position",10:"Battery Voltage",
       11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-      20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed"};
+      20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites"};
     let webPages = [];          // the round screen's own pages (/gauges.json)
     let signalValues = {};      // signals that currently have live data, keyed by signal id
 

@@ -85,9 +85,8 @@ static void handleRusefiFrame(uint32_t id, uint8_t *d) {
       g_flex_pct = d[7];
       g_flex_has_data = true;
       gauge_config_mark_signal_active(SIG_FLEX);
-      g_vss_mph = d[6] * 0.621371f;   // DBC: VehicleSpeed 48|8@1+ (1,0) kph -> shown in mph
-      g_vss_has_data = true;
-      gauge_config_mark_signal_active(SIG_VSS);
+      // Byte 6 is rusEFI's VehicleSpeed (kph). NOT read: Speed comes from the hall sensor on the hub, which sends it to
+      // rusEFI in the 0x7F0 frame, so rusEFI would only echo the hub's own number back (hub build 18).
       break;
     }
     case RUSEFI_BASE2: {

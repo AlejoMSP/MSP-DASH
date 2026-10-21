@@ -40,7 +40,9 @@
   X(SIG_AMBT,  0,  120,  0, 0,    1) \
   X(SIG_HUM,   0,  100,  0, 0,    1) \
   X(SIG_FUEL,  0,  100,  1, 15,   0) \
-  X(SIG_VSS,   0,  160,  0, 0,    1)
+  X(SIG_VSS,   0,  160,  0, 0,    1) \
+  X(SIG_GPS_SPD, 0, 160, 0, 0,    1) \
+  X(SIG_GPS_SATS, 0, 20, 1, 4,    0)
 
 static inline bool gauge_signal_default_range(int sig, int32_t *mn, int32_t *mx) {
 #define GAUGE_RANGE_CASE(S, A, B, W, T, U) if (sig == (S)) { *mn = (A); *mx = (B); return true; }

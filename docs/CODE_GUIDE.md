@@ -76,6 +76,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - EGT: MAX6675 on GPIO18 (SCK), 19 (SO), 23 (CS), every 250 ms; sent on CAN as 0x7F0 for rusEFI.
   - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Fuel level: pot (mock sender) on GPIO36, 0-100 %, signal Fuel Level.
+  - Speed (build 18 on): hall sensor on GPIO 27 (interrupt on core 0) -> Speed signal; GT-U7 GPS on Serial2 (GPIO 16/17) -> GPS Speed / GPS Satellites. Math and NMEA parsing in `speed_sensors.h` (host-tested). Frame 0x7F0 now carries speed too, sent by `canTxTask` 10 times a second. See docs/HUB_SPEED_SENSORS.md and docs/RUSEFI_LUA.md.
   - Bench simulator (build 15 on): `simulator.cpp/.h` copied in from the screen folder at compile time. `/simulator` page; its data packets carry `LINK_MASK_SIMULATED` (bit 0 of `has_mask`), the screens show SIMULATED and the main screen does not log. The hub's own sensors stop writing their values while it runs.
 - Web: `/` screens status (green/red) and brightness settings, `/simulator`, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.
 - `input_btn.h` - button struct (in a header because the Arduino builder moves prototypes above the sketch).

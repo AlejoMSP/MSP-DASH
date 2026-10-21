@@ -23,9 +23,10 @@
 #include "gauge_app.h"
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
+#include "speed_sensors.h" // hall sensor math and the GPS reader (host-tested)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 17
+#define INPUT_BUILD 18
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -48,9 +49,9 @@ static uint16_t s_seq = 0;
 static volatile uint32_t s_dataSent = 0;   // data packets sent to the screens
 
 // ---- the hub: CAN values (written by the decoder from can_parsing.h) and the data packet the screens read ----
-volatile float g_rpm, g_clt_f, g_boost_psi, g_afr, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph;
+volatile float g_rpm, g_clt_f, g_boost_psi, g_afr, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph, g_gps_mph, g_gps_sats;
 volatile bool g_rpm_has_data, g_clt_has_data, g_boost_has_data, g_afr_has_data, g_oilp_has_data, g_oilt_has_data,
-              g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data;
+              g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data, g_gps_has_data, g_sats_has_data;
 volatile uint16_t g_flag_bits, g_flag_seen;
 static volatile uint32_t s_seenMs[SIG_COUNT];
 #define STALE_MS 2000   // same as the screens: a signal not heard for 2 s shows "--"
@@ -60,6 +61,8 @@ static volatile uint32_t s_seenMs[SIG_COUNT];
 #define SRC_HUB_DHT  0xFFFF0002u   // DHT22
 #define SRC_HUB_FUEL 0xFFFF0003u   // fuel pot / sender
 #define SRC_HUB_SIM  0xFFFF0004u   // the bench simulator
+#define SRC_HUB_HALL 0xFFFF0005u   // hall speed sensor
+#define SRC_HUB_GPS  0xFFFF0006u   // GPS
 static volatile uint32_t s_srcId[SIG_COUNT];
 // Called by the CAN decoder (can_parsing.h, can_flags.h) from the CAN task: the source is the frame being decoded.
 // The simulator calls it too (from loop()); its values are tagged as coming from the simulator.
@@ -80,6 +83,7 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
     case SIG_BATTV: return g_battv;   case SIG_EGT: return g_egt_f;     case SIG_IAT: return g_iat_f;
     case SIG_AMBT: return g_ambt_f;  case SIG_HUM: return g_hum_pct;
     case SIG_FUEL: return g_fuel_pct;  case SIG_VSS: return g_vss_mph;
+    case SIG_GPS_SPD: return g_gps_mph; case SIG_GPS_SATS: return g_gps_sats;
     default: return gauge_signal_is_flag(sig) ? (((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f) : 0.0f;
   }
 }
@@ -197,19 +201,84 @@ static void egtTask(void *) {
     bool open = (raw & 0x0004) || raw == 0xFFFF;    // bit 2 = no thermocouple; all ones = chip missing
     float c = (raw >> 3) * 0.25f;
     s_egtOpen = open;
-    twai_message_t m = {};
-    m.identifier = CAN_ID_EGT_PLACEHOLDER; m.data_length_code = 3;
-    uint16_t ci = open ? 0 : (uint16_t)lroundf(c);
-    m.data[0] = ci & 0xFF; m.data[1] = ci >> 8; m.data[2] = open ? 1 : 0;
     if (!open) s_egtC = c;
     if (!open && !simOwns()) {
       g_egt_f = c * 9.0f / 5.0f + 32.0f;            // the hub does not hear its own frame, so set the value here too
       g_egt_has_data = true;
       markLocal(SIG_EGT, SRC_HUB_EGT);
     }
+    vTaskDelay(pdMS_TO_TICKS(EGT_PERIOD_MS));
+  }
+}
+
+// ---- Hall speed sensor: NJK-5002C (NPN, normally open) on GPIO 27, a magnet passing it pulls the pin low ----
+// Wiring: brown = +5 V (5-30 V), blue = ground, black = signal -> GPIO 27, with 10k from GPIO 27 to 3.3 V.
+// The interrupt runs on core 0: the DHT22 read switches interrupts off on core 1 for ~5 ms.
+#define HALL_PIN 27
+static volatile uint32_t s_hallCount = 0, s_hallLastUs = 0;
+static float s_ppm = HALL_PPM_DEFAULT;             // pulses per mile (saved; calibrate from the GPS)
+static volatile float s_hallMph = 0, s_hallHz = 0;
+static void IRAM_ATTR hallIsr() {
+  uint32_t now = micros();
+  if (now - s_hallLastUs < HALL_MIN_PERIOD_US) return;   // noise
+  s_hallLastUs = now; s_hallCount++;
+}
+static void ppmLoad() { Preferences p; p.begin("spd", true); s_ppm = p.getFloat("ppm", HALL_PPM_DEFAULT); p.end(); if (s_ppm < HALL_PPM_MIN || s_ppm > HALL_PPM_MAX) s_ppm = HALL_PPM_DEFAULT; }
+static void ppmSave() { Preferences p; p.begin("spd", false); p.putFloat("ppm", s_ppm); p.end(); }
+static void hallTask(void *) {
+  pinMode(HALL_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(HALL_PIN), hallIsr, FALLING);   // attached here, so it runs on this task's core (0)
+  uint32_t prevCount = s_hallCount, prevUs = s_hallLastUs;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+    uint32_t count = s_hallCount, lastUs = s_hallLastUs, now = micros();
+    uint32_t n = count - prevCount;
+    if (n > 0 && prevCount != 0) {                   // average period over every pulse since the last look
+      uint32_t period = (lastUs - prevUs) / n;
+      s_hallHz = period ? 1000000.0f / period : 0;
+      s_hallMph = hall_mph(period, now - lastUs, s_ppm);
+    } else if (now - lastUs > HALL_STOP_US) { s_hallMph = 0; s_hallHz = 0; }
+    if (n > 0) { prevCount = count; prevUs = lastUs; }
+    if (!simOwns()) { g_vss_mph = s_hallMph; g_vss_has_data = true; markLocal(SIG_VSS, SRC_HUB_HALL); }
+  }
+}
+
+// ---- GPS: GT-U7 (NEO-6M compatible) on Serial2: module TX -> GPIO 16, module RX <- GPIO 17, VCC 5 V ----
+#define GPS_RX_PIN 16
+#define GPS_TX_PIN 17
+static GpsParser s_gps;
+static volatile uint32_t s_gpsBytes = 0, s_gpsLastByteMs = 0;
+static void gpsTask(void *) {
+  gps_init(&s_gps);
+  Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  Serial2.write(GPS_CFG_RATE_5HZ, sizeof GPS_CFG_RATE_5HZ);      // 5 fixes a second
+  for (;;) {
+    while (Serial2.available()) {
+      char c = (char)Serial2.read(); s_gpsBytes++; s_gpsLastByteMs = millis();
+      if (!gps_feed(&s_gps, c) || simOwns()) continue;
+      if (s_gps.newRmc) { s_gps.newRmc = false; if (s_gps.fix) { g_gps_mph = s_gps.mph; g_gps_has_data = true; markLocal(SIG_GPS_SPD, SRC_HUB_GPS); } }
+      if (s_gps.newGga) { s_gps.newGga = false; if (s_gps.fix) { g_gps_sats = s_gps.sats; g_sats_has_data = true; markLocal(SIG_GPS_SATS, SRC_HUB_GPS); } }
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+// ---- CAN frame 0x7F0 to rusEFI, 10 times a second: EGT and speed ----
+//   bytes 0-1 EGT deg C (LE), byte 2 = 1 if the thermocouple is open, bytes 3-4 speed in kph x 10 (LE).
+// Sent only while the ECU was heard in the last second (an unanswered frame pushes the hub to bus-off).
+static void canTxTask(void *) {
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+    twai_message_t m = {};
+    m.identifier = CAN_ID_EGT_PLACEHOLDER; m.data_length_code = 5;
+    bool open = s_egtOpen;
+    uint16_t ci = open ? 0 : (uint16_t)lroundf(s_egtC);
+    float kph = s_hallMph * MPH_TO_KPH;
+    uint16_t k10 = (uint16_t)lroundf(kph * 10.0f > 65000.0f ? 65000.0f : kph * 10.0f);
+    m.data[0] = ci & 0xFF; m.data[1] = ci >> 8; m.data[2] = open ? 1 : 0; m.data[3] = k10 & 0xFF; m.data[4] = k10 >> 8;
     s_egtHeld = !s_canLastRxMs || millis() - s_canLastRxMs > EGT_HOLD_MS;
     if (!s_egtHeld && twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
-    vTaskDelay(pdMS_TO_TICKS(EGT_PERIOD_MS));
   }
 }
 
@@ -299,6 +368,11 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 <h2>MSP-DASH Hub</h2>
 <h3 style="color:#4dd0e1;margin:8px 0">Screens</h3><div class="live" id="scr">Waiting for screens...</div>
 <h3 style="color:#4dd0e1;margin:8px 0">Hub</h3><div class="live" id="live">Loading...</div>
+<h3 style="color:#4dd0e1;margin:8px 0">Speed</h3><div class="live" id="spd">Loading...</div>
+<label>Hall sensor pulses per mile<input type="number" id="ppm" step="any" min="100" max="100000"></label>
+<div class="row"><button type="button" onclick="savePpm()">Save pulses per mile</button><button type="button" onclick="calGps()">Calibrate from GPS</button></div>
+<span id="smsg" class="note"></span>
+<p class="note">To calibrate: drive at a steady speed above 10 mph with a GPS fix and press "Calibrate from GPS".</p>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
 <div class="row"><label>Night, dimmer lowest (%)<input type="number" id="nmin" min="5" max="100"></label>
@@ -324,7 +398,14 @@ l.sort((a,b)=>a.ip<b.ip?-1:1);
 document.getElementById("scr").innerHTML=l.length?l.map(s=>'<div class="scr"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
 (s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+'<a href="http://'+s.ip+'/">'+s.ip+'</a> | build '+s.build+' | '+s.mac+'</span></div>').join(''):
 'No screens heard yet. Screens set to main do not say hello.';}catch(e){}}
-poll();setInterval(poll,1000);scr();setInterval(scr,1000);
+async function spd(){try{const g=await (await fetch("/speed.json")).json();
+const gps=!g.gpsok?"not connected (no data on GPIO 16)":!g.fix?"no fix yet ("+g.sats+" satellites)":g.gpsmph.toFixed(1)+" mph, "+g.sats+" satellites";
+const diff=g.fix&&g.gpsmph>5?" | difference "+((g.hallmph-g.gpsmph)/g.gpsmph*100).toFixed(1)+" %":"";
+document.getElementById("spd").innerHTML="Hall: "+g.hallmph.toFixed(1)+" mph ("+g.hz.toFixed(1)+" pulses/s, "+g.pulses+" pulses)<br>GPS: "+gps+diff+"<br>Sent to rusEFI: "+(g.held?"no (ECU not heard)":(g.hallmph*1.609344).toFixed(1)+" kph");
+if(!spd.done){document.getElementById("ppm").value=g.ppm;spd.done=1;}}catch(e){}}
+async function savePpm(){document.getElementById("smsg").textContent=await (await fetch("/ppm?set="+encodeURIComponent(document.getElementById("ppm").value))).text();}
+async function calGps(){const r=await fetch("/hallcal");const t=await r.text();document.getElementById("smsg").textContent=t;if(r.ok){spd.done=0;}}
+poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,500);
 </script></body></html>)HTML");
   });
   // ---- raw CAN monitor: every ID seen, latest bytes, count, age ----
@@ -389,10 +470,10 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed"};
-const UNIT={1:"rpm",2:"F",3:"psi",4:"",5:"psi",6:"F",7:"psi",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%",25:"mph"};
-const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0,25:0};
-const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)",4294901764:"Bench simulator (FAKE)"};
+20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites"};
+const UNIT={1:"rpm",2:"F",3:"psi",4:"",5:"psi",6:"F",7:"psi",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%",25:"mph",26:"mph",27:"sats"};
+const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0,25:0,26:0,27:0};
+const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)",4294901764:"Bench simulator (FAKE)",4294901765:"Hall speed sensor (GPIO 27)",4294901766:"GT-U7 GPS (GPIO 16/17)"};
 function ecu(id){return id>=0x200&&id<=0x20F?"rusEFI":id>=0x5F0&&id<=0x63F?"MegaSquirt/Link":"";}
 async function u(){try{const l=(await (await fetch("/sensors.json")).json()).sort((a,b)=>(NAME[a.sig]||"").localeCompare(NAME[b.sig]||""));let h=0,c=0,e=new Set();
 document.getElementById("t").innerHTML=l.map(s=>{const isHub=HUB[s.src]!==undefined;isHub?h++:c++;const k=ecu(s.src);if(!isHub&&k)e.add(k);
@@ -454,7 +535,7 @@ u();setInterval(u,500);und();setInterval(und,1000);
 <script>
 const NAME={1:"RPM",2:"Coolant Temp (F)",3:"Boost (psi)",4:"AFR",5:"Oil Pressure (psi)",6:"Oil Temp (F)",7:"Fuel Pressure (psi)",8:"Ethanol %",9:"Throttle %",10:"Battery (V)",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-20:"EGT (F)",21:"Intake Air Temp (F)",22:"Ambient Temp (F)",23:"Humidity %",24:"Fuel Level %",25:"Speed (mph)"};
+20:"EGT (F)",21:"Intake Air Temp (F)",22:"Ambient Temp (F)",23:"Humidity %",24:"Fuel Level %",25:"Speed (mph)",26:"GPS Speed (mph)",27:"GPS Satellites"};
 let info=null,building="",sending=false,pending=null;
 function setMsg(t,bad){const m=document.getElementById("msg");m.textContent=t;m.className=bad?"bad":"";}
 async function post(p){const r=await fetch("/sim",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(p).toString()});
@@ -511,6 +592,30 @@ setInterval(refresh,1000);refresh();
              s_lightsV, s_lightsV >= s_cfg.lightsOnV ? "true" : "false", s_dimV, s_briPct, INPUT_BUILD, WiFi.localIP().toString().c_str(),
              WiFi.channel(), s_last, egtTxt, simTxt, dhtTxt, (double)s_fuelPct, (unsigned)s_egtSent, liveCount(), (unsigned)s_dataSent, s_cfg.mode, s_cfg.dayPct, s_cfg.nightMin, s_cfg.nightMax, s_cfg.dimLoV, s_cfg.dimHiV, s_cfg.lightsOnV);
     server.send(200, "application/json", b);
+  });
+  // ---- speed: hall sensor and GPS ----
+  server.on("/speed.json", HTTP_GET, []() {
+    char b[260];
+    snprintf(b, sizeof b, "{\"hallmph\":%.2f,\"hz\":%.2f,\"pulses\":%u,\"ppm\":%.1f,\"gpsok\":%s,\"fix\":%s,\"gpsmph\":%.2f,\"sats\":%d,\"rmc\":%u,\"bad\":%u,\"held\":%s}",
+             (double)s_hallMph, (double)s_hallHz, (unsigned)s_hallCount, (double)s_ppm,
+             (s_gpsLastByteMs && millis() - s_gpsLastByteMs < 2000) ? "true" : "false", s_gps.fix ? "true" : "false",
+             (double)s_gps.mph, s_gps.sats, (unsigned)s_gps.rmcCount, (unsigned)s_gps.badCount, s_egtHeld ? "true" : "false");
+    server.send(200, "application/json", b);
+  });
+  server.on("/ppm", HTTP_GET, []() {
+    float v = server.arg("set").toFloat();
+    if (v < HALL_PPM_MIN || v > HALL_PPM_MAX) { server.send(400, "text/plain", "Pulses per mile must be 100 to 100000"); return; }
+    s_ppm = v; ppmSave();
+    server.send(200, "text/plain", "Saved: " + String(v, 1) + " pulses per mile");
+  });
+  server.on("/hallcal", HTTP_GET, []() {
+    bool gpsLive = s_gps.fix && s_gpsLastByteMs && millis() - s_gpsLastByteMs < 2000;
+    if (!gpsLive) { server.send(409, "text/plain", "Not calibrated: the GPS has no fix"); return; }
+    if (s_gps.mph < 10.0f) { server.send(409, "text/plain", "Not calibrated: drive above 10 mph (GPS says " + String(s_gps.mph, 1) + ")"); return; }
+    float ppm = hall_ppm_from_gps(s_hallHz, s_gps.mph);
+    if (ppm <= 0) { server.send(409, "text/plain", "Not calibrated: the hall sensor is not seeing the magnet"); return; }
+    s_ppm = ppm; ppmSave();
+    server.send(200, "text/plain", "Calibrated: " + String(ppm, 1) + " pulses per mile");
   });
   server.on("/save", HTTP_GET, []() {
     auto I = [](const char *k, int d) { return server.hasArg(k) ? server.arg(k).toInt() : d; };
@@ -602,6 +707,10 @@ void setup() {
   xTaskCreatePinnedToCore(egtTask, "egt", 3072, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(dhtTask, "dht", 3072, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(fuelTask, "fuel", 2048, NULL, 1, NULL, 1);
+  ppmLoad();
+  xTaskCreatePinnedToCore(hallTask, "hall", 3072, NULL, 3, NULL, 0);
+  xTaskCreatePinnedToCore(gpsTask, "gps", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(canTxTask, "can_tx", 3072, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();
