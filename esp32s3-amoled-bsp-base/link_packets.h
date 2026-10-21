@@ -3,6 +3,7 @@
 #pragma once
 #include <stdint.h>
 #include "gauge_config.h"
+#include "custom_slots.h"   // "MSN1" custom slot names (SlotsPacket)
 
 // "MSD1": all signal values, sent 20 times a second by the hub (or a screen set to main)
 #define PKT_MAGIC 0x4D534431u
@@ -10,14 +11,15 @@ typedef struct __attribute__((packed)) {
   uint32_t magic;
   uint16_t seq;
   uint16_t count;          // SIG_COUNT of the sender; a receiver only reads what both builds know
-  uint32_t has_mask;       // bit s = signal s has data
+  uint64_t has_mask;       // bit s = signal s has data (64 bits since the custom slots, build 171)
   float v[SIG_COUNT];
 } LinkPacket;
-// has_mask has 32 bits, one per signal. Past 32 signals it needs to grow, or signals would silently drop.
-static_assert(SIG_COUNT <= 32, "LinkPacket.has_mask holds 32 signals: make it uint64_t before adding more");
+// has_mask has 64 bits, one per signal. Past 64 signals it needs to grow, or signals would silently drop.
+static_assert(SIG_COUNT <= 64, "LinkPacket.has_mask holds 64 signals");
+static_assert(sizeof(LinkPacket) <= 250, "an ESP-NOW packet is 250 bytes at most");
 // Bit 0 of has_mask belongs to SIG_NONE, which never carries data, so it is used as a flag: the hub's bench simulator
 // is running and these values are FAKE. The screens show SIMULATED and the main screen does not log them.
-#define LINK_MASK_SIMULATED (1u << SIG_NONE)
+#define LINK_MASK_SIMULATED (1ull << SIG_NONE)
 
 // "MSC1": a command from the hub (page next/prev, brightness); target "" = all screens
 #define LINK_CMD_MAGIC 0x4D534331u

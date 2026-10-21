@@ -43,6 +43,9 @@ typedef enum {
   SIG_VSS,         // vehicle speed, mph - rusEFI BASE1 byte 6 (kph); the hall sensor is wired to rusEFI
   SIG_GPS_SPD,     // GPS speed, mph - GT-U7 on the hub, a backup to compare with the hall speed
   SIG_GPS_SATS,    // GPS satellites in use
+  // ---- 16 custom slots (custom_slots.h): set up on the hub's /custom page, named by the hub ----
+  SIG_C1, SIG_C2, SIG_C3, SIG_C4, SIG_C5, SIG_C6, SIG_C7, SIG_C8,
+  SIG_C9, SIG_C10, SIG_C11, SIG_C12, SIG_C13, SIG_C14, SIG_C15, SIG_C16,
   SIG_COUNT
 } SignalId;
 
@@ -50,6 +53,8 @@ typedef enum {
 #define SIG_FLAG_END (SIG_BRAKE + 1)
 #define SIG_FLAG_COUNT (SIG_FLAG_END - SIG_FIRST_FLAG)
 static inline bool gauge_signal_is_flag(int sig) { return sig >= SIG_FIRST_FLAG && sig < SIG_FLAG_END; }
+#define SIG_CUSTOM_FIRST SIG_C1
+static inline bool gauge_signal_is_custom(int sig) { return sig >= SIG_C1 && sig <= SIG_C16; }
 
 // ---- Page layout templates - a fixed set of common arrangements
 // rather than a fully arbitrary grid, per project decision. ----

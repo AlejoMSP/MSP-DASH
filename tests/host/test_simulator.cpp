@@ -13,6 +13,11 @@ SerialClass Serial;
 volatile float g_afr, g_clt_f, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_boost_psi, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph, g_gps_mph, g_gps_sats;
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
               g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data, g_gps_has_data, g_sats_has_data;
+#include "custom_slots.h"
+volatile float g_custom_val[CUSTOM_SLOTS];
+volatile bool g_custom_has[CUSTOM_SLOTS];
+static CustomSlotInfo g_info[CUSTOM_SLOTS];
+const CustomSlotInfo *custom_slot_info(int i) { return &g_info[i]; }
 volatile int g_requested_page = -1, g_page_nav_delta = 0;
 volatile uint16_t g_flag_bits = 0, g_flag_seen = 0;
 static int marks[SIG_COUNT];
@@ -115,6 +120,12 @@ int main() {
   CHECK(sim_seconds_left() == 0, "no countdown after stop");
 
   printf("8. slider ranges\n");
+  { strcpy(g_info[2].name, "Wastegate"); g_info[2].min = 10; g_info[2].max = 30;
+    SimRange r = sim_range(SIG_C3), r0 = sim_range(SIG_C1);
+    CHECK(r.min == 10 && r.max == 30 && fabsf(r.step - 0.2f) < 0.001f, "a custom slot's slider uses its own gauge scale");
+    CHECK(r0.min == 0 && r0.max == 100, "a slot with no scale gets 0 to 100");
+    float out[SIG_COUNT]; sim_demo_values(30.0f, out);
+    CHECK(out[SIG_C3] >= 10 && out[SIG_C3] <= 30, "the demo keeps a custom slot inside its scale"); }
   bool ok = true; for (int s = 1; s < SIG_COUNT; s++) { SimRange r = sim_range(s); if (!(r.max > r.min && r.step > 0)) ok = false; }
   CHECK(ok, "every signal has min < max and a positive step");
 

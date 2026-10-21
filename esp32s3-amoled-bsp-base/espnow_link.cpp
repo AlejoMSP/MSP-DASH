@@ -48,7 +48,7 @@ static void sendTask(void *) {
     for (int s = 0; s < SIG_COUNT; s++) {
       bool has = s != SIG_NONE && gauge_config_signal_has_data((SignalId)s);
       p.v[s] = has ? gauge_config_signal_value((SignalId)s) : 0.0f;
-      if (has) p.has_mask |= 1u << s;
+      if (has) p.has_mask |= 1ull << s;
     }
     if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_txCount++;
     vTaskDelay(pdMS_TO_TICKS(ESPNOW_SEND_MS));
@@ -70,6 +70,7 @@ static bool handleCmd(const uint8_t *data, int len) {
 }
 
 static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (custom_slots_on_packet(data, len)) return;   // custom sensor names from the hub
   if (handleCmd(data, len)) return;
   if (len < (int)offsetof(HelloPacket, name)) return;
   HelloPacket hb; memset(&hb, 0, sizeof(hb)); memcpy(&hb, data, len < (int)sizeof(hb) ? len : sizeof(hb));
@@ -93,6 +94,7 @@ static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int le
 
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (handleCmd(data, len)) return;
+  if (custom_slots_on_packet(data, len)) return;   // custom sensor names from the hub
   if (len < (int)offsetof(LinkPacket, v) || ((const LinkPacket *)data)->magic != PKT_MAGIC) return;
   portENTER_CRITICAL(&s_mux);
   memset(&s_rx, 0, sizeof(s_rx));
@@ -107,7 +109,7 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
 static void applyPacket(const LinkPacket *p) {
   if (p->has_mask & LINK_MASK_SIMULATED) sim_note_remote();   // the hub's simulator is running: show SIMULATED, do not log
   int n = p->count < SIG_COUNT ? p->count : SIG_COUNT;
-  #define PUT(sig, var, has) if (sig < n && (p->has_mask >> sig & 1u)) { var = p->v[sig]; has = true; gauge_config_mark_signal_active((SignalId)(sig)); }
+  #define PUT(sig, var, has) if (sig < n && (p->has_mask >> sig & 1ull)) { var = p->v[sig]; has = true; gauge_config_mark_signal_active((SignalId)(sig)); }
   PUT(SIG_RPM, g_rpm, g_rpm_has_data)
   PUT(SIG_CLT, g_clt_f, g_clt_has_data)
   PUT(SIG_MAP, g_boost_psi, g_boost_has_data)
@@ -130,19 +132,26 @@ static void applyPacket(const LinkPacket *p) {
   uint16_t bits = 0, seen = 0;
   for (int i = 0; i < SIG_FLAG_COUNT && SIG_FIRST_FLAG + i < n; i++) {
     int s = SIG_FIRST_FLAG + i;
-    if (!(p->has_mask >> s & 1u)) continue;
+    if (!(p->has_mask >> s & 1ull)) continue;
     seen |= (uint16_t)(1u << i);
     if (p->v[s] > 0.5f) bits |= (uint16_t)(1u << i);
     gauge_config_mark_signal_active((SignalId)s);
   }
   g_flag_bits = bits;
   g_flag_seen = seen;
+  for (int i = 0; i < CUSTOM_SLOTS; i++) {   // the custom slots (the hub's /custom page)
+    int s = SIG_C1 + i;
+    if (s >= n || !(p->has_mask >> s & 1ull)) continue;
+    g_custom_val[i] = p->v[s]; g_custom_has[i] = true;
+    gauge_config_mark_signal_active((SignalId)s);
+  }
 }
 
 static void clearAll(void) {   // back to "--", as when CAN has gone quiet
   g_rpm_has_data = g_clt_has_data = g_boost_has_data = g_afr_has_data = g_oilp_has_data = false;
   g_oilt_has_data = g_fuelp_has_data = g_flex_has_data = g_tps_has_data = g_battv_has_data = false;
   g_egt_has_data = g_iat_has_data = g_ambt_has_data = g_hum_has_data = g_fuel_has_data = g_vss_has_data = g_gps_has_data = g_sats_has_data = false;
+  for (int i = 0; i < CUSTOM_SLOTS; i++) g_custom_has[i] = false;
   g_flag_seen = 0;
 }
 
@@ -177,6 +186,7 @@ void espnow_link_init(void) {
 
 void espnow_link_loop(void) {
   if (!s_up) return;
+  custom_slots_loop();
   uint32_t now = millis();
   if (now - s_ppsWindowMs >= 1000) {
     if (s_remote) { s_pps = s_rxCount - s_ppsCount; s_ppsCount = s_rxCount; }

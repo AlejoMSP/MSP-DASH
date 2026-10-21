@@ -38,6 +38,7 @@
 #include "gauge_config_json.h"
 #include "simulator.h"
 #include "sd_logging.h"
+#include "custom_slots.h"
 #include "espnow_link.h"
 #include "lcd_perf.h"
 #include "web_theme.h"
@@ -297,6 +298,7 @@ function updateLamps() {
       try {
         const res = await fetch("/gauges.json");
         webPages = await res.json();
+        try { for (const s of await (await fetch("/signals.json")).json()) if (s.custom && !s.unused) SIGNAL_NAMES[s.id] = s.name; } catch (e) {}   // custom slot names
         render();
       } catch (e) {
         document.getElementById("cellgrid").innerHTML = "<p class='empty-msg'>Could not load the page layout - retrying...</p>";
@@ -438,6 +440,7 @@ R"rawliteral(
       let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
       for (const s of sorted) {
         if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
+        if (s.unused && s.id !== selected) continue;   // a custom slot not set up on the hub yet
         const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
         html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
       }
@@ -1495,6 +1498,12 @@ void web_monitor_init(void) {
       o["name"] = gauge_config_signal_name((SignalId)sig);
       o["age_ms"] = gauge_config_signal_age_ms((SignalId)sig);
       o["flag"] = gauge_signal_is_flag(sig);   // an ECU on/off flag: 1 or 0
+      if (gauge_signal_is_custom(sig)) {        // a custom slot, set up on the hub's /custom page
+        const CustomSlotInfo *in = custom_slot_info(sig - SIG_C1);
+        o["custom"] = true;
+        o["unused"] = in->name[0] == 0;         // not set up yet: hidden from the signal lists
+        o["unit"] = in->unit; o["dec"] = in->decimals; o["min"] = in->min; o["max"] = in->max;
+      }
     }
     String out;
     serializeJson(doc, out);
@@ -1638,6 +1647,7 @@ void web_monitor_init(void) {
     JsonArray arr = doc["signals"].to<JsonArray>();
     for (int sig = 1; sig < SIG_COUNT; sig++) {
       if (gauge_signal_is_flag(sig)) continue;   // on/off flags have no level
+      if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) continue;   // custom slot not set up
       JsonObject o = arr.add<JsonObject>(); o["id"] = sig; o["name"] = gauge_config_signal_name((SignalId)sig);
     }
     String out; serializeJson(doc, out);
@@ -1666,6 +1676,7 @@ void web_monitor_init(void) {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE
+      if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) continue;   // custom slot not set up
       JsonObject o = arr.add<JsonObject>();
       o["id"] = sig;
       o["name"] = gauge_config_signal_name((SignalId)sig);

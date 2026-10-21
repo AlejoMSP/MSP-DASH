@@ -1,5 +1,12 @@
 # Configurable sensors (design)
 
+**Status (build 171 / hub 22):** stage 1 done, with CAN as the first source. 16 custom slots (SIG_C1..SIG_C16,
+`custom_slots.h`) set up on the hub's `/custom` page: name, unit, decimals, gauge min/max, and a CAN field (ID,
+start byte, 8/16/32 bit or 1 bit, byte order, signed, scale, offset) with a live preview. Names reach the screens
+in MSN1 packets (kept in each screen's NVS); values ride in the normal data packet (has_mask is now 64 bits).
+"Make a sensor" on the hub's Sensors page opens a slot for a frame nothing decodes. Next: GPIO sources (stage 2),
+CAN presets from the DBC (rest of stage 3), then moving the fixed hub sensors onto slots (stage 4).
+
 Goal: add or change a sensor from a web page on the hub, with no reflash of the hub or the screens.
 
 ## 1. Sensor slots

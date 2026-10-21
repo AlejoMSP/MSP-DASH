@@ -72,6 +72,8 @@ for each page, and that a failed save shows the board's own explanation.
   Build: `g++ -std=c++17 -Istubs -I<sketch> -DSD_MOUNT_POINT='"/tmp/sdtest"' <sketch>/sd_logging.cpp test_sim_logging.cpp`
 - `test_logging_page.js`: the Logging page: start condition form, save, refusals, the channel ticks, alphabetical lists.
 - `test_speed_sensors.cpp`: the hub GPS reader (checksums, RMC/GGA, junk, the 5 Hz command). Build: `g++ -std=c++17 -I../../esp32-input test_speed_sensors.cpp`
+- `test_custom_slots.cpp`: custom slots: the CAN field decoder (byte orders, signed, 1 bit, short frames, bad definitions), packet sizes, and the screen keeping the hub's names (NVS, cut names, slots past 16). Build: `g++ -std=c++17 -Istubs -I<ArduinoJson>/src -I<sketch> -DGAUGE_CFG_DIR='"/tmp/cfgtest"' <sketch>/custom_slots_screen.cpp <sketch>/gauge_config.cpp test_custom_slots.cpp`
+- `test_hub_custom_page.js`: the hub's /custom page: list, editor, live preview (its decoder matches the firmware's), Save, refusals, "Make a sensor".
 - `test_hub_ecu.cpp`: the hub names the ECU from the CAN IDs it hears (rusEFI, MegaSquirt / Link, both, none). Build: `g++ -std=c++17 -Istubs -I../../esp32-input test_hub_ecu.cpp`
 - `test_can_vss.cpp`: speed from rusEFI BASE1 byte 6, kph to mph, through the real `can_parsing.h`. Build: `g++ -std=c++17 -Istubs -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_can_vss.cpp`
 - `test_hub_sensors_page.js`: the hub's /sensors page: alphabetical, and CAN frames no sensor reads listed by themselves.

@@ -47,6 +47,7 @@
 #include "page_button.h"
 #include "build_info.h"
 #include "espnow_link.h"
+#include "custom_slots.h"
 
 // ---- CAN pins - using the UART connector (JST-SH cable available).
 // These are this board's dedicated UART0 pins, which Serial defaults
@@ -64,6 +65,7 @@ void setup()
 
   { Preferences dp; dp.begin("disp", true); gauge_app_set_diameter(dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT));
     gauge_app_set_options(dp.getBool("sweep", true), dp.getBool("demo", true)); dp.end(); }   // visible screen size
+  custom_slots_screen_init(); // custom sensor names, saved from the hub (before gauge_config: gauges show the names)
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
   gauge_config_web_cleanup(); // deletes the old web-dashboard config file, if any
   gauge_config_log_init(); // which signals get logged to SD - independent of what's displayed

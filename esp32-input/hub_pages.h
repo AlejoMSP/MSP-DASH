@@ -31,7 +31,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -59,8 +59,8 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 <p class="note">Hub = a sensor wired to this board. ECU = decoded from a CAN frame. Grey = not heard for 2 s.</p>
 <h3 style="color:#4dd0e1;margin:16px 0 4px">On the bus, not decoded</h3>
 <div class="note" id="usum"></div>
-<table><thead><tr><th>CAN ID</th><th>From</th><th>Bytes</th><th class="v">Age</th></tr></thead><tbody id="u"></tbody></table>
-<p class="note">Frames heard on the CAN bus that no sensor reads yet. They show up here by themselves as soon as they appear.</p>
+<table><thead><tr><th>CAN ID</th><th>From</th><th>Bytes</th><th class="v">Age</th><th></th></tr></thead><tbody id="u"></tbody></table>
+<p class="note">Frames heard on the CAN bus that no sensor reads yet. They show up here by themselves as soon as they appear. "Make a sensor" opens a custom slot for that frame.</p>
 <p><a href="/">Back</a> | <a href="/can">Raw CAN</a></p>
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
@@ -80,8 +80,8 @@ async function und(){try{const used=new Set((await (await fetch("/sensors.json")
 const j=await (await fetch("/can.json")).json();
 const l=j.ids.filter(x=>!used.has(x.id)&&x.age<10000).sort((a,b)=>a.id-b.id);
 document.getElementById("usum").textContent=l.length?l.length+" frame"+(l.length===1?"":"s")+" not read by any sensor":"Every frame on the bus is read by a sensor (or the bus is quiet).";
-document.getElementById("u").innerHTML=l.map(x=>'<tr class="'+(x.age>2000?'stale':'')+'"><td class="v" style="text-align:left">0x'+x.id.toString(16).toUpperCase().padStart(3,"0")+'</td><td>'+(ecu(x.id)||"unknown")+'</td><td class="v" style="text-align:left">'+x.d+'</td><td class="v">'+(x.age<1000?x.age+" ms":(x.age/1000).toFixed(0)+" s")+'</td></tr>').join("");}catch(x){}}
-u();setInterval(u,500);und();setInterval(und,1000);
+document.getElementById("u").innerHTML=l.map(x=>'<tr class="'+(x.age>2000?'stale':'')+'"><td class="v" style="text-align:left">0x'+x.id.toString(16).toUpperCase().padStart(3,"0")+'</td><td>'+(ecu(x.id)||"unknown")+'</td><td class="v" style="text-align:left">'+x.d+'</td><td class="v">'+(x.age<1000?x.age+" ms":(x.age/1000).toFixed(0)+" s")+'</td><td><a href="/custom?id=0x'+x.id.toString(16).toUpperCase()+'">Make a sensor</a></td></tr>').join("");}catch(x){}}
+(async()=>{try{for(const c of await (await fetch("/custom.json")).json())if(c.name)NAME[28+c.i]=c.name;}catch(x){}u();})();setInterval(u,500);und();setInterval(und,1000);
 </script></body></html>)HTML";
 
 static const char SIM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Simulator</title>
@@ -121,3 +121,74 @@ async function refresh(){try{info=await (await fetch("/sim.json")).json();render
 setInterval(refresh,1000);refresh();
 </script></body></html>)HTML";
 
+// /custom: the 16 custom sensor slots (custom_slots.h). Stage 1: each reads a field of a CAN frame.
+static const char CUSTOM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Custom Sensors</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:640px;margin:auto;padding:12px}h2,h3{color:#4dd0e1}a{color:#4dd0e1}
+table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #222}th{color:#999;font-weight:normal}
+.v{font-family:monospace;text-align:right}.note{color:#888;font-size:13px}.stale{color:#666}
+.box{background:#111;border-radius:8px;padding:12px;margin:12px 0}label{display:block;margin:6px 0 2px;color:#4dd0e1;font-size:13px}
+input,select{width:100%;box-sizing:border-box;padding:6px;background:#000;color:#ddd;border:1px solid #333;border-radius:4px}
+.row{display:flex;gap:8px}.row>div{flex:1}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px;margin:8px 8px 0 0}
+button.del{background:#c62828;color:#fff}#preview{font-family:monospace;font-size:18px;color:#4dd0e1;margin-top:8px}#msg{min-height:1.2em;color:#4dd0e1}#msg.bad{color:#ff6b6b}</style></head><body>
+<h2>Custom Sensors</h2>
+<p class="note">Read any value from a CAN frame and send it to the screens. Each slot shows up in the screens' gauge, lamp and logging lists under its name within a few seconds, no reflash.</p>
+<table><thead><tr><th>Slot</th><th>Name</th><th>From</th><th class="v">Value</th><th></th></tr></thead><tbody id="list"></tbody></table>
+<div class="box" id="ed" style="display:none">
+<h3 id="edtitle">Slot</h3>
+<div class="row"><div><label>Name</label><input id="name" maxlength="15"></div><div><label>Unit</label><input id="unit" maxlength="7"></div></div>
+<div class="row"><div><label>Decimals</label><select id="dec"><option>0</option><option>1</option><option>2</option><option>3</option></select></div>
+<div><label>Gauge min</label><input id="min" type="number" step="any"></div><div><label>Gauge max</label><input id="max" type="number" step="any"></div></div>
+<label>CAN ID (frames seen on the bus, or type one like 0x208)</label><input id="cid" list="ids" oninput="pv()"><datalist id="ids"></datalist>
+<div class="row"><div><label>Start byte (0-7)</label><input id="start" type="number" min="0" max="7" oninput="pv()"></div>
+<div><label>Size</label><select id="bits" onchange="shape();pv()"><option value="8">8 bit</option><option value="16">16 bit</option><option value="32">32 bit</option><option value="1">1 bit (on/off)</option></select></div></div>
+<div class="row" id="multi"><div><label>Byte order</label><select id="be" onchange="pv()"><option value="0">Little endian (Intel, rusEFI)</option><option value="1">Big endian (Motorola, MegaSquirt/Link)</option></select></div>
+<div><label>Signed</label><select id="sgn" onchange="pv()"><option value="0">No</option><option value="1">Yes</option></select></div></div>
+<div class="row" id="onebit" style="display:none"><div><label>Bit (0-7)</label><input id="bit" type="number" min="0" max="7" oninput="pv()"></div></div>
+<div class="row" id="lin"><div><label>Scale (value = raw x scale + offset)</label><input id="scale" type="number" step="any" oninput="pv()"></div><div><label>Offset</label><input id="offset" type="number" step="any" oninput="pv()"></div></div>
+<div id="preview">-</div><div class="note" id="raw"></div>
+<button onclick="save()">Save</button><button onclick="closeEd()">Cancel</button><button class="del" onclick="clr()">Clear slot</button>
+<div id="msg"></div></div>
+<p><a href="/">Back</a> | <a href="/sensors">Sensors</a></p>
+<script>
+let slots=[],can={ids:[]},cur=-1;
+const $=id=>document.getElementById(id);
+const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const hex=n=>"0x"+Number(n).toString(16).toUpperCase().padStart(3,"0");
+// Same maths as custom_can_decode() in custom_slots.h. null = the frame is too short for this field.
+function decode(c,bytes){
+  if(c.bits==1){if(c.start>=bytes.length)return null;return (bytes[c.start]>>c.bit)&1;}
+  const n=c.bits/8;if(c.start+n>bytes.length)return null;
+  let raw=0;for(let i=0;i<n;i++){const b=c.be?bytes[c.start+i]:bytes[c.start+n-1-i];raw=raw*256+b;}
+  if(c.sgn){const top=Math.pow(2,c.bits);if(raw>=top/2)raw-=top;}
+  return raw*c.scale+c.offset;}
+function bytesOf(id){const f=can.ids.find(x=>x.id===id);return f?f.d.trim().split(/\s+/).filter(Boolean).map(h=>parseInt(h,16)):null;}
+function form(){return{i:cur,name:$("name").value.trim(),unit:$("unit").value.trim(),dec:+$("dec").value,min:parseFloat($("min").value),max:parseFloat($("max").value),
+  id:parseInt($("cid").value),start:parseInt($("start").value),bits:+$("bits").value,bit:parseInt($("bit").value)||0,be:+$("be").value,sgn:+$("sgn").value,
+  scale:$("scale").value===""?1:parseFloat($("scale").value),offset:parseFloat($("offset").value)||0};}
+function shape(){const one=$("bits").value==="1";$("onebit").style.display=one?"":"none";$("multi").style.display=one?"none":"";$("lin").style.display=one?"none":"";}
+function pv(){const c=form();const b=bytesOf(c.id);
+  if(isNaN(c.id)){$("preview").textContent="-";$("raw").textContent="Pick or type a CAN ID";return;}
+  if(!b){$("preview").textContent="-";$("raw").textContent=hex(c.id)+" not heard on the bus right now";return;}
+  $("raw").textContent=hex(c.id)+": "+b.map(x=>x.toString(16).toUpperCase().padStart(2,"0")).join(" ");
+  const v=isNaN(c.start)?null:decode(c,b);
+  $("preview").textContent=v===null?"does not fit in this frame":(c.bits==1?(v?"ON":"off"):v.toFixed(c.dec)+(c.unit?" "+c.unit:""));}
+function srcText(s){return s.src==1?(hex(s.id)+" byte "+s.start+(s.bits==1?" bit "+s.bit:", "+s.bits+" bit")):"";}
+function render(){$("list").innerHTML=slots.map(s=>'<tr class="'+(s.name&&!s.has?'stale':'')+'"><td>'+(s.i+1)+'</td><td>'+(s.name?esc(s.name):'<span class="note">empty</span>')+'</td><td class="note">'+srcText(s)+'</td><td class="v">'+
+  (s.name&&s.has?(s.bits==1?(s.value?"ON":"off"):s.value.toFixed(s.dec)+(s.unit?" "+esc(s.unit):"")):"--")+'</td><td><button onclick="edit('+s.i+')">'+(s.name?"Edit":"Set up")+'</button></td></tr>').join("");
+  $("ids").innerHTML=can.ids.map(x=>'<option value="'+hex(x.id)+'">').join("");}
+function edit(i,id){cur=i;const s=slots[i];$("ed").style.display="";$("edtitle").textContent="Slot "+(i+1);$("msg").textContent="";
+  $("name").value=s.name;$("unit").value=s.unit;$("dec").value=String(s.dec);$("min").value=s.name?s.min:0;$("max").value=s.name?s.max:100;
+  $("cid").value=s.src==1?hex(s.id):(id||"");$("start").value=s.src==1?s.start:0;$("bits").value=String(s.src==1?s.bits:8);$("bit").value=s.bit;
+  $("be").value=String(s.be);$("sgn").value=String(s.sgn);$("scale").value=s.src==1?s.scale:1;$("offset").value=s.src==1?s.offset:0;shape();pv();}
+function closeEd(){cur=-1;$("ed").style.display="none";}
+function setMsg(t,bad){$("msg").textContent=t;$("msg").className=bad?"bad":"";}
+async function save(){const c=form();if(!c.name){setMsg("Give the sensor a name",true);return;}
+  const q=new URLSearchParams({i:c.i,name:c.name,unit:c.unit,dec:c.dec,min:c.min,max:c.max,id:hex(c.id),start:c.start,bits:c.bits,bit:c.bit,be:c.be,sgn:c.sgn,scale:c.scale,offset:c.offset});
+  const r=await fetch("/custom/set?"+q.toString());const t=await r.text();setMsg(t,!r.ok);if(r.ok)load();}
+async function clr(){if(cur<0)return;const r=await fetch("/custom/clear?i="+cur);setMsg(await r.text(),!r.ok);if(r.ok){closeEd();load();}}
+async function load(){try{slots=await (await fetch("/custom.json")).json();render();}catch(e){}}
+async function tick(){try{can=await (await fetch("/can.json")).json();if(cur>=0)pv();}catch(e){}load();}
+(async()=>{await load();await tick();const want=new URLSearchParams(location.search).get("id");
+  if(want){const free=slots.findIndex(s=>!s.name);if(free>=0)edit(free,want);}})();
+setInterval(tick,1000);
+</script></body></html>)HTML";

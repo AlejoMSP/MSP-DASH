@@ -16,6 +16,9 @@ const STYLE = fs.readFileSync(path.join(SK, 'gauge_style.h'), 'utf8');
 const NAMES = ["None", "RPM", "Coolant Temp", "MAP/Boost", "AFR", "Oil Pressure", "Oil Temp", "Fuel Pressure", "Ethanol %", "Throttle Position", "Battery Voltage",
   "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal"];
 
+// Two custom slots as a screen reports them: slot 1 set up on the hub, slot 2 not.
+const CUSTOM = [{ id: 28, name: "Wastegate Duty", age_ms: 50, flag: false, custom: true, unused: false, unit: "%", dec: 1, min: 0, max: 100 },
+                { id: 29, name: "Custom 2", age_ms: 4294967295, flag: false, custom: true, unused: true, unit: "", dec: 0, min: 0, max: 0 }];
 function makeEditor(pageName, getUrl) {
   const els = {}; const posts = [];
   const box = {
@@ -24,7 +27,7 @@ function makeEditor(pageName, getUrl) {
     fetch: async (url, opts) => {
       if (opts && opts.method === "POST") { posts.push({ url, body: opts.body }); return { ok: true, status: 200, text: async () => "OK" }; }
       if (url === getUrl) return { json: async () => [{ enabled: true, layout: 0, cells: [{ enabled: true, signal: 2, gauge_type: 0, min: 0, max: 250, rest: 0, caption: "CLT", needle_color: 16777215, tick_color: 16777215, bg_color: 0, value_divisor: 1, tick_count: 26, major_nth: 5, refresh_hz: 10, show_value: false, value_font_size: 28, has_warning: false, warning_threshold: 0, warning_above: false }] }] };
-      if (url === "/signals.json") return { json: async () => NAMES.map((n, i) => ({ id: i, name: n, age_ms: i === 0 ? 4294967295 : 100 * i, flag: i >= 11 })) };
+      if (url === "/signals.json") return { json: async () => NAMES.map((n, i) => ({ id: i, name: n, age_ms: i === 0 ? 4294967295 : 100 * i, flag: i >= 11 })).concat(CUSTOM) };
       throw new Error("unexpected fetch " + url);
     },
   };
@@ -49,6 +52,14 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(names.length > 5 && names.every((n, i) => i === 0 || names[i - 1].localeCompare(n) <= 0), "the gauge Signal list is alphabetical, whatever has data: " + names.join(", "));
     const ind = [...probe.run('indicatorSignalOptions(0)').split("<optgroup")[0].matchAll(/<option value="(\d+)"[^>]*>([^<\[(]+)/g)].filter(m => m[1] !== "0").map(m => m[2].trim());
     check(ind.length > 5 && ind.every((n, i) => i === 0 || ind[i - 1].localeCompare(n) <= 0), "the lamp Signal list is alphabetical too"); }
+  { const g = probe.run('signalOptionsHtml(0)'), l = probe.run('indicatorSignalOptions(0)');
+    check(/Wastegate Duty/.test(g) && /Wastegate Duty \[%\]/.test(l), "a custom slot set up on the hub is listed by its name (with its unit for lamps)");
+    check(!/Custom 2/.test(g) && !/Custom 2/.test(l), "a custom slot not set up yet is hidden");
+    check(/Custom 2/.test(probe.run('signalOptionsHtml(29)')), "...unless a gauge already uses it (so the box still shows its choice)");
+    probe.run('setCellSignal(0, 0, 28)');
+    const c = JSON.parse(probe.run('JSON.stringify(pages[0].cells[0])'));
+    check(c.signal === 28 && c.min === 0 && c.max === 100 && c.rest === 0 && c.units === "%" && c.decimals === 1 && c.has_warning === false,
+      "picking it fills the scale, units and decimals the hub gave it: " + [c.min, c.max, c.units, c.decimals].join(", ")); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

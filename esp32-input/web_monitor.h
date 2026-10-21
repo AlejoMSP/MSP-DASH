@@ -10,6 +10,7 @@ static volatile uint32_t s_canTotal = 0;
 static volatile uint32_t s_canLastRxMs = 0;   // last frame heard from anyone else on the bus
 static volatile uint32_t s_canCurId = 0;      // ID of the frame being decoded right now (the sensors page shows it as the source)
 static portMUX_TYPE s_canMux = portMUX_INITIALIZER_UNLOCKED;
+void hub_custom_can_frame(uint32_t id, const uint8_t *d, uint8_t len);   // esp32-input.ino: custom CAN sensors
 static inline void web_monitor_track_can_frame(uint32_t id, const uint8_t *d, uint8_t len) {
   if (len > 8) len = 8;
   portENTER_CRITICAL(&s_canMux);
@@ -23,7 +24,7 @@ static inline void web_monitor_track_can_frame(uint32_t id, const uint8_t *d, ui
     CanMonEntry &e = s_canMon[i];
     e.len = len; memcpy(e.d, d, len); e.count++; e.lastMs = millis();
   }
-  portEXIT_CRITICAL(&s_canMux);
+  portEXIT_CRITICAL(&s_canMux);  hub_custom_can_frame(id, d, len);   // outside the lock: decodes the custom slots that read this ID
 }
 
 // Which ECU is talking, from the CAN IDs heard in the last 2 s. rusEFI uses 0x200-0x20F; MegaSquirt and Link use the

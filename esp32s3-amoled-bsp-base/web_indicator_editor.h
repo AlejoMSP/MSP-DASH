@@ -12,7 +12,8 @@ R"rawliteral(
     const IND_MAX = 12;
     // Signal numbers = the order of SignalId in gauge_config.h (tests/host/test_editor_indicators.js checks this table against that file).
     const SIG = { RPM:1, CLT:2, MAP:3, AFR:4, OILP:5, OILT:6, FUELP:7, FLEX:8, TPS:9, BATTV:10,
-                  REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24, VSS:25, GPS_SPD:26, GPS_SATS:27 };
+                  REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24, VSS:25, GPS_SPD:26, GPS_SATS:27,
+                  C1:28, C2:29, C3:30, C4:31, C5:32, C6:33, C7:34, C8:35, C9:36, C10:37, C11:38, C12:39, C13:40, C14:41, C15:42, C16:43 };
     const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"psi", 4:"AFR", 5:"psi", 6:"F", 7:"psi", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%", 25:"mph", 26:"mph", 27:"sats" };
     const IND_RED = 0xE53935, IND_AMBER = 0xFFB300, IND_GREEN = 0x43A047, IND_BLUE = 0x1E88E5, IND_OFF = 0x2A2A2A;
 
@@ -59,12 +60,12 @@ R"rawliteral(
     // Every signal: the analog ones first, then the ECU's on/off flags. Units are shown so thresholds are typed in the right ones.
     function indicatorSignalOptions(selected) {
       const opt = s => {
-        const unit = SIGNAL_UNITS[s.id];
+        const unit = SIGNAL_UNITS[s.id] || s.unit;
         const liveTag = s.age_ms < 5000 ? " (live)" : "";
         return `<option value="${s.id}" ${selected === s.id ? "selected" : ""}>${escHtml(s.name)}${unit ? " [" + unit + "]" : ""}${liveTag}</option>`;
       };
       const byName = (a, b) => a.name.localeCompare(b.name);   // alphabetical, like the gauge editor's list
-      const analog = signalActivity.filter(s => s.id !== 0 && !s.flag).sort(byName);
+      const analog = signalActivity.filter(s => s.id !== 0 && !s.flag && (!s.unused || s.id === selected)).sort(byName);
       const flags = signalActivity.filter(s => s.flag).sort(byName);
       return `<option value="0" ${selected === 0 ? "selected" : ""}>None</option>` + analog.map(opt).join("") +
              (flags.length ? `<optgroup label="ECU on/off flags">${flags.map(opt).join("")}</optgroup>` : "");
@@ -81,7 +82,7 @@ R"rawliteral(
     }
 
     function renderLamp(pIdx, i, l, count) {
-      const info = signalInfo(l.signal), isFlag = !!(info && info.flag), unit = SIGNAL_UNITS[l.signal] || "";
+      const info = signalInfo(l.signal), isFlag = !!(info && info.flag), unit = SIGNAL_UNITS[l.signal] || (info && info.unit) || "";
       const id = pIdx + "," + i;
       return `
         <div class="cell lamp-card">
@@ -221,6 +222,12 @@ R"rawliteral(
     function setCellSignal(pIdx, cIdx, sig) {
       const c = pages[pIdx].cells[cIdx];
       c.signal = sig;
+      const info = signalInfo(sig);
+      if (info && info.custom && !info.unused) {   // a custom slot: its scale, units and decimals come from the hub
+        c.min = Math.floor(info.min); c.max = Math.ceil(info.max); c.rest = c.min;
+        c.units = info.unit || ""; c.decimals = info.dec; c.has_warning = false; c.alert_fullscreen = false;
+        renderPages(); return;
+      }
       const r = SIGNAL_DEFAULT_RANGES[sig];
       if (!r) return;
       c.min = r[0]; c.max = r[1]; c.rest = sig === SIG.MAP ? 0 : r[0];   // MAP rests at 0: the atmosphere, zero boost

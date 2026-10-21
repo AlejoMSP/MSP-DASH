@@ -5,6 +5,7 @@
 #include "simulator.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
+#include "custom_slots.h"
 #include <Arduino.h>
 #include <math.h>
 #include <cmath>
@@ -30,6 +31,11 @@ const char *sim_last_stop_reason(void) { return s_stopReason; }
 float sim_value(int sig) { return (sig > 0 && sig < SIG_COUNT) ? s_values[sig] : 0.0f; }
 
 SimRange sim_range(int sig) {
+  if (gauge_signal_is_custom(sig)) {   // a custom slot: its own gauge scale from the hub's /custom page
+    const CustomSlotInfo *in = custom_slot_info(sig - SIG_C1);
+    if (in->max > in->min) return {in->min, in->max, (in->max - in->min) / 100.0f};
+    return {0, 100, 1};
+  }
   switch (sig) {
     case SIG_RPM:   return {0, 9000, 50};
     case SIG_CLT:   return {50, 260, 1};
@@ -97,6 +103,10 @@ void sim_demo_values(float t, float out[SIG_COUNT]) {
   out[SIG_VSS]  = (t < 5.0f) ? 0.0f : 20.0f + 45.0f * load;             // parked for the first 5 s, then driving
   out[SIG_GPS_SPD] = out[SIG_VSS] * 1.02f;                               // GPS a little different from the hall sensor
   out[SIG_GPS_SATS] = 9.0f;
+  for (int i = 0; i < CUSTOM_SLOTS; i++) {   // custom slots: a slow sweep across each one's own scale, each a bit out of step
+    SimRange r = sim_range(SIG_C1 + i);
+    out[SIG_C1 + i] = r.min + (r.max - r.min) * (0.5f + 0.4f * sinf(t * 0.2f + i));
+  }
 
   // On/off flags, so an indicators page has something to show. The check-engine light and lambda protection
   // never come on by themselves (use manual mode to test those).
@@ -131,6 +141,7 @@ static void writeValues(const float *v) {
   g_vss_mph = v[SIG_VSS];     g_vss_has_data = true;   gauge_config_mark_signal_active(SIG_VSS);
   g_gps_mph = v[SIG_GPS_SPD]; g_gps_has_data = true;   gauge_config_mark_signal_active(SIG_GPS_SPD);
   g_gps_sats = v[SIG_GPS_SATS]; g_sats_has_data = true; gauge_config_mark_signal_active(SIG_GPS_SATS);
+  for (int i = 0; i < CUSTOM_SLOTS; i++) { g_custom_val[i] = v[SIG_C1 + i]; g_custom_has[i] = true; gauge_config_mark_signal_active((SignalId)(SIG_C1 + i)); }
 
   uint16_t bits = 0;
   for (int i = 0; i < SIG_FLAG_COUNT; i++) {
@@ -161,6 +172,7 @@ void sim_stop(const char *why) {
   g_rpm_has_data = g_clt_has_data = g_boost_has_data = g_afr_has_data = g_oilp_has_data = false;
   g_oilt_has_data = g_fuelp_has_data = g_flex_has_data = g_tps_has_data = g_battv_has_data = false;
   g_egt_has_data = g_iat_has_data = g_ambt_has_data = g_hum_has_data = g_fuel_has_data = g_vss_has_data = g_gps_has_data = g_sats_has_data = false;
+  for (int i = 0; i < CUSTOM_SLOTS; i++) g_custom_has[i] = false;
   g_flag_seen = 0;
   strncpy(s_stopReason, why ? why : "stopped", sizeof(s_stopReason) - 1);
   s_stopReason[sizeof(s_stopReason) - 1] = '\0';

@@ -24,10 +24,11 @@
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 #include "speed_sensors.h" // the GPS reader (host-tested)
+#include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 21
+#define INPUT_BUILD 22
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -75,7 +76,42 @@ static inline bool simOwns(void) { return sim_is_active(); }
 extern "C" bool gauge_config_signal_has_data(SignalId sig) {
   return sig > 0 && sig < SIG_COUNT && s_seenMs[sig] && millis() - s_seenMs[sig] < STALE_MS;
 }
+// ---- custom sensor slots (custom_slots.h): set up on /custom, saved in NVS, names sent to the screens ----
+volatile float g_custom_val[CUSTOM_SLOTS];
+volatile bool g_custom_has[CUSTOM_SLOTS];
+static CustomSlotConfig s_slots[CUSTOM_SLOTS];
+static volatile bool s_slotsChanged = true;   // send the names now (also every SLOTS_MS)
+const CustomSlotInfo *custom_slot_info(int slot) { static CustomSlotInfo e; return (slot >= 0 && slot < CUSTOM_SLOTS) ? &s_slots[slot].info : &e; }
+static void slotsLoad() {
+  Preferences p; p.begin("slots", true);
+  if (p.getBytes("cfg", s_slots, sizeof s_slots) != sizeof s_slots) memset(s_slots, 0, sizeof s_slots);
+  p.end();
+  for (int i = 0; i < CUSTOM_SLOTS; i++) { s_slots[i].info.name[CUSTOM_NAME_LEN - 1] = 0; s_slots[i].info.unit[CUSTOM_UNIT_LEN - 1] = 0; }
+}
+static void slotsSave() { Preferences p; p.begin("slots", false); p.putBytes("cfg", s_slots, sizeof s_slots); p.end(); s_slotsChanged = true; }
+// Every received CAN frame (from the tracker): decode every slot that reads this ID.
+void hub_custom_can_frame(uint32_t id, const uint8_t *d, uint8_t len) {
+  for (int i = 0; i < CUSTOM_SLOTS; i++) {
+    const CustomSlotConfig &c = s_slots[i];
+    if (c.src != CUSTOM_SRC_CAN || c.can.id != id || !c.info.name[0]) continue;
+    float v;
+    if (!custom_can_decode(&c.can, d, len, &v)) continue;
+    g_custom_val[i] = v; g_custom_has[i] = true;
+    s_seenMs[SIG_C1 + i] = millis() | 1; s_srcId[SIG_C1 + i] = id;
+  }
+}
+static void slotsSendNames() {
+  for (int first = 0; first < CUSTOM_SLOTS; first += SLOTS_PER_PACKET) {
+    SlotsPacket p; memset(&p, 0, sizeof p);
+    p.magic = SLOTS_MAGIC; p.first = first; p.n = SLOTS_PER_PACKET;
+    for (int k = 0; k < SLOTS_PER_PACKET; k++) p.info[k] = s_slots[first + k].info;
+    esp_now_send(BCAST, (const uint8_t *)&p, sizeof p);
+    delay(4);
+  }
+}
+
 extern "C" float gauge_config_signal_value(SignalId sig) {
+  if (gauge_signal_is_custom(sig)) return g_custom_val[sig - SIG_C1];
   switch (sig) {
     case SIG_RPM: return g_rpm;       case SIG_CLT: return g_clt_f;     case SIG_MAP: return g_boost_psi;
     case SIG_AFR: return g_afr;       case SIG_OILP: return g_oilp_psi; case SIG_OILT: return g_oilt_f;
@@ -406,6 +442,52 @@ static void setupWeb() {
   server.on("/simulator", HTTP_GET, []() {
     server.send(200, "text/html", SIM_HTML);
   });
+  // ---- custom sensor slots (/custom) ----
+  server.on("/custom", HTTP_GET, []() { server.send(200, "text/html", CUSTOM_HTML); });
+  server.on("/custom.json", HTTP_GET, []() {
+    String j = "[";
+    for (int i = 0; i < CUSTOM_SLOTS; i++) {
+      const CustomSlotConfig &c = s_slots[i];
+      String nm = c.info.name, un = c.info.unit;
+      nm.replace("\\", "\\\\"); nm.replace("\"", "\\\""); un.replace("\\", "\\\\"); un.replace("\"", "\\\"");
+      char b[300];
+      snprintf(b, sizeof b, "%s{\"i\":%d,\"name\":\"%s\",\"unit\":\"%s\",\"dec\":%u,\"min\":%g,\"max\":%g,\"src\":%u,\"id\":%lu,\"start\":%u,\"bits\":%u,\"bit\":%u,\"be\":%u,\"sgn\":%u,\"scale\":%g,\"offset\":%g,\"has\":%s,\"value\":%g}",
+               i ? "," : "", i, nm.c_str(), un.c_str(), c.info.decimals, (double)c.info.min, (double)c.info.max, c.src, (unsigned long)c.can.id, c.can.start, c.can.bits, c.can.bit,
+               c.can.big_endian, c.can.is_signed, (double)c.can.scale, (double)c.can.offset, gauge_config_signal_has_data((SignalId)(SIG_C1 + i)) ? "true" : "false", (double)g_custom_val[i]);
+      j += b;
+    }
+    server.send(200, "application/json", j + "]");
+  });
+  server.on("/custom/set", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= CUSTOM_SLOTS) { server.send(400, "text/plain", "No such slot"); return; }
+    CustomSlotConfig c; memset(&c, 0, sizeof c);
+    String name = server.arg("name"); name.trim();
+    if (!name.length()) { server.send(400, "text/plain", "Give the sensor a name"); return; }
+    custom_copy_text(c.info.name, CUSTOM_NAME_LEN, name.c_str());
+    custom_copy_text(c.info.unit, CUSTOM_UNIT_LEN, server.arg("unit").c_str());
+    int dec = server.arg("dec").toInt(); c.info.decimals = dec < 0 ? 0 : dec > 3 ? 3 : dec;
+    c.info.min = server.arg("min").toFloat(); c.info.max = server.arg("max").toFloat();
+    if (!(c.info.max > c.info.min)) { server.send(400, "text/plain", "Gauge max must be above gauge min"); return; }
+    c.src = CUSTOM_SRC_CAN;
+    c.can.id = strtoul(server.arg("id").c_str(), NULL, 0);
+    c.can.start = server.arg("start").toInt(); c.can.bits = server.arg("bits").toInt(); c.can.bit = server.arg("bit").toInt();
+    c.can.big_endian = server.arg("be") == "1"; c.can.is_signed = server.arg("sgn") == "1";
+    c.can.scale = server.hasArg("scale") ? server.arg("scale").toFloat() : 1.0f; c.can.offset = server.arg("offset").toFloat();
+    if (!custom_can_valid(&c.can)) { server.send(400, "text/plain", "That CAN field does not fit: check the ID (up to 0x7FF), start byte, size and scale (not 0)"); return; }
+    for (int k = 0; k < CUSTOM_SLOTS; k++)
+      if (k != i && s_slots[k].info.name[0] && !strcasecmp(s_slots[k].info.name, c.info.name)) { server.send(400, "text/plain", "Another slot already has that name"); return; }
+    s_slots[i] = c; g_custom_has[i] = false; s_seenMs[SIG_C1 + i] = 0;
+    slotsSave();
+    server.send(200, "text/plain", "Saved. The screens get the name within a few seconds.");
+  });
+  server.on("/custom/clear", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= CUSTOM_SLOTS) { server.send(400, "text/plain", "No such slot"); return; }
+    memset(&s_slots[i], 0, sizeof s_slots[i]); g_custom_has[i] = false; s_seenMs[SIG_C1 + i] = 0;
+    slotsSave();
+    server.send(200, "text/plain", "Cleared");
+  });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -486,7 +568,7 @@ static void dataTask(void *) {
     for (int i = 0; i < SIG_COUNT; i++) {
       bool has = i != SIG_NONE && gauge_config_signal_has_data((SignalId)i);
       p.v[i] = has ? gauge_config_signal_value((SignalId)i) : 0.0f;
-      if (has) p.has_mask |= 1u << i;
+      if (has) p.has_mask |= 1ull << i;
     }
     if (sim_is_active()) p.has_mask |= LINK_MASK_SIMULATED;   // the screens show SIMULATED and the main screen does not log
     if (esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)) == ESP_OK) s_dataSent++;
@@ -532,6 +614,7 @@ void setup() {
   esp_now_add_peer(&peer);
   esp_now_register_recv_cb(onEspNowRecv);   // screen hellos, for the status lights
 
+  slotsLoad();   // custom sensor slots, before CAN starts decoding them
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;
@@ -555,6 +638,8 @@ void loop() {
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   sim_loop();
+  { static uint32_t lastNames = 0;   // custom slot names to the screens: on a change and every 10 s
+    if (s_wifiUp && (s_slotsChanged || millis() - lastNames > SLOTS_MS)) { s_slotsChanged = false; lastNames = millis(); slotsSendNames(); } }
   if (s_wifiUp) server.handleClient();
   delay(2);
 }

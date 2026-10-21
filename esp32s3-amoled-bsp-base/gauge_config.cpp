@@ -13,6 +13,7 @@
 */
 
 #include "gauge_config.h"
+#include "custom_slots.h"
 #include "gauge_config_json.h"
 #include "gauge_style.h"
 #include "gauge_indicators.h"
@@ -518,6 +519,14 @@ const char *gauge_config_last_error(void) { return s_lastError; }
 size_t gauge_config_saved_bytes(int which) { return (which == 0 || which == 1) ? s_savedBytes[which] : 0; }
 
 const char *gauge_config_signal_name(SignalId sig) {
+  if (gauge_signal_is_custom(sig)) {   // named on the hub's /custom page; "Custom 3" until it is
+    static char fallback[CUSTOM_SLOTS][12];
+    int i = sig - SIG_C1;
+    const CustomSlotInfo *in = custom_slot_info(i);
+    if (in->name[0]) return in->name;
+    snprintf(fallback[i], sizeof fallback[i], "Custom %d", i + 1);
+    return fallback[i];
+  }
   switch (sig) {
     case SIG_RPM: return "RPM";
     case SIG_CLT: return "Coolant Temp";
@@ -551,6 +560,7 @@ const char *gauge_config_signal_name(SignalId sig) {
 }
 
 float gauge_config_signal_value(SignalId sig) {
+  if (gauge_signal_is_custom(sig)) return g_custom_val[sig - SIG_C1];
   switch (sig) {
     case SIG_RPM: return g_rpm;
     case SIG_CLT: return g_clt_f;
@@ -578,7 +588,8 @@ float gauge_config_signal_value(SignalId sig) {
 
 bool gauge_config_signal_has_data(SignalId sig) {
   bool seen;
-  switch (sig) {
+  if (gauge_signal_is_custom(sig)) seen = g_custom_has[sig - SIG_C1];
+  else switch (sig) {
     case SIG_RPM: seen = g_rpm_has_data; break;
     case SIG_CLT: seen = g_clt_has_data; break;
     case SIG_MAP: seen = g_boost_has_data; break;
@@ -633,6 +644,7 @@ void gauge_config_log_init(void) {
 
 bool gauge_config_is_log_enabled(SignalId sig) {
   if (sig < 0 || sig >= SIG_COUNT) return false;
+  if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) return false;   // slot not set up: no empty column
   return s_logEnabled[sig];
 }
 

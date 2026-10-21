@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
   {
     static const char *NAMES[9] = { "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal" };
     bool namesOk = true; for (int i = 0; i < 9; i++) if (strcmp(gauge_config_signal_name((SignalId)(SIG_FIRST_FLAG + i)), NAMES[i]) != 0) namesOk = false;
-    CHECK(namesOk && SIG_COUNT == 28 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (28 signals in all)");
+    CHECK(namesOk && SIG_COUNT == 44 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (44 signals in all, 16 of them custom slots)");
     CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(SIG_EGT) && !gauge_signal_is_flag(SIG_IAT) && !gauge_signal_is_flag(SIG_AMBT) && !gauge_signal_is_flag(SIG_HUM) && !gauge_signal_is_flag(SIG_FUEL) && !gauge_signal_is_flag(0), "which signals are flags");
     g_fake_millis = 50000; g_flag_bits = 0; g_flag_seen = 0;
     CHECK(!gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 0.0f, "before any frame: no data");

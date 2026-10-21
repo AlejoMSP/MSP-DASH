@@ -5,6 +5,8 @@
 #include <string.h>
 uint32_t g_fake_millis = 1000; uint32_t millis() { return g_fake_millis; }
 #include "web_monitor.h"
+static int g_customCalls = 0;
+void hub_custom_can_frame(uint32_t, const uint8_t *, uint8_t) { g_customCalls++; }   // the .ino decodes the custom slots here
 static int pass = 0, fail = 0;
 #define CHECK(c, m) do { if (c) pass++; else { fail++; printf("  FAIL: %s (line %d)\n", m, __LINE__); } } while (0)
 static void hear(uint32_t id) { uint8_t d[8] = {0}; web_monitor_track_can_frame(id, d, 8); }
@@ -19,6 +21,7 @@ int main() {
   CHECK(!strcmp(hub_ecu_detected(), "rusEFI and MegaSquirt / Link"), "0x20F is the last rusEFI ID");
   g_fake_millis += 2500; hear(0x210); hear(0x640);
   CHECK(!strcmp(hub_ecu_detected(), "none heard"), "0x210 and 0x640 are just outside the ranges");
+  CHECK(g_customCalls == 8, "every frame is handed to the custom slot decoder");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

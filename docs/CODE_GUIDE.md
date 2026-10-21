@@ -56,6 +56,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 
 **Web**
 - `web_monitor.cpp/.h` - web server: front page (live list of the screen's own gauges), `/gauges` editor, `/settings`, `/status.json`, `/update` (OTA), net/name/diameter/role endpoints. The raw CAN monitor and the separate web dashboard editor were removed in build 160 (raw CAN lives on the hub).
+- `custom_slots.h` / `custom_slots_screen.cpp` - the 16 custom sensor slots (SIG_C1..SIG_C16): shared CAN field decoder, MSN1 names packet; the screen keeps the names from the hub in NVS. Unused slots are hidden from every list and get no log column.
 - `web_theme.h` - the frame every page shares; its script puts the board's name next to MSP-DASH and in the tab title.
 - `gauge_style.h` - `GAUGE_DEFAULT_RANGES`: the gauge template per signal (scale and warning) used when a signal is picked. Pressures are psi and MAP is boost psi, converted in `can_parsing.h` (build 161).
 - `web_indicator_editor.h`, `web_theme.h` - indicator editor page and shared page style.
@@ -76,6 +77,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Fuel level: pot (mock sender) on GPIO36, 0-100 %, signal Fuel Level.
   - Web pages live in `hub_pages.h` (HOME_HTML, SENSORS_HTML, SIM_HTML), never as raw strings in the .ino: the Arduino builder mangled them ("'asyncfunction' does not name a type", hub build 18/19). A test checks the .ino has none.
+  - Custom sensor slots (build 22 on): 16 slots in NVS (`s_slots`), set up on `/custom` (CUSTOM_HTML). `hub_custom_can_frame()` decodes them from every CAN frame (called by the tracker in web_monitor.h); `slotsSendNames()` sends MSN1 packets on change and every 10 s. Shared header `custom_slots.h` (copied in).
   - Speed (build 19 on): the hall sensor is wired to rusEFI; the hub reads speed from BASE1 byte 6 like any ECU value. GT-U7 GPS on Serial2 (GPIO 16/17) -> GPS Speed / GPS Satellites (`speed_sensors.h`, host-tested); the hub page compares the two. Frame 0x7F0 carries EGT only. See docs/HUB_SPEED_SENSORS.md and docs/RUSEFI_LUA.md.
   - Bench simulator (build 15 on): `simulator.cpp/.h` copied in from the screen folder at compile time. `/simulator` page; its data packets carry `LINK_MASK_SIMULATED` (bit 0 of `has_mask`), the screens show SIMULATED and the main screen does not log. The hub's own sensors stop writing their values while it runs.
 - Web: `/` screens status (green/red) and brightness settings, `/simulator`, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.

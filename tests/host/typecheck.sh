@@ -20,7 +20,7 @@ echo '#pragma once
 void Touch_Init(void);' > "$TMP/FT3168.h"
 FLAGS="-std=c++17 -fsyntax-only -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-format-truncation -Wno-maybe-uninitialized -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 -I$HERE/stubs -I$AJ -I$TMP"
 fail=0
-for f in esp32s3-amoled-bsp-base.ino web_monitor.cpp gauge_config.cpp sd_logging.cpp simulator.cpp espnow_link.cpp; do
+for f in esp32s3-amoled-bsp-base.ino web_monitor.cpp gauge_config.cpp sd_logging.cpp simulator.cpp espnow_link.cpp custom_slots_screen.cpp; do
   x=""; [[ $f == *.ino ]] && x="-x c++"
   if out=$(g++ $FLAGS $x "$TMP/$f" 2>&1); then echo "OK    $f"; else echo "FAIL  $f"; echo "$out" | grep -E "error" | head -10; fail=1; fi
 done

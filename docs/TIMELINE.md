@@ -199,3 +199,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 168 | 2026-10-20 | (this commit) | Hall speed sensor moved to rusEFI: Speed read from BASE1 byte 6 again; hub build 19 drops the hall code and the speed bytes in 0x7F0, keeps the GPS and compares it with rusEFI speed |
 | 169 | 2026-10-21 | (this commit) | Hub build 20: web pages moved from the .ino to hub_pages.h (the Arduino builder mangled the raw strings; hub 18 and 19 never compiled) |
 | 170 | 2026-10-21 | (this commit) | ECU type setting removed from the screens (it was only a label; both decoders always run). Hub build 21 shows the ECU it hears on its home page |
+| 171 | 2026-10-21 | (this commit) | Configurable sensors stage 1: 16 custom slots (SIG_C1..C16), hub /custom page (CAN field decoder with live preview), MSN1 names packet to the screens (kept in NVS), has_mask 64 bit; fixed the hub dropping signals past 32. Hub build 22 |
