@@ -197,3 +197,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 164 | 2026-10-20 | (this commit) | Signal lists alphabetical everywhere (gauge, lamp, logging); hub build 17: Sensors page alphabetical + 'On the bus, not decoded' list of CAN frames no sensor reads |
 | 165 | 2026-10-20 | (this commit) | Hub build 18: hall speed sensor (GPIO 27, calibrate from GPS) -> Speed and CAN 0x7F0 bytes 3-4 to rusEFI; GT-U7 GPS (GPIO 16/17) -> GPS Speed, GPS Satellites; rusEFI BASE1 speed no longer read |
 | 168 | 2026-10-20 | (this commit) | Hall speed sensor moved to rusEFI: Speed read from BASE1 byte 6 again; hub build 19 drops the hall code and the speed bytes in 0x7F0, keeps the GPS and compares it with rusEFI speed |
+| 169 | 2026-10-21 | (this commit) | Hub build 20: web pages moved from the .ino to hub_pages.h (the Arduino builder mangled the raw strings; hub 18 and 19 never compiled) |

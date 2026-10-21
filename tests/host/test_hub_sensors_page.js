@@ -1,8 +1,9 @@
-// Drives the HUB's /sensors page script (from esp32-input/esp32-input.ino) with a fake hub: sensors listed
+// Drives the HUB's /sensors page script (from esp32-input/hub_pages.h) with a fake hub: sensors listed
 // alphabetically, and CAN frames that no sensor reads listed under "On the bus, not decoded".
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const HUB = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'esp32-input.ino'), 'utf8');
-const html = HUB.slice(HUB.indexOf('server.on("/sensors", HTTP_GET')).match(/R"HTML\(([\s\S]*?)\)HTML"/)[1];
+const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
+const html = PAGES.match(/SENSORS_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1];
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r => setImmediate(r)); };
@@ -34,5 +35,8 @@ vm.createContext(ctx);
   check(/^3 frames not read/.test(el("usum").textContent), "summary: " + el("usum").textContent);
   can = { total: 0, ids: [] }; vm.runInContext("und()", ctx); await settle();
   check(/Every frame/.test(el("usum").textContent) && el("u").innerHTML === "", "nothing undecoded: says so");
+  console.log("3. the .ino has no raw strings (the Arduino builder mangles them: 'asyncfunction' does not name a type)");
+  check(!/R"[A-Za-z]*\(/.test(HUB), "esp32-input.ino has no R\"...( raw string literals - pages go in hub_pages.h");
+  for (const n of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML"]) check(HUB.includes('server.send(200, "text/html", ' + n + ')') && PAGES.includes(n + "[] PROGMEM"), n + " is in hub_pages.h and served");
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

@@ -1,9 +1,9 @@
-// Drives the HUB's /simulator page script (pulled straight out of esp32-input/esp32-input.ino) with a fake hub.
+// Drives the HUB's /simulator page script (pulled straight out of esp32-input/hub_pages.h) with a fake hub.
 // The simulator moved from the screens to the hub in screen build 162 / hub build 15.
 const fs = require('fs');
 const path = require('path');
-const HUB = fs.readFileSync(process.env.HUB_INO || path.join(__dirname, '..', '..', 'esp32-input', 'esp32-input.ino'), 'utf8');
-const script = (() => { const i = HUB.indexOf('server.on("/simulator"'); const h = HUB.slice(i).match(/R"HTML\(([\s\S]*?)\)HTML"/)[1]; return h.match(/<script>([\s\S]*?)<\/script>/)[1]; })();
+const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
+const script = PAGES.match(/SIM_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1].match(/<script>([\s\S]*?)<\/script>/)[1];
 
 // ---- fake browser ----
 const timers = [];

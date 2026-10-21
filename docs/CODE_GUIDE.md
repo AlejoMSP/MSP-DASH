@@ -76,6 +76,7 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
   - EGT: MAX6675 on GPIO18 (SCK), 19 (SO), 23 (CS), every 250 ms; sent on CAN as 0x7F0 for rusEFI.
   - Ambient temp + humidity: DHT22 on GPIO4, every 2.5 s; signals Ambient Temp and Humidity.
   - Fuel level: pot (mock sender) on GPIO36, 0-100 %, signal Fuel Level.
+  - Web pages live in `hub_pages.h` (HOME_HTML, SENSORS_HTML, SIM_HTML), never as raw strings in the .ino: the Arduino builder mangled them ("'asyncfunction' does not name a type", hub build 18/19). A test checks the .ino has none.
   - Speed (build 19 on): the hall sensor is wired to rusEFI; the hub reads speed from BASE1 byte 6 like any ECU value. GT-U7 GPS on Serial2 (GPIO 16/17) -> GPS Speed / GPS Satellites (`speed_sensors.h`, host-tested); the hub page compares the two. Frame 0x7F0 carries EGT only. See docs/HUB_SPEED_SENSORS.md and docs/RUSEFI_LUA.md.
   - Bench simulator (build 15 on): `simulator.cpp/.h` copied in from the screen folder at compile time. `/simulator` page; its data packets carry `LINK_MASK_SIMULATED` (bit 0 of `has_mask`), the screens show SIMULATED and the main screen does not log. The hub's own sensors stop writing their values while it runs.
 - Web: `/` screens status (green/red) and brightness settings, `/simulator`, `/sensors` every signal with its source (hub sensor or ECU CAN ID), `/can` raw CAN monitor, `/update` OTA.
