@@ -1,36 +1,14 @@
-// speed_sensors.h (hub) - the pure math and parsing behind the speed sensors, kept free of Arduino calls so the
-// host tests can check it (tests/host/test_speed_sensors.cpp).
-//   - Hall sensor (NJK-5002C on GPIO 27): pulses -> mph, using pulses per mile; calibration against the GPS.
+// speed_sensors.h (hub) - the GPS reader, kept free of Arduino calls so the host tests can check it
+// (tests/host/test_speed_sensors.cpp).
 //   - GPS (GT-U7, NEO-6M compatible, NMEA at 9600 baud on GPIO 16/17): reads RMC (speed, fix) and GGA (satellites).
+//   - The hall speed sensor is wired to rusEFI; the hub reads its speed from CAN (BASE1) and compares it with the GPS.
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-// ---------------- hall sensor ----------------
-#define HALL_PPM_DEFAULT   4000.0f   // pulses per mile until calibrated (about one magnet on the driveshaft)
-#define HALL_PPM_MIN       100.0f
-#define HALL_PPM_MAX       100000.0f
-#define HALL_MIN_PERIOD_US 1000u     // pulses closer than 1 ms are noise (that would be over 1000 pulses a second)
-#define HALL_STOP_US       1500000u  // no pulse for 1.5 s = stopped
 #define KNOTS_TO_MPH       1.150779f
-#define MPH_TO_KPH         1.609344f
-
-// Speed from the time between the last two pulses. 0 when stopped (no pulse for HALL_STOP_US) or no period yet.
-static inline float hall_mph(uint32_t periodUs, uint32_t usSinceLastPulse, float ppm) {
-  if (periodUs < HALL_MIN_PERIOD_US || usSinceLastPulse > HALL_STOP_US || ppm <= 0) return 0.0f;
-  // pulses per second / pulses per mile = miles per second; x 3600 = mph
-  return (1000000.0f / (float)periodUs) / ppm * 3600.0f;
-}
-
-// Calibration: at a steady speed, the GPS says gpsMph while the hall sensor gives pulseHz. Returns the pulses per
-// mile that makes the two agree, or 0 if the numbers are not good enough to calibrate from (too slow, out of range).
-static inline float hall_ppm_from_gps(float pulseHz, float gpsMph) {
-  if (gpsMph < 10.0f || pulseHz <= 0.0f) return 0.0f;     // below 10 mph the GPS speed is too rough
-  float ppm = pulseHz * 3600.0f / gpsMph;
-  return (ppm >= HALL_PPM_MIN && ppm <= HALL_PPM_MAX) ? ppm : 0.0f;
-}
 
 // ---------------- GPS (NMEA 0183) ----------------
 typedef struct {

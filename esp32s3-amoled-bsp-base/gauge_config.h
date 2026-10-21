@@ -40,7 +40,7 @@ typedef enum {
   SIG_AMBT,        // ambient (cabin) temp, F - DHT22 on the hub
   SIG_HUM,         // relative humidity, % - DHT22 on the hub
   SIG_FUEL,        // fuel level, % - sender (pot for now) on the hub
-  SIG_VSS,         // vehicle speed, mph - the hall sensor on the hub (hub build 18 on)
+  SIG_VSS,         // vehicle speed, mph - rusEFI BASE1 byte 6 (kph); the hall sensor is wired to rusEFI
   SIG_GPS_SPD,     // GPS speed, mph - GT-U7 on the hub, a backup to compare with the hall speed
   SIG_GPS_SATS,    // GPS satellites in use
   SIG_COUNT
