@@ -1,11 +1,13 @@
 # Hub speed sensors (hub build 18)
 
+Pins are GPIO numbers with the Freenove breakout terminal (L = left row, R = right row). Ground goes to the breadboard ground bar.
+
 ## Hall sensor: NJK-5002C (NPN, normally open, 5-30 V, with magnet)
 | Wire | Goes to |
 |---|---|
-| Brown (+) | 5 V (anything 5-30 V works) |
+| Brown (+) | 5 V, L24 (anything 5-30 V works) |
 | Blue (-) | ground |
-| Black (signal) | GPIO 27, plus a 10k resistor from GPIO 27 to 3.3 V |
+| Black (signal) | GPIO 27 = L16, plus a 10k resistor from L16 to 3.3 V (L6) |
 
 The sensor pulls the signal to ground when the magnet passes and lets go otherwise, so GPIO 27 never sees more
 than 3.3 V. Check first: power the sensor with the black wire connected to nothing and measure black to ground.
@@ -19,10 +21,10 @@ speed matches the GPS. Speed goes into the Speed signal and, in kph, to rusEFI i
 ## GPS: GT-U7 (NEO-6M compatible)
 | GT-U7 pin | Goes to |
 |---|---|
-| VCC | 5 V |
+| VCC | 5 V, L24 |
 | GND | ground |
-| TX | GPIO 16 (hub receives) |
-| RX | GPIO 17 (hub sends the 5 Hz setting) |
+| TX | GPIO 16 = R17 (hub receives) |
+| RX | GPIO 17 = R16 (hub sends the 5 Hz setting) |
 
 9600 baud NMEA. The hub asks for 5 fixes a second. Signals: GPS Speed (mph) and GPS Satellites. The antenna needs
 a view of the sky; the first fix can take several minutes. The hub page shows hall speed, GPS speed and the
