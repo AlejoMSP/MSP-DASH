@@ -63,8 +63,9 @@ R"rawliteral(
         const liveTag = s.age_ms < 5000 ? " (live)" : "";
         return `<option value="${s.id}" ${selected === s.id ? "selected" : ""}>${escHtml(s.name)}${unit ? " [" + unit + "]" : ""}${liveTag}</option>`;
       };
-      const analog = signalActivity.filter(s => s.id !== 0 && !s.flag).sort((a, b) => a.id - b.id);
-      const flags = signalActivity.filter(s => s.flag).sort((a, b) => a.id - b.id);
+      const byName = (a, b) => a.name.localeCompare(b.name);   // alphabetical, like the gauge editor's list
+      const analog = signalActivity.filter(s => s.id !== 0 && !s.flag).sort(byName);
+      const flags = signalActivity.filter(s => s.flag).sort(byName);
       return `<option value="0" ${selected === 0 ? "selected" : ""}>None</option>` + analog.map(opt).join("") +
              (flags.length ? `<optgroup label="ECU on/off flags">${flags.map(opt).join("")}</optgroup>` : "");
     }

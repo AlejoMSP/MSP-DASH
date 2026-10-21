@@ -45,6 +45,10 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(fw[4].join() === "10,20,0,0,1" && fw[2].join() === "40,300,1,230,1" && fw[10].join() === "8,16,1,12,0" && fw[5].join() === "0,100,1,10,0", "AFR 10-20; coolant 40-300 F warn above 230; battery 8-16 V warn below 12; oil pressure 0-100 psi warn below 10");
     check(fw[3].join() === "-15,30,0,0,1", "MAP is boost psi: -15 (vacuum) to 30");
     check(Object.keys(fw).every(k => !(+k >= 11 && +k <= 19)), "the ECU on/off flags have no template"); }
+  { const names = [...probe.run('signalOptionsHtml(0)').matchAll(/<option value="(\d+)"[^>]*>([^<(]+)/g)].filter(m => m[1] !== "0").map(m => m[2].trim());
+    check(names.length > 5 && names.every((n, i) => i === 0 || names[i - 1].localeCompare(n) <= 0), "the gauge Signal list is alphabetical, whatever has data: " + names.join(", "));
+    const ind = [...probe.run('indicatorSignalOptions(0)').split("<optgroup")[0].matchAll(/<option value="(\d+)"[^>]*>([^<\[(]+)/g)].filter(m => m[1] !== "0").map(m => m[2].trim());
+    check(ind.length > 5 && ind.every((n, i) => i === 0 || ind[i - 1].localeCompare(n) <= 0), "the lamp Signal list is alphabetical too"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

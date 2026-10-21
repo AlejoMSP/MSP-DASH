@@ -33,7 +33,10 @@ vm.createContext(ctx); vm.runInContext(script + ";this.__ch=()=>channels;", ctx)
 
   console.log("2. the channel ticks change the RIGHT signal");
   check(/channels\[0\]\.enabled/.test(el("channels").innerHTML) && /channels\[1\]\.enabled/.test(el("channels").innerHTML) && !/channels\[2\]/.test(el("channels").innerHTML),
-    "box 1 changes channels[0] (RPM), box 2 changes channels[1] (Coolant) - not the next one along");
+    "box 1 changes channels[0], box 2 changes channels[1] - not the next one along");
+
+  check(el("channels").innerHTML.indexOf("Coolant Temp") < el("channels").innerHTML.indexOf("RPM"), "the channels are alphabetical (Coolant Temp before RPM)");
+  check(el("tsig").innerHTML.indexOf("Speed") < el("tsig").innerHTML.indexOf("Throttle"), "the sensor list is alphabetical");
 
   console.log("3. saving the start condition");
   el("tsig").value = "9"; el("tabove").value = "1"; el("tlevel").value = "90"; el("tstop").value = "15";

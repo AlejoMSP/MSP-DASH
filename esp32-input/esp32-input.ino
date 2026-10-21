@@ -25,7 +25,7 @@
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 16
+#define INPUT_BUILD 17
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -381,6 +381,10 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 <h2>Sensors</h2><div class="note" id="sum"></div>
 <table><thead><tr><th>Signal</th><th class="v">Value</th><th>Source</th><th class="v">Age</th></tr></thead><tbody id="t"></tbody></table>
 <p class="note">Hub = a sensor wired to this board. ECU = decoded from a CAN frame. Grey = not heard for 2 s.</p>
+<h3 style="color:#4dd0e1;margin:16px 0 4px">On the bus, not decoded</h3>
+<div class="note" id="usum"></div>
+<table><thead><tr><th>CAN ID</th><th>From</th><th>Bytes</th><th class="v">Age</th></tr></thead><tbody id="u"></tbody></table>
+<p class="note">Frames heard on the CAN bus that no sensor reads yet. They show up here by themselves as soon as they appear.</p>
 <p><a href="/">Back</a> | <a href="/can">Raw CAN</a></p>
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
@@ -390,13 +394,18 @@ const UNIT={1:"rpm",2:"F",3:"psi",4:"",5:"psi",6:"F",7:"psi",8:"%",9:"%",10:"V",
 const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0,25:0};
 const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)",4294901764:"Bench simulator (FAKE)"};
 function ecu(id){return id>=0x200&&id<=0x20F?"rusEFI":id>=0x5F0&&id<=0x63F?"MegaSquirt/Link":"";}
-async function u(){try{const l=await (await fetch("/sensors.json")).json();let h=0,c=0,e=new Set();
+async function u(){try{const l=(await (await fetch("/sensors.json")).json()).sort((a,b)=>(NAME[a.sig]||"").localeCompare(NAME[b.sig]||""));let h=0,c=0,e=new Set();
 document.getElementById("t").innerHTML=l.map(s=>{const isHub=HUB[s.src]!==undefined;isHub?h++:c++;const k=ecu(s.src);if(!isHub&&k)e.add(k);
 const flag=s.sig>=11&&s.sig<=19;const val=flag?(s.v>0.5?"ON":"off"):s.v.toFixed(DEC[s.sig]??1)+" "+(UNIT[s.sig]||"");
 const src=s.src===4294901764?'<span class="tag sim">Sim</span> '+HUB[s.src]:isHub?'<span class="tag hub">Hub</span> '+HUB[s.src]:'<span class="tag can">ECU</span> CAN 0x'+s.src.toString(16).toUpperCase()+(k?" ("+k+")":"");
 return '<tr class="'+(s.age>2000?'stale':'')+'"><td>'+(NAME[s.sig]||("Signal "+s.sig))+'</td><td class="v">'+val+'</td><td>'+src+'</td><td class="v">'+(s.age<1000?s.age+" ms":(s.age/1000).toFixed(0)+" s")+'</td></tr>';}).join("");
 document.getElementById("sum").textContent=h+" from the hub, "+c+" from the ECU"+(e.size?" ("+[...e].join(", ")+")":"");}catch(x){}}
-u();setInterval(u,500);
+async function und(){try{const used=new Set((await (await fetch("/sensors.json")).json()).map(s=>s.src));
+const j=await (await fetch("/can.json")).json();
+const l=j.ids.filter(x=>!used.has(x.id)&&x.age<10000).sort((a,b)=>a.id-b.id);
+document.getElementById("usum").textContent=l.length?l.length+" frame"+(l.length===1?"":"s")+" not read by any sensor":"Every frame on the bus is read by a sensor (or the bus is quiet).";
+document.getElementById("u").innerHTML=l.map(x=>'<tr class="'+(x.age>2000?'stale':'')+'"><td class="v" style="text-align:left">0x'+x.id.toString(16).toUpperCase().padStart(3,"0")+'</td><td>'+(ecu(x.id)||"unknown")+'</td><td class="v" style="text-align:left">'+x.d+'</td><td class="v">'+(x.age<1000?x.age+" ms":(x.age/1000).toFixed(0)+" s")+'</td></tr>').join("");}catch(x){}}
+u();setInterval(u,500);und();setInterval(und,1000);
 </script></body></html>)HTML");
   });
   // ---- bench simulator (moved here from the screens in build 15; safety rules in simulator.h) ----

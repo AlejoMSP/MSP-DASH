@@ -434,11 +434,8 @@ R"rawliteral(
     }
 
     function signalOptionsHtml(selected) {
-      // Sorted by activity (lowest age_ms first = most live), "never seen" last, name as secondary sort.
-      const sorted = signalActivity.slice().sort((a, b) => {
-        if (a.age_ms !== b.age_ms) return a.age_ms - b.age_ms;
-        return a.name.localeCompare(b.name);
-      });
+      // Alphabetical, so a signal is always in the same place; "(live)" says which ones have data now.
+      const sorted = signalActivity.slice().sort((a, b) => a.name.localeCompare(b.name));
       let html = `<option value="0" ${selected===0?"selected":""}>None</option>`;
       for (const s of sorted) {
         if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
@@ -988,7 +985,7 @@ R"rawliteral(
       document.getElementById("status").textContent = "Loading...";
       try {
         const res = await fetch("/log-channels.json");
-        channels = await res.json();
+        channels = (await res.json()).sort((a, b) => a.name.localeCompare(b.name));
         render();
         loaded = true;
         document.getElementById("status").textContent = "";
@@ -1012,6 +1009,7 @@ R"rawliteral(
     async function loadTrig() {
       try {
         const t = await (await fetch("/log-trigger.json")).json();
+        t.signals.sort((a, b) => a.name.localeCompare(b.name));
         $("tsig").innerHTML = t.signals.map(s => `<option value="${s.id}">${s.name}</option>`).join("");
         $("tmode").value = String(t.mode); $("tsig").value = String(t.sig); $("tabove").value = t.above ? "1" : "0";
         $("tlevel").value = t.level; $("tstop").value = t.stop_delay_s;
