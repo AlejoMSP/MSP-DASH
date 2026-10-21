@@ -20,7 +20,6 @@
 #include "web_monitor.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
-#include "ecu_config.h"
 #include "sd_storage.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
@@ -245,7 +244,7 @@ function updateLamps() {
       const n = Object.keys(signalValues).length;
       if (n > 0) setStatus("st-ok", "Live - " + n + " signal" + (n === 1 ? "" : "s") + " - CAN " + live.fps + " frames/s");
       else if (live.fps === 0) setStatus("st-warn", "Connected, but no CAN frames are arriving (check CAN wiring and ECU power)");
-      else setStatus("st-warn", "CAN frames arriving (" + live.fps + "/s) but none decoded - check the ECU type");
+      else setStatus("st-warn", "CAN frames arriving (" + live.fps + "/s) but none decoded - this ECU's frames are not known (see the hub's Sensors page)");
     }
 
     // Opens the live connection, and reopens it whenever it drops. It used
@@ -1317,18 +1316,6 @@ void web_monitor_init(void) {
 
 
 
-  server.on("/ecu", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{\"ecu\":" + String((int)ecu_config_get()) + "}";
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/ecu", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("ecu", true)) {
-      int val = request->getParam("ecu", true)->value().toInt();
-      ecu_config_set((EcuSelection)val);
-    }
-    request->send(200, "text/plain", "OK");
-  });
 
   // Everything needed to answer "is the board running what I think, and is
   // CAN actually flowing?" - build number, uptime, memory, WiFi, CAN driver

@@ -25,3 +25,17 @@ static inline void web_monitor_track_can_frame(uint32_t id, const uint8_t *d, ui
   }
   portEXIT_CRITICAL(&s_canMux);
 }
+
+// Which ECU is talking, from the CAN IDs heard in the last 2 s. rusEFI uses 0x200-0x20F; MegaSquirt and Link use the
+// same frames (0x5F0-0x63F), so they cannot be told apart. Both decoders always run, so this is only a label.
+// (Build 170: this replaced the ECU type setting that each screen used to have.)
+static inline const char *hub_ecu_detected(void) {
+  bool rus = false, ms = false; uint32_t now = millis();
+  for (int i = 0; i < s_canMonN; i++) {
+    if (now - s_canMon[i].lastMs > 2000) continue;
+    uint32_t id = s_canMon[i].id;
+    if (id >= 0x200 && id <= 0x20F) rus = true;
+    if (id >= 0x5F0 && id <= 0x63F) ms = true;
+  }
+  return rus && ms ? "rusEFI and MegaSquirt / Link" : rus ? "rusEFI" : ms ? "MegaSquirt / Link" : "none heard";
+}

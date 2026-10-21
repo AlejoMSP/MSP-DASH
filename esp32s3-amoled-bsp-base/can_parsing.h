@@ -14,9 +14,9 @@
   against the actual rusEFI DBC file).
   MegaSquirt/LinkECU: big-endian, base 0x5F0 - shared parser, ported
   directly from the WROOM board's confirmed handleSecondaryEcuFrame.
-  Both ID ranges are disjoint, so both parsers stay active
-  simultaneously regardless of the ECU selection in ecu_config.h/.cpp
-  (which is purely a display label, not a parsing gate).
+  Both ID ranges are disjoint, so both parsers always stay active.
+  There is no ECU type setting (removed from the screens in build 170);
+  the hub's home page shows which ECU it hears.
 
   Frames are received by a dedicated FreeRTOS task (can_start_task),
   not from loop(). loop() also does SD writes (open/write/close) and

@@ -50,7 +50,6 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 **CAN**
 - `can_parsing.h` - decodes rusEFI (0x200 range, little endian) and MegaSquirt/Link (0x5F0 range, big endian). Runs in its own FreeRTOS task, priority 3. Writes plain globals only, never LVGL. Also used by the hub.
 - `can_flags.h` - ECU on/off flags into `g_flag_bits`.
-- `ecu_config.cpp/.h` - ECU type label.
 
 **Link between boards**
 - `espnow_link.cpp/.h` - role main/remote, data packet (`MSD1`), remote hello (`MSH1`), command packet from the hub (`MSC1`: page next/prev, brightness), timeouts.

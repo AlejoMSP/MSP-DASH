@@ -44,7 +44,7 @@ the round bezel that the numeric tests alone would not have shown.
 ## Type-checking the board-only code
 
 `typecheck.sh` runs `g++ -fsyntax-only` over the `.ino`, `web_monitor.cpp`,
-`sd_logging.cpp` and `ecu_config.cpp` against small stand-ins for the Arduino /
+`sd_logging.cpp` against small stand-ins for the Arduino /
 WiFi / AsyncWebServer / TWAI APIs (`stubs/`). It is not a real compile, but it
 catches typos, wrong argument counts and misspelled fields in code that is
 otherwise only compiled on the board. Deliberate typos in the build macro, a
@@ -72,6 +72,7 @@ for each page, and that a failed save shows the board's own explanation.
   Build: `g++ -std=c++17 -Istubs -I<sketch> -DSD_MOUNT_POINT='"/tmp/sdtest"' <sketch>/sd_logging.cpp test_sim_logging.cpp`
 - `test_logging_page.js`: the Logging page: start condition form, save, refusals, the channel ticks, alphabetical lists.
 - `test_speed_sensors.cpp`: the hub GPS reader (checksums, RMC/GGA, junk, the 5 Hz command). Build: `g++ -std=c++17 -I../../esp32-input test_speed_sensors.cpp`
+- `test_hub_ecu.cpp`: the hub names the ECU from the CAN IDs it hears (rusEFI, MegaSquirt / Link, both, none). Build: `g++ -std=c++17 -Istubs -I../../esp32-input test_hub_ecu.cpp`
 - `test_can_vss.cpp`: speed from rusEFI BASE1 byte 6, kph to mph, through the real `can_parsing.h`. Build: `g++ -std=c++17 -Istubs -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_can_vss.cpp`
 - `test_hub_sensors_page.js`: the hub's /sensors page: alphabetical, and CAN frames no sensor reads listed by themselves.
 - `test_sim_page.js`: the /simulator page's script - modes, countdown, one slider request at

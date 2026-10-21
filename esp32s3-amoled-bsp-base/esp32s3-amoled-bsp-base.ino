@@ -41,7 +41,6 @@
 #include "gauge_config.h"
 #include "driver/twai.h"
 #include "web_monitor.h"
-#include "ecu_config.h"
 #include "sd_storage.h"
 #include "sd_logging.h"
 #include "can_parsing.h"
@@ -63,7 +62,6 @@ void setup()
   Serial.printf("\nMSP-DASH build %d, compiled %s %s\n", FW_BUILD_NUMBER, __DATE__, __TIME__);
   pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
 
-  ecu_config_init();
   { Preferences dp; dp.begin("disp", true); gauge_app_set_diameter(dp.getInt("diam", GAUGE_DIAMETER_BOARD_DEFAULT));
     gauge_app_set_options(dp.getBool("sweep", true), dp.getBool("demo", true)); dp.end(); }   // visible screen size
   gauge_config_init(); // must load before lcd_lvgl_Init(), since build_gauge_app() (called from within it) reads this config
