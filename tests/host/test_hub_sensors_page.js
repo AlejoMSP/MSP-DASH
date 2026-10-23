@@ -37,6 +37,7 @@ vm.createContext(ctx);
   check(/Every frame/.test(el("usum").textContent) && el("u").innerHTML === "", "nothing undecoded: says so");
   console.log("3. the .ino has no raw strings (the Arduino builder mangles them: 'asyncfunction' does not name a type)");
   check(!/R"[A-Za-z]*\(/.test(HUB), "esp32-input.ino has no R\"...( raw string literals - pages go in hub_pages.h");
+  check(!/\)\s*\{\s*static\s/.test(HUB), "no one-line function with 'static' inside its body (the Arduino prototype scan reads it as a static function)");
   for (const n of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML"]) check(HUB.includes('server.send(200, "text/html", ' + n + ')') && PAGES.includes(n + "[] PROGMEM"), n + " is in hub_pages.h and served");
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

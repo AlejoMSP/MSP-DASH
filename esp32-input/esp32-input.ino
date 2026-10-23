@@ -81,7 +81,13 @@ volatile float g_custom_val[CUSTOM_SLOTS];
 volatile bool g_custom_has[CUSTOM_SLOTS];
 static CustomSlotConfig s_slots[CUSTOM_SLOTS];
 static volatile bool s_slotsChanged = true;   // send the names now (also every SLOTS_MS)
-const CustomSlotInfo *custom_slot_info(int slot) { static CustomSlotInfo e; return (slot >= 0 && slot < CUSTOM_SLOTS) ? &s_slots[slot].info : &e; }
+static CustomSlotInfo s_noSlot;   // returned for a slot number out of range
+// extern "C", several lines and no "static" inside the body on purpose: the Arduino builder's prototype scan read
+// the one-line version as a static function ("declared 'extern' and later 'static'", hub build 22).
+extern "C" const CustomSlotInfo *custom_slot_info(int slot) {
+  if (slot < 0 || slot >= CUSTOM_SLOTS) return &s_noSlot;
+  return &s_slots[slot].info;
+}
 static void slotsLoad() {
   Preferences p; p.begin("slots", true);
   if (p.getBytes("cfg", s_slots, sizeof s_slots) != sizeof s_slots) memset(s_slots, 0, sizeof s_slots);

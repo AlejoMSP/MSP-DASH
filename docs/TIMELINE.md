@@ -200,3 +200,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 169 | 2026-10-21 | (this commit) | Hub build 20: web pages moved from the .ino to hub_pages.h (the Arduino builder mangled the raw strings; hub 18 and 19 never compiled) |
 | 170 | 2026-10-21 | (this commit) | ECU type setting removed from the screens (it was only a label; both decoders always run). Hub build 21 shows the ECU it hears on its home page |
 | 171 | 2026-10-21 | (this commit) | Configurable sensors stage 1: 16 custom slots (SIG_C1..C16), hub /custom page (CAN field decoder with live preview), MSN1 names packet to the screens (kept in NVS), has_mask 64 bit; fixed the hub dropping signals past 32. Hub build 22 |
+| hub 22 fix | 2026-10-23 | (this commit) | custom_slot_info written over several lines with extern "C": the Arduino prototype scan read the one-liner as static. Test guards against one-line functions with 'static' inside |
