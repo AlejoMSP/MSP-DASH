@@ -59,6 +59,22 @@ int main() {
   uint16_t big[3] = { 60000, 60000, 60000 };
   CHECK(rf_estimate_unit(big, 3) == 0, "only long gaps: no unit");
 
+  printf("5. a real capture: U912 tire sensor (fixtures/u912_burst1.txt)\n");
+  { FILE *f = fopen("fixtures/u912_burst1.txt", "r"); uint16_t cap[700]; int nc = 0; char line[512];
+    while (f && fgets(line, sizeof line, f)) { if (line[0] == '#') continue; char *p = line, *e; for (;;) { long v = strtol(p, &e, 10); if (e == p) break; if (nc < 700) cap[nc++] = (uint16_t)v; p = e; } }
+    if (f) fclose(f);
+    CHECK(nc == 293, "the fixture has the 293 pulses");
+    char bits[RF_MAX_BITS + 1]; float unit = 0;
+    int nb = rf_decode_pairs(cap, nc, 0, bits, RF_MAX_BITS, &unit);
+    CHECK(unit > 51.5f && unit < 53.0f, "half-bit 52 us (9600 bit/s), from pulse pairs");
+    CHECK(nb >= 120, "120+ Manchester bits in a row (the old single-pulse method found 0)");
+    uint8_t by[32]; int nby = rf_bits_to_bytes(bits, nb, by, 32);
+    const uint8_t want[] = { 0x44, 0x1D, 0xC5, 0xA2, 0xA2, 0xB5, 0x3B, 0x51, 0x0E, 0xCD, 0x44, 0x1D, 0xC5, 0xA2 };
+    CHECK(nby >= 14 && !memcmp(by, want, sizeof want), "bytes 44 1D C5 A2 A2 B5 3B 51 0E CD, then 44 1D C5 A2 again (sent twice)");
+    char hx[200]; rf_hex(by, nby, hx); printf("    decoded: %s\n", hx); }
+  { uint16_t junk[300]; for (int i = 0; i < 300; i++) junk[i] = (uint16_t)(5 + rand() % 3000);
+    char bits[RF_MAX_BITS + 1]; float unit; CHECK(rf_decode_pairs(junk, 300, 0, bits, RF_MAX_BITS, &unit) < 16, "random pulses: no long decode"); }
+
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

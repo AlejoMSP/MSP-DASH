@@ -170,16 +170,17 @@ static inline int rfThreshold() { return s_rfAuto ? s_rfFloor + s_rfMargin : s_r
 // Turns the collected pulses into a burst for the page.
 static void rfFinishBurst(const uint16_t *w, int n, uint8_t firstLevel, int peak) {
   if (n < RF_MIN_PULSES) return;
-  static uint8_t lv[RF_MAX_BITS * 2], bits[RF_MAX_BITS], bytes[RF_MAX_BYTES];
+  static uint8_t bytes[RF_MAX_BYTES];
   static RfBurst b;   // 1.3 kB: static, not on the task stack
   memset(&b, 0, sizeof b);
   b.ms = millis(); b.rssi = (int8_t)peak; b.pulses = n; b.firstLevel = firstLevel;
-  b.unit = (uint16_t)rf_estimate_unit(w, n);
-  int m = rf_pulses_to_levels(w, n, firstLevel, b.unit, lv, sizeof lv);
-  int nbits = 0; bool inv = false;
-  int nbytes = rf_best_manchester(lv, m, bytes, 32, bits, &nbits, &inv);
-  b.nbits = nbits; b.inverted = inv;
-  for (int i = 0; i < nbits && i < 256; i++) b.bits[i] = bits[i] ? '1' : '0';
+  // pulse pairs -> half-bit time, glitches merged, receiver stretch corrected, Manchester (rf_decode.h)
+  static char bitText[RF_MAX_BITS + 1];
+  float unit = 0;
+  int nbits = rf_decode_pairs(w, n, firstLevel, bitText, RF_MAX_BITS, &unit);
+  b.unit = (uint16_t)(unit + 0.5f); b.nbits = nbits; b.inverted = false;
+  memcpy(b.bits, bitText, nbits < 256 ? nbits : 256); b.bits[nbits < 256 ? nbits : 256] = 0;
+  int nbytes = rf_bits_to_bytes(bitText, nbits, bytes, 32);
   rf_hex(bytes, nbytes, b.hex);
   b.nw = n > RF_MAX_PULSES ? RF_MAX_PULSES : n;
   memcpy(b.w, w, b.nw * sizeof(uint16_t));

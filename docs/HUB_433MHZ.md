@@ -25,3 +25,13 @@ OOK is chosen on the page. Code: `rf_cc1101.h` (driver, capture), `rf_decode.h` 
 
 Next step: capture the tire sensors' bursts, match them to a known format (rtl_433 has decoders for most
 aftermarket brands), then decode pressure/temperature per wheel into custom slots.
+
+## U912 kit findings (first capture, hub build 26)
+- Kit: "U912 TPMS" with 4 internal valve-stem sensors (generic, no FCC ID). Heard at -56 to -69 dBm in 2-FSK.
+- Manchester at 9600 bit/s (half-bit 52 us). The CC1101's data output stretches one level and shortens the other
+  (about 20 us, drifting to 7 within a packet), so the decoder works on pulse PAIRS (2/3/4 half-bits), merges
+  glitches under T/3, and corrects the stretch locally (`rf_decode_pairs`, hub build 27).
+- First packet: `44 1D C5 A2 A2 B5 3B 51 0E CD`, then `44 1D C5 A2 ...` again: probably 80 bits sent twice, with
+  `44 1D C5 A2` a likely sensor ID. Fixture: tests/host/fixtures/u912_burst1.txt.
+- Next: more captures (same tire at two pressures, and the other tires) next to the kit display's readings, to map
+  the ID, pressure, temperature, flags and checksum.
