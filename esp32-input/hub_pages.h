@@ -31,7 +31,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a> | <a href=/rf>433 MHz</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a> | <a href=/rf>433 MHz</a> | <a href=/buttons>Buttons</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -241,4 +241,37 @@ if(!loaded){$("mod").value=j.ook?"ook":"fsk";$("thr").value=j.thr;$("auto").chec
 chart(j);draw();
 }catch(e){$("st").textContent="Could not reach the hub - retrying...";}}
 poll();setInterval(poll,1000);
+</script></body></html>)HTML";
+// /buttons: what each button does, for a press and for holds of 1, 2, 3, 5 and 10 s (button_actions.h).
+static const char BUTTONS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Buttons</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;vertical-align:top}th{color:#4dd0e1;text-align:left}
+select{width:100%;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;margin:2px 0}
+.note{color:#888;font-size:13px}#msg{color:#4dd0e1;min-height:1.2em}#msg.bad{color:#ff6b6b}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px}</style></head><body>
+<h2>Buttons</h2>
+<p class="note">Left = GPIO 26 (L15), right = GPIO 25 (L14). Hold a button and let go: the action for the longest time you reached runs
+(if nothing is set at that time, the last one you passed). While you hold, the screens show what letting go will do.
+Page actions go to the screen chosen with "Next gauge" (all screens until you choose one; back to all after a minute).</p>
+<div id="state" class="note"></div>
+<table><thead><tr><th>Hold</th><th>Left</th><th>Right</th><th>Both</th></tr></thead><tbody id="grid"></tbody></table>
+<div id="msg"></div>
+<p><button onclick="defaults()">Back to the defaults</button></p>
+<p><a href="/">Back</a></p>
+<script>
+const LEVELS=["Press","1 s","2 s","3 s","5 s","10 s"];const GOTO=4,COLOR=7,RACE=8,CYCLE=255;
+let cfg=null;const $=id=>document.getElementById(id);
+function paramHtml(i,l,a,p){
+  if(a==GOTO||a==RACE){let o="";for(let n=1;n<=8;n++)o+='<option value="'+n+'"'+(n==p?" selected":"")+'>'+(a==RACE?"Race page ":"Page ")+n+'</option>';return '<select onchange="setB('+i+','+l+','+a+',+this.value)">'+o+'</select>';}
+  if(a==COLOR){let o='<option value="255"'+(p==CYCLE?" selected":"")+'>Next scheme each time</option>';cfg.colors.forEach((n,k)=>o+='<option value="'+k+'"'+(k==p?" selected":"")+'>'+(k+1)+'. '+n+'</option>');return '<select onchange="setB('+i+','+l+','+a+',+this.value)">'+o+'</select>';}
+  return "";}
+function render(){let h="";for(let l=0;l<6;l++){h+="<tr><th>"+LEVELS[l]+"</th>";for(let i=0;i<3;i++){const b=cfg.bind[i][l];
+  const opts=cfg.actions.map((n,k)=>'<option value="'+k+'"'+(k==b[0]?" selected":"")+'>'+n+'</option>').join("");
+  h+='<td><select onchange="pickA('+i+','+l+',+this.value)">'+opts+'</select>'+paramHtml(i,l,b[0],b[1])+'</td>';}h+="</tr>";}
+  $("grid").innerHTML=h;$("state").textContent="Race mode: "+(cfg.race?"ON":"off")+" | buttons control: "+(cfg.target||"all screens");}
+function pickA(i,l,a){const p=(a==GOTO||a==RACE)?1:(a==COLOR?CYCLE:0);setB(i,l,a,p);}
+async function setB(i,l,a,p){const r=await fetch("/buttons/set?"+new URLSearchParams({in:i,lv:l,a:a,p:p}));const t=await r.text();
+  $("msg").textContent=r.ok?(LEVELS[l]+" "+["left","right","both"][i]+": "+cfg.actions[a]+" - saved"):t;$("msg").className=r.ok?"":"bad";if(r.ok){cfg.bind[i][l]=[a,p];render();}}
+async function defaults(){const r=await fetch("/buttons/defaults");$("msg").textContent=await r.text();load();}
+async function load(){try{cfg=await (await fetch("/buttons.json")).json();render();}catch(e){$("msg").textContent="Could not reach the hub";}}
+load();
 </script></body></html>)HTML";

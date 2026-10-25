@@ -47,6 +47,9 @@ bool sd_logging_set_trigger(const SdLogTrigger *t);
 // Hub buttons: put marker number n in the "marker" column of the next row. False if not logging right now.
 bool sd_logging_mark(int n);
 
+// Race mode: log as if the start condition were true, until switched off.
+void sd_logging_force(bool on);
+
 // One line for the web page: what logging is doing right now.
 const char *sd_logging_status_text(void);
 

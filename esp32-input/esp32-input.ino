@@ -24,12 +24,14 @@
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 #include "speed_sensors.h" // the GPS reader (host-tested)
 #include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
-#include "btn_logic.h"       // short / long / both-button gestures (host-tested)
+#include "color_presets.h"   // copied in: the 10 colour schemes
+#include "button_actions.h"  // copied in: the actions the buttons can run (/buttons page)
+#include "btn_logic.h"       // press / hold-time events (host-tested)
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 28
+#define INPUT_BUILD 29
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -166,7 +168,8 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   strncpy(p.target, target, sizeof(p.target) - 1);
   for (int i = 0; i < 3; i++) { esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)); delay(4); }
   const char *what = cmd == LINK_CMD_PAGE_NEXT ? "next page" : cmd == LINK_CMD_PAGE_PREV ? "previous page" : cmd == LINK_CMD_SELECT ? "buttons control"
-                   : cmd == LINK_CMD_ALERT_ACK ? "clear warning" : cmd == LINK_CMD_LOG_MARK ? "log marker" : "brightness";
+                   : cmd == LINK_CMD_ALERT_ACK ? "clear warning" : cmd == LINK_CMD_LOG_MARK ? "log marker" : cmd == LINK_CMD_GOTO_PAGE ? "go to page"
+                   : cmd == LINK_CMD_COLOR ? "color scheme" : cmd == LINK_CMD_RACE ? "race mode" : cmd == LINK_CMD_HINT ? "hint" : "brightness";
   if (cmd == LINK_CMD_SELECT) snprintf(s_last, sizeof(s_last), "%s %s", what, target[0] ? target : "all screens");
   else if (cmd == LINK_CMD_ALERT_ACK) snprintf(s_last, sizeof(s_last), "%s", what);
   else snprintf(s_last, sizeof(s_last), "%s %d%s%s", what, value, target[0] ? " to " : "", target);
@@ -206,6 +209,17 @@ static int wantedPct() {
   float f = span > 0.1f ? (s_dimV - s_cfg.dimLoV) / span : 0.0f;
   f = f < 0 ? 0 : (f > 1 ? 1 : f);
   return clampPct(s_cfg.nightMin + (int)lroundf(f * (s_cfg.nightMax - s_cfg.nightMin)));
+}
+
+// Brightness from the buttons (Dim all / Brighten all): an offset on top of the automatic or knob level. It drops
+// back to 0 when the base level moves by 5 % or more (lights switched, dimmer or knob turned). Race mode: 100 %.
+static int s_briOffset = 0, s_briOffsetBase = 0;
+static bool s_raceOn = false;
+static int finalPct() {
+  int base = wantedPct();
+  if (s_raceOn) return 100;
+  if (s_briOffset && abs(base - s_briOffsetBase) >= 5) s_briOffset = 0;
+  return clampPct(base + s_briOffset);
 }
 
 #include "can_parsing.h"   // copied in at compile time; uses the values and functions above
@@ -354,7 +368,7 @@ static void readKnob() {
   s_potAvg = s_potAvg < 0 ? raw : s_potAvg * 0.85f + raw * 0.15f;
   s_lightsV = s_lightsV * 0.8f + carVolts(LIGHTS_PIN) * 0.2f;
   s_dimV = s_dimV * 0.8f + carVolts(DIMMER_PIN) * 0.2f;
-  int pct = wantedPct();
+  int pct = finalPct();
   if (s_briPct < 0 || abs(pct - s_briPct) >= 2 || millis() - s_lastBriMs > 2000) {
     s_briPct = pct; s_lastBriMs = millis();
     sendCmd(LINK_CMD_BRIGHTNESS, (int16_t)pct, "");
@@ -362,6 +376,68 @@ static void readKnob() {
 }
 
 // ---- web: status page and WiFi updates (curl -F "firmware=@...bin" http://192.168.55.204/update) ----
+// ---- buttons: configurable on /buttons (button_actions.h, btn_logic.h). Left = GPIO 26 (L15), right = GPIO 25 (L14) ----
+static BtnState s_btn = {};   // all zero = released (same as btn_init)
+static BtnBinding s_bind[BTN_INPUTS][BTN_LEVELS];
+static char s_target[LINK_NAME_LEN + 1] = "";   // the screen the buttons control; "" = all
+static uint32_t s_lastBtnMs = 0;
+static int s_markN = 0;
+static int s_hintAction = -1, s_hintParam = -1;
+#define BTN_TARGET_IDLE_MS 60000                  // back to all screens after a minute without a press
+static void bindLoad() {
+  Preferences p; p.begin("btncfg", true);
+  if (p.getBytes("b", s_bind, sizeof s_bind) != sizeof s_bind) btn_defaults(s_bind);
+  p.end();
+  for (int i = 0; i < BTN_INPUTS; i++) for (int l = 0; l < BTN_LEVELS; l++) if (s_bind[i][l].action >= BA_COUNT) s_bind[i][l].action = BA_NONE;
+}
+static void bindSave() { Preferences p; p.begin("btncfg", false); p.putBytes("b", s_bind, sizeof s_bind); p.end(); }
+static void chooseNextScreen() {
+  const char *names[SCREEN_MAX]; static char copy[SCREEN_MAX][LINK_NAME_LEN + 1];
+  portENTER_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX; i++) {
+    bool on = s_screens[i].used && millis() - s_screens[i].lastMs < SCREEN_OFFLINE_MS;
+    strcpy(copy[i], on ? s_screens[i].name : "");
+  }
+  portEXIT_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX; i++) names[i] = copy[i];
+  int k = btn_next_target(s_target, names, SCREEN_MAX);
+  strcpy(s_target, k < 0 ? "" : copy[k]);
+  sendCmd(LINK_CMD_SELECT, 0, s_target);   // only that screen (or all) shows the pop-up
+}
+static void runAction(const BtnBinding *b) {
+  switch (b->action) {
+    case BA_NEXT_PAGE: sendCmd(LINK_CMD_PAGE_NEXT, 0, s_target); break;
+    case BA_PREV_PAGE: sendCmd(LINK_CMD_PAGE_PREV, 0, s_target); break;
+    case BA_NEXT_GAUGE: chooseNextScreen(); break;
+    case BA_GOTO_PAGE: sendCmd(LINK_CMD_GOTO_PAGE, b->param ? b->param : 1, s_target); break;
+    case BA_DIM:    s_briOffset = s_briOffset - 20 < -95 ? -95 : s_briOffset - 20; s_briOffsetBase = wantedPct(); s_briPct = -1; break;
+    case BA_BRIGHT: s_briOffset = s_briOffset + 20 > 95 ? 95 : s_briOffset + 20; s_briOffsetBase = wantedPct(); s_briPct = -1; break;
+    case BA_COLOR: sendCmd(LINK_CMD_COLOR, b->param, ""); break;
+    case BA_RACE:
+      s_raceOn = !s_raceOn; s_briPct = -1;
+      sendCmd(LINK_CMD_RACE, s_raceOn ? 1 : 0, "");
+      if (s_raceOn) sendCmd(LINK_CMD_GOTO_PAGE, b->param ? b->param : 1, "");
+      break;
+    case BA_CLEAR_WARNING: sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
+    case BA_LOG_MARK: sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
+  }
+}
+static void handleButtons() {
+  BtnEvent e = btn_step(&s_btn, millis(), digitalRead(BTN_PREV) == LOW, digitalRead(BTN_NEXT) == LOW);   // left, right
+  if (e.type == BTN_EV_LEVEL) {   // held long enough for another action: tell the screens what letting go will do
+    const BtnBinding *b = btn_pick(s_bind, e.input, e.level);
+    if (b && (b->action != s_hintAction || b->param != s_hintParam)) {
+      s_hintAction = b->action; s_hintParam = b->param;
+      sendCmd(LINK_CMD_HINT, (int16_t)((b->action << 8) | b->param), s_target);
+    }
+  } else if (e.type == BTN_EV_RELEASE) {
+    const BtnBinding *b = btn_pick(s_bind, e.input, e.level);
+    s_hintAction = s_hintParam = -1; s_lastBtnMs = millis();
+    if (b) runAction(b);
+  }
+  if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
+}
+
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/html", HOME_HTML);
@@ -552,6 +628,33 @@ static void setupWeb() {
     rfSaveSettings(); s_rfReconfig = true;
     server.send(200, "text/plain", "Saved");
   });
+  // ---- button actions (/buttons) ----
+  server.on("/buttons", HTTP_GET, []() { server.send(200, "text/html", BUTTONS_HTML); });
+  server.on("/buttons.json", HTTP_GET, []() {
+    String j = "{\"actions\":[";
+    for (int a = 0; a < BA_COUNT; a++) { if (a) j += ","; j += "\""; j += BA_NAMES[a]; j += "\""; }
+    j += "],\"colors\":[";
+    for (int c = 0; c < COLOR_PRESET_COUNT; c++) { if (c) j += ","; j += "\""; j += COLOR_PRESETS_C[c].name; j += "\""; }
+    j += "],\"race\":"; j += s_raceOn ? "true" : "false";
+    j += ",\"target\":\""; j += s_target; j += "\",\"bind\":[";
+    for (int i = 0; i < BTN_INPUTS; i++) {
+      if (i) j += ",";
+      j += "[";
+      for (int l = 0; l < BTN_LEVELS; l++) { if (l) j += ","; j += "["; j += String((int)s_bind[i][l].action); j += ","; j += String((int)s_bind[i][l].param); j += "]"; }
+      j += "]";
+    }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/buttons/set", HTTP_GET, []() {
+    int i = server.arg("in").toInt(), l = server.arg("lv").toInt(), a = server.arg("a").toInt(), p = server.arg("p").toInt();
+    if (i < 0 || i >= BTN_INPUTS || l < 0 || l >= BTN_LEVELS || a < 0 || a >= BA_COUNT || p < 0 || p > 255) { server.send(400, "text/plain", "Bad setting"); return; }
+    if ((a == BA_GOTO_PAGE || a == BA_RACE) && (p < 1 || p > 8)) { server.send(400, "text/plain", "Page must be 1 to 8"); return; }
+    if (a == BA_COLOR && p >= COLOR_PRESET_COUNT && p != COLOR_PRESET_CYCLE) { server.send(400, "text/plain", "Pick a color scheme"); return; }
+    s_bind[i][l].action = (uint8_t)a; s_bind[i][l].param = (uint8_t)p;
+    bindSave();
+    server.send(200, "text/plain", "Saved");
+  });
+  server.on("/buttons/defaults", HTTP_GET, []() { btn_defaults(s_bind); bindSave(); server.send(200, "text/plain", "Back to the defaults"); });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -679,6 +782,7 @@ void setup() {
   esp_now_register_recv_cb(onEspNowRecv);   // screen hellos, for the status lights
 
   slotsLoad();   // custom sensor slots, before CAN starts decoding them
+  bindLoad();    // button actions (/buttons)
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;
@@ -695,38 +799,6 @@ void setup() {
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();
-}
-
-// ---- buttons (btn_logic.h): short = page, hold Next = choose screen, hold Prev = clear warning, both = log marker ----
-static BtnState s_btn = {};   // all zero = released (same as btn_init)
-static char s_target[LINK_NAME_LEN + 1] = "";   // the screen the buttons control; "" = all
-static uint32_t s_lastBtnMs = 0;
-static int s_markN = 0;
-#define BTN_TARGET_IDLE_MS 60000                  // back to all screens after a minute without a press
-static void chooseNextScreen() {
-  const char *names[SCREEN_MAX]; static char copy[SCREEN_MAX][LINK_NAME_LEN + 1];
-  portENTER_CRITICAL(&s_scrMux);
-  for (int i = 0; i < SCREEN_MAX; i++) {
-    bool on = s_screens[i].used && millis() - s_screens[i].lastMs < SCREEN_OFFLINE_MS;
-    strcpy(copy[i], on ? s_screens[i].name : "");
-  }
-  portEXIT_CRITICAL(&s_scrMux);
-  for (int i = 0; i < SCREEN_MAX; i++) names[i] = copy[i];
-  int k = btn_next_target(s_target, names, SCREEN_MAX);
-  strcpy(s_target, k < 0 ? "" : copy[k]);
-  sendCmd(LINK_CMD_SELECT, 0, s_target);   // only that screen (or all) shows the pop-up
-}
-static void handleButtons() {
-  int a = btn_step(&s_btn, millis(), digitalRead(BTN_NEXT) == LOW, digitalRead(BTN_PREV) == LOW);
-  if (a) s_lastBtnMs = millis();
-  switch (a) {
-    case BTN_NEXT_SHORT: sendCmd(LINK_CMD_PAGE_NEXT, 0, s_target); break;
-    case BTN_PREV_SHORT: sendCmd(LINK_CMD_PAGE_PREV, 0, s_target); break;
-    case BTN_NEXT_LONG:  chooseNextScreen(); break;
-    case BTN_PREV_LONG:  sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
-    case BTN_BOTH:       sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
-  }
-  if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
 }
 
 void loop() {

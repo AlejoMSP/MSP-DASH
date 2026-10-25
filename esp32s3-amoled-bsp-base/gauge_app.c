@@ -23,6 +23,7 @@
 */
 
 #include "gauge_app.h"
+#include "color_presets.h"
 #include "gauge_config.h"
 #include "sd_logging.h"
 #include "simulator.h"
@@ -79,6 +80,9 @@ volatile uint16_t g_flag_seen = 0;
 volatile int g_requested_page = -1;
 volatile int g_page_nav_delta = 0;
 volatile int g_alert_ack_req = 0;
+volatile int g_color_preset_req = -1;   // hub button: recolour every gauge now (-1 = nothing pending)
+volatile int g_race_req = -1;           // hub button: race mode 1 = on, 0 = off (-1 = nothing pending)
+static int s_racePrevPage = -1;
 
 // ---- short pop-up message (hub button feedback) ----
 #define POPUP_MS 1500
@@ -141,6 +145,7 @@ typedef struct {
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *peakNeedle; // shadow needle for peak hold; NULL when off
   lv_meter_indicator_t *glow[2];    // needle glow: two wider, dimmer copies under the needle; NULL when off
+  lv_meter_scale_t *scale;          // the dial scale (recoloured live by a colour preset)
   int32_t peak_val; uint32_t peak_ms; uint32_t peak_hold_ms;
   lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
   int32_t needleHubPct;         // needle trim, % of the dial radius: gap at the centre ...
@@ -546,6 +551,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->needle = NULL;
   rt->peakNeedle = NULL;
   rt->glow[0] = rt->glow[1] = NULL;
+  rt->scale = NULL;
   rt->numberLabel = NULL;
   rt->chart = NULL;
   rt->chartSeries = NULL;
@@ -789,6 +795,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     lv_obj_set_style_border_width(meter, 0, 0);
 
     lv_meter_scale_t *scale = lv_meter_add_scale(meter);
+    rt->scale = scale;
     lv_meter_set_scale_ticks(meter, scale, cfg->tick_count, 2, 10, tickColor);
     lv_meter_set_scale_major_ticks(meter, scale, cfg->major_nth, 4, 18, tickColor, 25);
     lv_meter_set_scale_range(meter, scale, cfg->min_val, cfg->max_val, angleRange, rotation);
@@ -1084,6 +1091,34 @@ static void update_warning_flash(CellRuntime *c, float value, bool has_data) {
 // Runs every ~100ms from the timer. Looks at every alert-enabled cell on
 // EVERY page (not just the one on screen), independent of each cell's own
 // refresh throttle.
+// Hub "Color scheme" button: recolours every gauge cell live (no rebuild, no restart). The saved config is changed
+// separately (espnow_link.cpp, outside the LVGL task) so the colours survive a reboot.
+static void recolor_all(int preset) {
+  if (preset < 0 || preset >= COLOR_PRESET_COUNT) return;
+  const ColorPreset *cp = &COLOR_PRESETS_C[preset];
+  lv_color_t nc = lv_color_hex(cp->needle), tc = lv_color_hex(cp->tick), bc = lv_color_hex(cp->bg);
+  for (int p = 0; p < s_num_active_pages; p++) {
+    for (int k = 0; k < pages[p].numCells; k++) {
+      CellRuntime *rt = &pages[p].cells[k];
+      if (!rt->enabled || !rt->container) continue;
+      rt->bg_color = cp->bg;
+      lv_obj_set_style_bg_color(rt->container, bc, 0);
+      if (rt->meter) {
+        lv_obj_set_style_bg_color(rt->meter, bc, 0);
+        lv_obj_set_style_text_color(rt->meter, tc, LV_PART_TICKS);
+        if (rt->scale) { rt->scale->tick_color = tc; rt->scale->tick_major_color = tc; }
+        if (rt->needle) rt->needle->type_data.needle_line.color = nc;
+        if (rt->peakNeedle) rt->peakNeedle->type_data.needle_line.color = lv_color_mix(nc, bc, 110);
+        if (rt->glow[0]) { rt->glow[0]->type_data.needle_line.color = lv_color_mix(nc, bc, 60); rt->glow[1]->type_data.needle_line.color = lv_color_mix(nc, bc, 120); }
+        lv_obj_invalidate(rt->meter);
+      }
+      if (rt->chart) { lv_obj_set_style_bg_color(rt->chart, bc, 0); lv_obj_set_style_border_color(rt->chart, tc, 0); if (rt->chartSeries) lv_chart_set_series_color(rt->chart, rt->chartSeries, nc); }
+    }
+  }
+  char t[48]; snprintf(t, sizeof t, "Colors: %s", cp->name); t[40] = 0;
+  gauge_app_popup(t);
+}
+
 static void update_alert_overlay(uint32_t now) {
   if (!s_alertOverlay) return;
 
@@ -1168,11 +1203,17 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
     }
   }
 
-  if (g_requested_page >= 0 && g_requested_page < s_num_active_pages) {
-    switch_to_page(g_requested_page);
+  if (g_requested_page >= 0) {   // a page that does not exist is dropped, not kept pending
+    if (g_requested_page < s_num_active_pages) switch_to_page(g_requested_page);
     g_requested_page = -1;
   }
 
+  if (g_color_preset_req >= 0) { int p = g_color_preset_req; g_color_preset_req = -1; recolor_all(p); }
+  if (g_race_req >= 0) {
+    int on = g_race_req; g_race_req = -1;
+    if (on) { s_racePrevPage = s_current_page; gauge_app_popup("Race mode ON"); }
+    else { if (s_racePrevPage >= 0 && s_racePrevPage < s_num_active_pages) switch_to_page(s_racePrevPage); s_racePrevPage = -1; gauge_app_popup("Race mode off"); }
+  }
   if (g_alert_ack_req) {   // hub: hold Prev
     g_alert_ack_req = 0;
     if (s_alertShown) { alert_dismiss(now); gauge_app_popup("Warning hidden 30 s"); }

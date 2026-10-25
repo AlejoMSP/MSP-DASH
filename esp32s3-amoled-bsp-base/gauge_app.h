@@ -90,6 +90,8 @@ extern volatile int g_page_nav_delta;
 // Hub buttons (build 172): hold Prev = hide the full-screen warning (like a tap), and short messages
 // ("Buttons: this screen", "Marker 3") shown for 1.5 s. Both are handled inside the LVGL timer like the above.
 extern volatile int g_alert_ack_req;
+extern volatile int g_color_preset_req;   // recolour every gauge to this preset (color_presets.h)
+extern volatile int g_race_req;           // race mode: 1 on (remember the page), 0 off (go back)
 void gauge_app_popup(const char *text);   // safe to call from any task
 
 #ifdef __cplusplus

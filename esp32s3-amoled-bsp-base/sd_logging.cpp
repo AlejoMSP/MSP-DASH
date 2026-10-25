@@ -38,6 +38,7 @@ static const uint32_t LOG_INTERVAL_MS = 500;
 static volatile bool s_isLoggingActive = false;
 static char s_status[96] = "Starting...";
 static volatile int s_pendingMark = 0;      // marker to write in the next row (0 = none)
+static volatile bool s_forced = false;       // race mode: logging on regardless of the start condition
 
 static bool validTrigger(const SdLogTrigger *t) {
   if (t->mode >= LOG_START_COUNT || t->stop_delay_s > LOG_STOP_DELAY_MAX) return false;
@@ -81,6 +82,7 @@ bool sd_logging_set_trigger(const SdLogTrigger *t) {
 }
 
 bool sd_logging_is_active(void) { return s_isLoggingActive; }
+void sd_logging_force(bool on) { s_forced = on; }
 bool sd_logging_mark(int n) { if (!s_logging || !sd_storage_is_mounted() || n <= 0) return false; s_pendingMark = n; return true; }
 const char *sd_logging_status_text(void) { return s_status; }
 
@@ -143,7 +145,7 @@ void sd_logging_loop(void) {
     return;
   }
 
-  bool cond = conditionNow();
+  bool cond = s_forced || conditionNow();
   if (cond) s_lastTrueMs = now;
   if (cond && !s_logging && !startSession()) { s_isLoggingActive = false; return; }
   if (!cond && s_logging && now - s_lastTrueMs >= (uint32_t)s_trig.stop_delay_s * 1000u) endSession("start condition ended");

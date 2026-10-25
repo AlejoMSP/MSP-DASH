@@ -1,5 +1,7 @@
 // espnow_link.cpp - see espnow_link.h.
 #include "simulator.h"
+#include "button_actions.h"
+#include "color_presets.h"
 #include "sd_storage.h"
 #include "sd_logging.h"
 #include "espnow_link.h"
@@ -57,6 +59,10 @@ static void sendTask(void *) {
   }
 }
 
+// Colour preset in use (hub "Color scheme" button); the cell colours themselves are saved with the config.
+static int s_colorPreset = -1;
+static volatile bool s_colorSavePending = false;
+
 // Commands from the input board; every copy (it sends each 3 times) after the first is ignored by its seq
 static volatile uint32_t s_lastCmdSeq = 0xFFFFFFFFu;
 static bool handleCmd(const uint8_t *data, int len) {
@@ -70,6 +76,21 @@ static bool handleCmd(const uint8_t *data, int len) {
   else if (c.cmd == LINK_CMD_BRIGHTNESS) { if (c.value != lcd_get_brightness_pct()) lcd_set_brightness_pct(c.value); }
   else if (c.cmd == LINK_CMD_SELECT) gauge_app_popup(c.target[0] ? "Buttons: this screen" : "Buttons: all screens");
   else if (c.cmd == LINK_CMD_ALERT_ACK) g_alert_ack_req = 1;
+  else if (c.cmd == LINK_CMD_GOTO_PAGE) { if (c.value >= 1) g_requested_page = c.value - 1; }
+  else if (c.cmd == LINK_CMD_COLOR) {
+    int p = c.value;
+    if (p == COLOR_PRESET_CYCLE) p = (s_colorPreset + 1) % COLOR_PRESET_COUNT;
+    if (p >= 0 && p < COLOR_PRESET_COUNT) { s_colorPreset = p; g_color_preset_req = p; s_colorSavePending = true; }
+  }
+  else if (c.cmd == LINK_CMD_RACE) { g_race_req = c.value ? 1 : 0; sd_logging_force(c.value != 0); }
+  else if (c.cmd == LINK_CMD_HINT) {
+    int a = (c.value >> 8) & 0xFF, prm = c.value & 0xFF;
+    char t[48];
+    if (a == BA_GOTO_PAGE || a == BA_RACE) snprintf(t, sizeof t, "Release: %s %d", BA_NAMES[a], prm);
+    else if (a == BA_COLOR && prm < COLOR_PRESET_COUNT) snprintf(t, sizeof t, "Release: colors %d", prm + 1);
+    else snprintf(t, sizeof t, "Release: %s", a < BA_COUNT ? BA_NAMES[a] : "?");
+    gauge_app_popup(t);
+  }
   else if (c.cmd == LINK_CMD_LOG_MARK) {
     char t[40];
     if (sd_storage_is_mounted()) snprintf(t, sizeof t, sd_logging_mark(c.value) ? "Marker %d logged" : "Marker %d: not logging", c.value);
@@ -195,6 +216,16 @@ void espnow_link_init(void) {
 }
 
 void espnow_link_loop(void) {
+  if (s_colorSavePending && s_colorPreset >= 0) {   // outside the radio callback: write the new colours to the config
+    s_colorSavePending = false;
+    const ColorPreset *cp = &COLOR_PRESETS_C[s_colorPreset];
+    PageConfig *pg = gauge_config_get_pages();
+    for (int p = 0; p < MAX_PAGES; p++) for (int k = 0; k < MAX_CELLS_PER_PAGE; k++) {
+      CellConfig *cc = &pg[p].cells[k];
+      cc->needle_color = cp->needle; cc->tick_color = cp->tick; cc->bg_color = cp->bg;
+    }
+    gauge_config_save();
+  }
   if (!s_up) return;
   custom_slots_loop();
   uint32_t now = millis();

@@ -64,6 +64,9 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const L = c => { const f = x => (x /= 255) <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); return 0.2126 * f(c >> 16 & 255) + 0.7152 * f(c >> 8 & 255) + 0.0722 * f(c & 255); };
     const cr = (a, b) => { const x = L(a), y = L(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
     check(P.length === 10 && new Set(P.map(p => p[0])).size === 10, "10 colour presets, all named differently");
+    const H = require('fs').readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/color_presets.h', 'utf8');
+    const C = [...H.matchAll(/\{"([^"]+)",\s*0x([0-9A-F]{6}),\s*0x([0-9A-F]{6}),\s*0x([0-9A-F]{6})\}/g)].map(m => [m[1], parseInt(m[2], 16), parseInt(m[3], 16), parseInt(m[4], 16)]);
+    check(JSON.stringify(C) === JSON.stringify(P), "the editor's presets are exactly color_presets.h (the button 'Color scheme' list)");
     check(P.every(p => cr(p[1], p[3]) >= 3 && cr(p[2], p[3]) >= 4.5 && cr(0xFFFFFF, p[3]) >= 7),
       "every preset: needle 3:1 or better against the face, ticks 4.5:1, the white readout 7:1 (WCAG contrast)");
     probe.run('applyCellPreset(0, 0, 7)');
