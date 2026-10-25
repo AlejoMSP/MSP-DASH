@@ -46,7 +46,14 @@ static SPIClass s_rfSpi(HSPI);
 static bool s_rfOk = false;
 static uint8_t s_rfPart = 0xFF, s_rfVersion = 0xFF;
 static bool s_rfOok = false;                 // false = 2-FSK (most TPMS), true = OOK/ASK
-static int s_rfThr = -85;                    // dBm
+static int s_rfThr = -85;                    // dBm (manual threshold)
+static bool s_rfAuto = true;                 // automatic threshold: background + margin
+static int s_rfMargin = 10;                  // dB above the background (automatic mode)
+static volatile int s_rfFloor = -100;        // background: median signal of the last second, dBm
+static volatile int s_rfActiveThr = -85;     // the threshold in use right now
+#define RF_HIST 120                          // seconds of signal history for the page
+static int8_t s_rfHistPeak[RF_HIST], s_rfHistFloor[RF_HIST];
+static volatile int s_rfHistHead = 0, s_rfHistCount = 0;
 static volatile int s_rfRssi = -120;
 static volatile bool s_rfReconfig = false;
 static RfBurst s_rfBursts[RF_BURSTS];
@@ -125,8 +132,36 @@ static void rfConfigure() {
   rfStrobe(0x34);                                                    // SRX
 }
 
-static void rfLoadSettings() { Preferences p; p.begin("rf", true); s_rfOok = p.getUChar("ook", 0); s_rfThr = p.getChar("thr", -85); p.end(); }
-static void rfSaveSettings() { Preferences p; p.begin("rf", false); p.putUChar("ook", s_rfOok); p.putChar("thr", (int8_t)s_rfThr); p.end(); }
+static void rfLoadSettings() {
+  Preferences p; p.begin("rf", true);
+  s_rfOok = p.getUChar("ook", 0); s_rfThr = p.getChar("thr", -85); s_rfAuto = p.getUChar("auto", 1); s_rfMargin = p.getUChar("margin", 10);
+  p.end();
+}
+static void rfSaveSettings() {
+  Preferences p; p.begin("rf", false);
+  p.putUChar("ook", s_rfOok); p.putChar("thr", (int8_t)s_rfThr); p.putUChar("auto", s_rfAuto); p.putUChar("margin", (uint8_t)s_rfMargin);
+  p.end();
+}
+
+// Background tracking: a histogram of the idle readings of the last second; its median is the background.
+static uint16_t s_rfBins[128];   // -128..-1 dBm
+static int s_rfBinN = 0, s_rfSecPeak = -128;
+static uint32_t s_rfSecStart = 0;
+static void rfTrack(int rssi) {
+  int b = rssi + 128; if (b < 0) b = 0; if (b > 127) b = 127;
+  s_rfBins[b]++; s_rfBinN++; if (rssi > s_rfSecPeak) s_rfSecPeak = rssi;
+  uint32_t now = millis();
+  if (now - s_rfSecStart < 1000) return;
+  if (s_rfBinN) {
+    int half = s_rfBinN / 2, acc = 0, med = -100;
+    for (int i = 0; i < 128; i++) { acc += s_rfBins[i]; if (acc > half) { med = i - 128; break; } }
+    s_rfFloor = med;
+  }
+  s_rfHistPeak[s_rfHistHead] = (int8_t)s_rfSecPeak; s_rfHistFloor[s_rfHistHead] = (int8_t)s_rfFloor;
+  s_rfHistHead = (s_rfHistHead + 1) % RF_HIST; if (s_rfHistCount < RF_HIST) s_rfHistCount++;
+  memset(s_rfBins, 0, sizeof s_rfBins); s_rfBinN = 0; s_rfSecPeak = -128; s_rfSecStart = now;
+}
+static inline int rfThreshold() { return s_rfAuto ? s_rfFloor + s_rfMargin : s_rfThr; }
 
 // Turns the collected pulses into a burst for the page.
 static void rfFinishBurst(const uint16_t *w, int n, uint8_t firstLevel, int peak) {
@@ -178,7 +213,9 @@ static void rfTask(void *) {
     vTaskDelay(1);
     if (s_rfReconfig) { s_rfReconfig = false; rfConfigure(); }
     int rssi = rfRssiDbm(); s_rfRssi = rssi;
-    if (rssi < s_rfThr) continue;
+    rfTrack(rssi);
+    int thr = rfThreshold(); s_rfActiveThr = thr;
+    if (rssi < thr) continue;
     // a signal: record it with the SPI bus quiet
     uint32_t readTail = s_rfEdgeHead > 64 ? s_rfEdgeHead - 64 : 0;      // keep the last few edges: the start of the preamble
     uint32_t prevUs = 0; uint8_t firstLevel = 0, lastLevel = 0;
@@ -189,7 +226,8 @@ static void rfTask(void *) {
       n = rfCollect(readTail, w, n, prevUs, firstLevel, lastLevel);
       if (millis() - start >= RF_CAPTURE_MAX_MS || n >= RF_MAX_PULSES) break;
       int r = rfRssiDbm(); s_rfRssi = r;
-      if (r < s_rfThr) break;
+      if (r > s_rfSecPeak) s_rfSecPeak = r;     // the history shows the burst (not counted in the background)
+      if (r < thr) break;
       if (r > peak) peak = r;
     }
     rfFinishBurst(w, n, firstLevel, peak);

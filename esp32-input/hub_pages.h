@@ -198,25 +198,39 @@ static const char RF_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta na
 .box{background:#111;border-radius:8px;padding:10px;margin:10px 0}.note{color:#888;font-size:13px}.bad{color:#ff6b6b}
 .mono{font-family:monospace;font-size:12px;word-break:break-all}.b{border-top:1px solid #222;padding:8px 0}.hex{color:#4dd0e1;font-size:14px}
 select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px}button{padding:6px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
-#bar{height:8px;background:#222;border-radius:4px;overflow:hidden;margin-top:6px}#barin{height:100%;background:#4dd0e1;width:0}</style></head><body>
+svg{width:100%;height:140px;background:#000;border:1px solid #222;border-radius:4px}</style></head><body>
 <h2>433 MHz listen</h2>
 <div class="box" id="st">Loading...</div>
+<div class="box"><svg id="ch" viewBox="0 0 240 100" preserveAspectRatio="none"></svg>
+<div class="note">Last 2 minutes, one point per second: <span style="color:#4dd0e1">strongest signal</span>, <span style="color:#888">background</span>, <span style="color:#f5a623">threshold</span> (scale -110 to -30 dBm). A sensor sending shows as a spike.</div></div>
 <div class="box">Mode <select id="mod"><option value="fsk">2-FSK (most tire sensors)</option><option value="ook">OOK / ASK (remotes, some sensors)</option></select>
- Threshold <input id="thr" type="number" min="-110" max="-30" style="width:70px"> dBm <button onclick="save()">Save</button> <span id="msg" class="note"></span>
-<div class="note">Bursts stronger than the threshold are captured. Set it a few dB above the noise shown below. Tire sensors send when the wheel turns, when the pressure changes, or every few minutes when parked; a TPMS tool or letting a little air out makes them send now.</div></div>
+<label><input type="checkbox" id="auto" onchange="shape()"> Automatic threshold</label>
+<span id="mbox">margin <input id="margin" type="number" min="3" max="40" style="width:55px"> dB above the background</span>
+<span id="tbox">threshold <input id="thr" type="number" min="-110" max="-30" style="width:70px"> dBm</span>
+<button onclick="save()">Save</button> <span id="msg" class="note"></span>
+<div><label><input type="checkbox" id="hide" checked onchange="draw()"> Hide noise (show only bursts with 24+ Manchester bits)</label></div>
+<div class="note">Tire sensors send when the wheel turns, when the pressure changes, or every few minutes when parked. Watch for a spike when the kit's display changes.</div></div>
 <div id="list"></div>
 <p><a href="/">Back</a></p>
 <script>
-const $=id=>document.getElementById(id);let loaded=false;
-async function save(){const q=new URLSearchParams({mod:$("mod").value,thr:$("thr").value});const r=await fetch("/rf/set?"+q);$("msg").textContent=await r.text();}
+const $=id=>document.getElementById(id);let loaded=false,last=null;
+function shape(){$("mbox").style.display=$("auto").checked?"":"none";$("tbox").style.display=$("auto").checked?"none":"";}
+async function save(){const q=new URLSearchParams({mod:$("mod").value,auto:$("auto").checked?1:0,margin:$("margin").value,thr:$("thr").value});const r=await fetch("/rf/set?"+q);$("msg").textContent=await r.text();}
 function age(ms){return ms<60000?(ms/1000).toFixed(0)+" s ago":(ms/60000).toFixed(1)+" min ago";}
-async function poll(){try{const j=await (await fetch("/rf.json")).json();
+function y(d){return Math.max(0,Math.min(100,(-30-d)*100/80));}
+function chart(j){const h=j.hist,n=h.length;if(!n){$("ch").innerHTML="";return;}const x=i=>(240-(n-1-i)*2);
+ const line=(k,c)=>'<polyline fill="none" stroke="'+c+'" stroke-width="1" points="'+h.map((p,i)=>x(i)+","+y(p[k]).toFixed(1)).join(" ")+'"/>';
+ const thr=j.auto?h.map((p,i)=>x(i)+","+y(p[1]+j.margin).toFixed(1)).join(" "):(x(0)+","+y(j.thr)+" 240,"+y(j.thr));
+ $("ch").innerHTML=line(1,"#888")+'<polyline fill="none" stroke="#f5a623" stroke-width="0.7" stroke-dasharray="2,2" points="'+thr+'"/>'+line(0,"#4dd0e1");}
+function draw(){const j=last;if(!j)return;const hide=$("hide").checked;const l=j.bursts.filter(b=>!hide||b.nbits>=24);
+ $("list").innerHTML=l.length?l.map(b=>'<div class="b"><b>'+age(b.age)+'</b> | '+b.rssi+' dBm | '+b.pulses+' pulses | half-bit '+b.unit+' us (about '+(b.unit?Math.round(500000/b.unit):0)+' bit/s) | '+b.nbits+' Manchester bits'+(b.inv?' (inverted)':'')+
+ '<div class="hex mono">'+(b.hex||'(no Manchester bytes)')+'</div><div class="mono note">bits: '+b.bits+'</div><div class="mono note">pulses (us, first level '+b.first+'): '+b.w.join(" ")+'</div></div>').join("")
+ :'<p class="note">'+(j.bursts.length&&hide?j.bursts.length+" bursts hidden as noise (untick Hide noise to see them).":"Nothing heard yet above the threshold.")+'</p>';}
+async function poll(){try{const j=await (await fetch("/rf.json")).json();last=j;
 if(!j.ok){$("st").innerHTML='<span class="bad">CC1101 not found</span> (read part 0x'+j.part.toString(16)+', version 0x'+j.version.toString(16)+'; expected 00 / 14). Check VCC on 3.3 V, GND, and SCK/MOSI/MISO/CSN.';return;}
-const pct=Math.max(0,Math.min(100,(j.rssi+110)*100/80));
-$("st").innerHTML="CC1101 found (version 0x"+j.version.toString(16)+") | listening on 433.92 MHz, "+(j.ook?"OOK":"2-FSK")+" | signal now "+j.rssi+" dBm | bursts heard: "+j.total+'<div id="bar"><div id="barin" style="width:'+pct+'%"></div></div>';
-if(!loaded){$("mod").value=j.ook?"ook":"fsk";$("thr").value=j.thr;loaded=true;}
-$("list").innerHTML=j.bursts.length?j.bursts.map(b=>'<div class="b"><b>'+age(b.age)+'</b> | '+b.rssi+' dBm | '+b.pulses+' pulses | half-bit '+b.unit+' us (about '+(b.unit?Math.round(500000/b.unit):0)+' bit/s) | '+b.nbits+' Manchester bits'+(b.inv?' (inverted)':'')+
- '<div class="hex mono">'+(b.hex||'(no Manchester bytes)')+'</div><div class="mono note">bits: '+b.bits+'</div><div class="mono note">pulses (us, first level '+b.first+'): '+b.w.join(" ")+'</div></div>').join(""):'<p class="note">Nothing heard yet above '+j.thr+' dBm.</p>';
+$("st").innerHTML="CC1101 found (version 0x"+j.version.toString(16)+") | 433.92 MHz, "+(j.ook?"OOK":"2-FSK")+" | signal now "+j.rssi+" dBm | background "+j.floor+" dBm | threshold "+j.active+" dBm"+(j.auto?" (auto)":"")+" | bursts heard: "+j.total;
+if(!loaded){$("mod").value=j.ook?"ook":"fsk";$("thr").value=j.thr;$("auto").checked=j.auto;$("margin").value=j.margin;shape();loaded=true;}
+chart(j);draw();
 }catch(e){$("st").textContent="Could not reach the hub - retrying...";}}
 poll();setInterval(poll,1000);
 </script></body></html>)HTML";

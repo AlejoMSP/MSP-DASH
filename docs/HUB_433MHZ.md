@@ -20,7 +20,7 @@ GDO0 is not on GPIO 39: the ESP32 puts false short pulses on GPIO 36/39 while th
 ## Listen mode (/rf on the hub)
 At boot the hub reads the CC1101's part number and version (00 / 14); the serial log says "CC1101: ... found"
 or "NOT found (check wiring)". The page shows the live signal strength and every burst above the threshold
-(default -85 dBm): pulse widths, the half-bit time, the Manchester bits and bytes. 2-FSK (most tire sensors) or
+(automatic by default: 10 dB above the measured background; or a fixed dBm): pulse widths, the half-bit time, the Manchester bits and bytes. 2-FSK (most tire sensors) or
 OOK is chosen on the page. Code: `rf_cc1101.h` (driver, capture), `rf_decode.h` (host-tested decoding).
 
 Next step: capture the tire sensors' bursts, match them to a known format (rtl_433 has decoders for most

@@ -29,7 +29,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 24
+#define INPUT_BUILD 25
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -500,10 +500,16 @@ static void setupWeb() {
   server.on("/rf.json", HTTP_GET, []() {
     String j;
     j.reserve(12000);
-    char b[200];
-    snprintf(b, sizeof b, "{\"ok\":%s,\"part\":%u,\"version\":%u,\"ook\":%s,\"thr\":%d,\"rssi\":%d,\"total\":%lu,\"bursts\":[",
-             s_rfOk ? "true" : "false", s_rfPart, s_rfVersion, s_rfOok ? "true" : "false", s_rfThr, (int)s_rfRssi, (unsigned long)s_rfBurstTotal);
+    char b[320];
+    snprintf(b, sizeof b, "{\"ok\":%s,\"part\":%u,\"version\":%u,\"ook\":%s,\"thr\":%d,\"auto\":%s,\"margin\":%d,\"floor\":%d,\"active\":%d,\"rssi\":%d,\"total\":%lu,\"hist\":[",
+             s_rfOk ? "true" : "false", s_rfPart, s_rfVersion, s_rfOok ? "true" : "false", s_rfThr, s_rfAuto ? "true" : "false", s_rfMargin,
+             (int)s_rfFloor, (int)s_rfActiveThr, (int)s_rfRssi, (unsigned long)s_rfBurstTotal);
     j += b;
+    for (int k = s_rfHistCount - 1; k >= 0; k--) {   // oldest first: [peak, background] per second
+      int i = (s_rfHistHead - 1 - k + RF_HIST) % RF_HIST;
+      j += "["; j += String((int)s_rfHistPeak[i]); j += ","; j += String((int)s_rfHistFloor[i]); j += k ? "]," : "]";
+    }
+    j += "],\"bursts\":[";
     portENTER_CRITICAL(&s_rfMux);
     int count = s_rfBurstCount, head = s_rfBurstHead;
     static RfBurst copy[RF_BURSTS];
@@ -521,6 +527,8 @@ static void setupWeb() {
   });
   server.on("/rf/set", HTTP_GET, []() {
     if (server.hasArg("mod")) s_rfOok = server.arg("mod") == "ook";
+    if (server.hasArg("auto")) s_rfAuto = server.arg("auto") == "1";
+    if (server.hasArg("margin")) { int m = server.arg("margin").toInt(); if (m < 3 || m > 40) { server.send(400, "text/plain", "Margin must be 3 to 40 dB"); return; } s_rfMargin = m; }
     if (server.hasArg("thr")) { int t = server.arg("thr").toInt(); if (t < -110 || t > -30) { server.send(400, "text/plain", "Threshold must be -110 to -30 dBm"); return; } s_rfThr = t; }
     rfSaveSettings(); s_rfReconfig = true;
     server.send(200, "text/plain", "Saved");
