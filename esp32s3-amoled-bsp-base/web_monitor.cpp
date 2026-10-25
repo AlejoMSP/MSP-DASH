@@ -42,6 +42,7 @@
 #include "espnow_link.h"
 #include "lcd_perf.h"
 #include "web_theme.h"
+#include "gauge_icons_js.h"   // ICONS for the gauge editor
 #include <math.h> // NAN
 
 static const char FW_COMPILED[] = __DATE__ " " __TIME__; // when THIS file was compiled - changes on every rebuild
@@ -416,6 +417,7 @@ R"rawliteral(<div class="pad">
 </div>)rawliteral" PH_CLOSE
 R"rawliteral(
 <script>
+)rawliteral" GAUGE_ICONS_JS R"rawliteral(
     window.onerror = function(msg, src, line) { document.getElementById("boot").textContent = "Script error: " + msg + " (line " + line + ")"; };
     document.getElementById("boot").textContent = "";
     const SIGNALS = ["None","RPM","Coolant Temp","MAP/Boost","AFR","Oil Pressure","Oil Temp","Fuel Pressure","Ethanol %","Throttle Position","Battery Voltage"];
@@ -432,7 +434,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, needle_glow:false, dial_x:0, dial_y:0, peak_hold:false, peak_hold_s:3, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, needle_glow:false, icon:0, icon_pos:0, dial_x:0, dial_y:0, peak_hold:false, peak_hold_s:3, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -459,6 +461,10 @@ R"rawliteral(
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
           <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Icon ${iconSvg(c.icon || 0)} <select onchange="setCellField(${pIdx},${cIdx},'icon',parseInt(this.value))">${ICONS.map((ic,i)=>`<option value="${i}" ${(c.icon||0)===i?"selected":""}>${ic[0]}</option>`).join("")}</select></label></div>
+            <div><label>Icon position <select onchange="setCellField(${pIdx},${cIdx},'icon_pos',parseInt(this.value))" ${c.icon ? "" : "disabled"}>${["Left of the caption","Above the caption","Instead of the caption"].map((t,i)=>`<option value="${i}" ${(c.icon_pos||0)===i?"selected":""}>${t}</option>`).join("")}</select></label></div>
+          </div>
           <div class="row2">
             <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
             <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. psi" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
@@ -873,6 +879,12 @@ R"rawliteral(
       ["Carbon grey",                        0xFF1744, 0xF5F5F5, 0x1E1E1E],
       ["Green phosphor",                     0xFFFFFF, 0x39FF14, 0x000000],
     ];
+    // A small preview of a caption icon (same Material Design Icons path the screen's icon font is made from).
+    function iconSvg(i) {
+      const ic = (typeof ICONS !== "undefined" && ICONS[i]) || null;
+      if (!ic || !ic[1]) return "";
+      return `<svg viewBox="0 0 24 24" width="20" height="20" style="vertical-align:middle;fill:#4dd0e1"><path d="${ic[1]}"/></svg>`;
+    }
     function presetOptions() { return '<option value="">Pick one...</option>' + COLOR_PRESETS.map((p, i) => `<option value="${i}">${p[0]}</option>`).join(""); }
     function applyCellPreset(pIdx, cIdx, i) {
       const p = COLOR_PRESETS[i]; if (!p) return;

@@ -24,6 +24,7 @@
 
 #include "gauge_app.h"
 #include "color_presets.h"
+#include "gauge_icons.h"
 #include "gauge_config.h"
 #include "sd_logging.h"
 #include "simulator.h"
@@ -146,6 +147,8 @@ typedef struct {
   lv_meter_indicator_t *peakNeedle; // shadow needle for peak hold; NULL when off
   lv_meter_indicator_t *glow[2];    // needle glow: two wider, dimmer copies under the needle; NULL when off
   lv_meter_scale_t *scale;          // the dial scale (recoloured live by a colour preset)
+  lv_obj_t *iconLabel;              // the caption icon (gauge_icons.h); NULL when none
+  lv_color_t iconColor;             // its normal colour (it flashes red/white with a warning)
   int32_t peak_val; uint32_t peak_ms; uint32_t peak_hold_ms;
   lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
   int32_t needleHubPct;         // needle trim, % of the dial radius: gap at the centre ...
@@ -530,9 +533,38 @@ static void apply_text_xy(lv_obj_t *container, const CellConfig *cfg) {
   }
 }
 
+// The caption label of the cell being built (each gauge type makes one); the icon is placed against it.
+static lv_obj_t *s_capLabel = NULL;
+
+// Caption icon (gauge_icons.h): an icon-font label beside, above or instead of the caption, in the caption's colour and
+// at its size. Placed last, after the caption has its final spot (automatic, aligned or by coordinates).
+static void attach_caption_icon(lv_obj_t *container, const CellConfig *cfg, CellRuntime *rt) {
+  rt->iconLabel = NULL;
+  if (cfg->icon < 1 || cfg->icon > GAUGE_ICON_COUNT || !s_capLabel) return;
+  lv_obj_update_layout(container);
+  const lv_font_t *capFont = lv_obj_get_style_text_font(s_capLabel, 0);
+  int32_t size = capFont ? (int32_t)lv_font_get_line_height(capFont) : 20;
+  lv_obj_t *ic = lv_label_create(container);
+  lv_obj_set_style_text_font(ic, gauge_icon_font(cfg->icon_pos == 2 ? size + 12 : size), 0);   // in place of the caption: a size up
+  rt->iconColor = lv_obj_get_style_text_color(s_capLabel, 0);
+  lv_obj_set_style_text_color(ic, rt->iconColor, 0);
+  lv_label_set_text(ic, GAUGE_ICON_TEXT[cfg->icon]);
+  bool emptyCap = !cfg->caption[0];
+  if (cfg->icon_pos == 2 || emptyCap) {                 // instead of the caption: the text is kept (invisible) for its spot
+    lv_obj_set_style_text_opa(s_capLabel, LV_OPA_TRANSP, 0);
+    lv_obj_align_to(ic, s_capLabel, LV_ALIGN_CENTER, 0, 0);
+  } else if (cfg->icon_pos == 1) {
+    lv_obj_align_to(ic, s_capLabel, LV_ALIGN_OUT_TOP_MID, 0, -2);
+  } else {
+    lv_obj_align_to(ic, s_capLabel, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+  }
+  rt->iconLabel = ic;
+}
+
 static const CellConfig *s_pairCfg = NULL;   // 2-Up: the other cell on the page while one is being built
 
 static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRuntime *rt) {
+  s_capLabel = NULL;
   rt->enabled = cfg->enabled;
   rt->gauge_type = cfg->gauge_type;
   rt->signal = cfg->signal;
@@ -553,6 +585,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->peakNeedle = NULL;
   rt->glow[0] = rt->glow[1] = NULL;
   rt->scale = NULL;
+  rt->iconLabel = NULL;
   rt->numberLabel = NULL;
   rt->chart = NULL;
   rt->chartSeries = NULL;
@@ -609,6 +642,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     rt->numberLabel = numLabel;
 
     lv_obj_t *capLabel = lv_label_create(container);
+    s_capLabel = capLabel;
     if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
     if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
@@ -690,6 +724,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     rt->noDataLabel = noData;
 
     lv_obj_t *capLabel = lv_label_create(container);
+    s_capLabel = capLabel;
     if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_hex(0x4dd0e1), 0);
     if (capFont) lv_obj_set_style_text_font(capLabel, capFont, 0);
@@ -867,6 +902,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
     }
 
     lv_obj_t *capLabel = lv_label_create(container);
+    s_capLabel = capLabel;
     if (!cfg->caption_on_face || cfg->gauge_type == GAUGE_TYPE_NUMBER || cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) lv_obj_add_flag(capLabel, LV_OBJ_FLAG_USER_1);
     lv_obj_set_style_text_color(capLabel, lv_color_white(), 0);
     if (onFace) {
@@ -908,6 +944,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
 
   if (cfg->text_xy) apply_text_xy(container, cfg);
   else apply_text_halign(container, rect, gauge_resolve_halign(cfg->h_align));
+  attach_caption_icon(container, cfg, rt);
 
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);
 
@@ -1082,9 +1119,11 @@ static void update_warning_flash(CellRuntime *c, float value, bool has_data) {
     bool flash_on = (s_flash_counter / 24) % 2 == 0;
     lv_color_t target = flash_on ? lv_color_hex(0xB00000) : lv_color_hex(c->bg_color);
     lv_obj_set_style_bg_color(c->container, target, 0);
+    if (c->iconLabel) lv_obj_set_style_text_color(c->iconLabel, flash_on ? lv_color_white() : lv_color_hex(0xFF3030), 0);   // red, white on the red flash
     c->warning_active = true;
   } else if (c->warning_active) {
     lv_obj_set_style_bg_color(c->container, lv_color_hex(c->bg_color), 0);
+    if (c->iconLabel) lv_obj_set_style_text_color(c->iconLabel, c->iconColor, 0);
     c->warning_active = false;
   }
 }

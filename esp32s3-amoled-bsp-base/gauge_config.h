@@ -127,6 +127,8 @@ typedef struct {
   int32_t peak_hold_s;     // 1-10 s, default 3
   int32_t needle_w;        // needle thickness, px (1-20, default 6)
   bool needle_glow;        // needle/half-moon: a soft halo of the needle colour behind the needle (two wider, dimmer lines)
+  int32_t icon;            // 0 = none, else an icon from gauge_icons.h (Material Design Icons), drawn with the caption
+  int32_t icon_pos;        // 0 = left of the caption, 1 = above it, 2 = instead of it (the caption text hidden)
   bool text_xy;            // place the caption and the readout (+ units under it) by coordinates instead of automatically
   int32_t cap_x, cap_y;    // caption centre, px from the cell's centre (+x right, +y down); -300..300
   int32_t val_x, val_y;    // readout centre, same; the units follow under it

@@ -76,6 +76,13 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   { probe.run('pages[0].name = "Boost <x>"; renderPages()');
     const h = probe.run('document.getElementById("pages").innerHTML');
     check(/class="pname"[^>]*value="Boost &lt;x&gt;"/.test(h || ""), "each page has a name box, showing the saved name (escaped)"); }
+  { check(JSON.parse(probe.run('JSON.stringify(ICONS.map(i => i[0]))'))[1] === "Check engine", "the editor's icon list comes from gauge_icons_js.h (icon 1 = Check engine)");
+    probe.run('pages[0].cells[0].icon = 1; pages[0].cells[0].icon_pos = 2; renderPages()');
+    const h = probe.run('document.getElementById("pages").innerHTML');
+    check(/<option value="1" selected>Check engine<\/option>/.test(h) && /<option value="2" selected>Instead of the caption<\/option>/.test(h), "a cell's icon and its position are selected in the editor");
+    check(/<svg viewBox="0 0 24 24"[^>]*><path d="M7,4V6/.test(h), "the chosen icon shows as a preview (the same MDI shape the screen draws)");
+    probe.run('pages[0].cells[0].icon = 0; renderPages()');
+    check(/Icon position <select[^>]*disabled/.test(probe.run('document.getElementById("pages").innerHTML')), "no icon: the position box is greyed out"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

@@ -1,0 +1,3 @@
+# MDI icon name | label shown in the editor
+# Order matters: an icon's number (saved in the gauge config) is its line number here. Add new icons at the END only.
+engine|Check engine

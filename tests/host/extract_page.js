@@ -39,7 +39,7 @@ function loadMacros() {
   const macros = {};
   for (const f of fs.readdirSync(SKETCH).filter(f => f.endsWith('.h') || f.endsWith('.cpp'))) {
     const text = fs.readFileSync(path.join(SKETCH, f), 'utf8');
-    const re = /^[ \t]*#define[ \t]+(PH_\w+)[ \t]*((?:[^\n\\]|\\\n|\\(?!\n))*)/gm;   // up to the first newline that is not escaped
+    const re = /^[ \t]*#define[ \t]+(PH_\w+|GAUGE_ICONS_JS)[ \t]*((?:[^\n\\]|\\\n|\\(?!\n))*)/gm;   // up to the first newline that is not escaped
     let m; while ((m = re.exec(text))) macros[m[1]] = tokenize(m[2]);
   }
   return macros;

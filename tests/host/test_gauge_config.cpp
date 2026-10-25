@@ -58,7 +58,7 @@ static void fillAll(PageConfig *p) {            // the worst case: every page, e
       c.tick_font_size = (j % 2) ? 14 : -1; c.start_deg = 200 + 10 * j; c.end_deg = 100 + i;
       c.low_crit_on = (j % 2) == 0; c.low_crit = 10 + i; c.low_warn_on = (i % 2) == 0; c.low_warn = 30 + j; c.high_warn_on = (i + j) % 2 == 1; c.high_warn = 150 + i; c.high_crit_on = (i + j) % 3 == 0; c.high_crit = 200 + j; c.zone_style = 1 + (i + j) % 3;
       c.needle_hub_pct = 5 + j; c.needle_tip_pct = 3 + i;
-      c.dial_x = -7 + j; c.dial_y = 9 + i; c.peak_hold = (i + j) % 2 == 0; c.peak_hold_s = 1 + (i + j) % 10; c.needle_w = 2 + j; c.needle_glow = (i + j) % 3 == 0; c.text_xy = (i + j) % 2; c.cap_x = -100 - j; c.cap_y = 120 + i; c.val_x = 33; c.val_y = -44;
+      c.dial_x = -7 + j; c.dial_y = 9 + i; c.peak_hold = (i + j) % 2 == 0; c.peak_hold_s = 1 + (i + j) % 10; c.needle_w = 2 + j; c.needle_glow = (i + j) % 3 == 0; c.icon = (i + j) % 2; c.icon_pos = (i + j) % 3; c.text_xy = (i + j) % 2; c.cap_x = -100 - j; c.cap_y = 120 + i; c.val_x = 33; c.val_y = -44;
       c.caption_font_size = GAUGE_CAPTION_SIZES[(i + j) % GAUGE_CAPTION_SIZE_COUNT]; c.caption_on_face = (i + j) % 2 == 0; snprintf(c.units, GAUGE_UNITS_MAXLEN, "u%d%d", i, j); c.v_align = (i + j) % 3;
       c.has_warning = true; c.warning_threshold = 123.5f; c.warning_above = (j & 1); c.alert_fullscreen = true;
       c.history_sec = 90 + i; c.ref_enabled = true; c.ref_value = 14.7f;
@@ -427,6 +427,9 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"needle_w\":12,\"text_xy\":true,\"cap_x\":-50,\"cap_y\":400,\"val_x\":7,\"val_y\":-9}");
   CHECK(c10.needle_w == 12 && c10.text_xy && c10.cap_x == -50 && c10.cap_y == 300 && c10.val_x == 7 && c10.val_y == -9, "needle width and coordinates load, kept within -300..300");
   c10 = load1("{\"enabled\":true}"); CHECK(!c10.needle_glow, "old configs: no needle glow");
+  c10 = load1("{\"enabled\":true}"); CHECK(c10.icon == 0 && c10.icon_pos == 0, "old configs: no icon");
+  c10 = load1("{\"enabled\":true,\"icon\":1,\"icon_pos\":2}"); CHECK(c10.icon == 1 && c10.icon_pos == 2, "icon and position load");
+  c10 = load1("{\"enabled\":true,\"icon\":999,\"icon_pos\":7}"); CHECK(c10.icon == 0 && c10.icon_pos == 0, "an icon this firmware does not have, or a bad position: none / left");
   { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"name\":\"Boost\",\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"name\":\"A very long page name\\tx\",\"kind\":1,\"cols\":2,\"indicators\":[]}]");
     static PageConfig pg[MAX_PAGES]; gauge_config_pages_from_json(d.as<JsonArray>(), pg);
     CHECK(!strcmp(pg[0].name, "Boost") && pg[1].name[0] == 0, "page names load; a page without one has none");
