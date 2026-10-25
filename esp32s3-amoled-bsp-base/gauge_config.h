@@ -159,6 +159,7 @@ typedef struct {
   uint32_t on_color, off_color;     // lamp background, 0xRRGGBB
   uint32_t on_text_color, off_text_color;
   bool blink;                       // flash while on
+  int32_t icon;                     // 0 = none, else a gauge_icons.h icon: drawn above the text (or alone), in the text colour
 } IndicatorConfig;
 
 // A page: a chosen layout template plus however many cells that

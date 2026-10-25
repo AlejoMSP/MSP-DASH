@@ -375,6 +375,8 @@ R"rawliteral(<style>
     .zonerow label { flex:1; }
     .zonerow input[type=number] { width:92px; margin:0; }
     .pname { width:9em; margin:0 6px; }
+    .screenwrap { text-align:center; margin:6px 0 10px; }
+    .screenprev { border:1px solid #333; border-radius:6px; max-width:100%; height:auto; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
@@ -455,6 +457,7 @@ R"rawliteral(
       return `
         <div class="cell">
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
+          <div class="screenwrap" id="prev_${pIdx}_${cIdx}">${previewSvg(c, (pages[pIdx] && Number(pages[pIdx].layout)) || 0, cIdx)}</div>
           ${!c.enabled ? "" : `
           <label>Signal <select onchange="setCellSignal(${pIdx},${cIdx},parseInt(this.value))">${signalOptionsHtml(c.signal)}</select></label>
           <label>Gauge Type <select onchange="changeGaugeType(${pIdx},${cIdx},parseInt(this.value))">
@@ -676,6 +679,89 @@ R"rawliteral(
         `<circle cx="${f(a0[0])}" cy="${f(a0[1])}" r="3.5" fill="#2ecc71"/><circle cx="${f(a1[0])}" cy="${f(a1[1])}" r="3.5" fill="#e74c3c"/>` +
         `<text x="48" y="7" font-size="8" fill="#666" text-anchor="middle">0</text></svg>` +
         `<div class="dialcap">${g.sweep}&deg; sweep${g.standard ? " (standard dial)" : ""}</div>`;
+    }
+
+    // ---- screen preview: the whole cell as the round display draws it, with its text, at a sample value ----
+    // An approximation (the screen's own fonts and fitting differ a little), so layouts can be tried here before saving and
+    // flashing. Positions follow the screen: automatic text, or "Place text by coordinates" (px from the cell's centre).
+    const SCREEN_PX = 466;
+    function cellSize(layout, cIdx) {
+      const S = SCREEN_PX, H = S / 2;
+      if (layout === 0) return [S, S];
+      if (layout === 1) return [S, H];
+      if (layout === 2) return cIdx === 0 ? [S, H] : [H, H];
+      return [H, H];
+    }
+    const hexc = v => "#" + ((Number(v) >>> 0) & 0xFFFFFF).toString(16).padStart(6, "0");
+    function sampleValue(c) {
+      const mn = Number(c.min) || 0, mx = Number(c.max) || 0, raw = mn + (mx - mn) * 0.65;
+      const div = Number(c.value_divisor) || 1, dec = Math.max(0, Math.min(3, Number(c.decimals) || 0));
+      return (raw / div).toFixed(dec);
+    }
+    function previewSvg(c, layout, cIdx) {
+      const [w, h] = cellSize(layout, cIdx), cx0 = w / 2, cy0 = h / 2, type = Number(c.gauge_type) || 0;
+      const f = v => (+v).toFixed(1), esc = escHtml;
+      const bg = hexc(c.bg_color), tick = hexc(c.tick_color), needle = hexc(c.needle_color);
+      let out = `<rect x="0" y="0" width="${w}" height="${h}" fill="${bg}"/>`;
+      const capSize = Number(c.caption_font_size) > 0 ? Number(c.caption_font_size) : 20;
+      const valSize = Number(c.value_font_size) || 28;
+      let capX = cx0, capY, valX = cx0, valY, capColor = type === 0 || type === 2 ? "#ffffff" : "#4dd0e1";
+      const showValue = type === 1 || !!c.show_value;
+      if (type === 0 || type === 2) {
+        const half = type === 2, R = Math.min(w, h) / 2 - 10;
+        const dcx = cx0 + (Number(c.dial_x) || 0), dcy = cy0 + (Number(c.dial_y) || 0) + (half ? R / 3 : 0);
+        const g = dialGeometry(c), pt = (deg, r) => [dcx + r * Math.sin(deg * Math.PI / 180), dcy - r * Math.cos(deg * Math.PI / 180)];
+        const n = Math.max(2, Math.min(60, parseInt(c.tick_count) || 26)), major = Math.max(1, parseInt(c.major_nth) || 5);
+        for (let i = 0; i < n; i++) {
+          const a = g.start + g.sweep * i / (n - 1), len = (i % major === 0) ? 18 : 10, p0 = pt(a, R), p1 = pt(a, R - len);
+          out += `<line x1="${f(p0[0])}" y1="${f(p0[1])}" x2="${f(p1[0])}" y2="${f(p1[1])}" stroke="${tick}" stroke-width="${i % major === 0 ? 4 : 2}"/>`;
+        }
+        const trim = resolveTrim(c), at = g.start + g.sweep * 0.65, nw = Number(c.needle_w) || 6;
+        const n0 = pt(at, R * trim.hub / 100), n1 = pt(at, R * (0.94 - trim.tip / 100) - 12);
+        if (c.needle_glow) {
+          out += `<line x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needle}" stroke-opacity="0.25" stroke-width="${nw * 3 + 4}" stroke-linecap="round"/>`;
+          out += `<line x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needle}" stroke-opacity="0.45" stroke-width="${nw * 2 + 2}" stroke-linecap="round"/>`;
+        }
+        out += `<line x1="${f(n0[0])}" y1="${f(n0[1])}" x2="${f(n1[0])}" y2="${f(n1[1])}" stroke="${needle}" stroke-width="${nw}" stroke-linecap="round"/>`;
+        valY = dcy + R * (half ? 0.2 : 0.45);
+        capY = c.caption_on_face ? dcy - R * 0.35 : (half ? dcy + R * 0.5 : h - 12 - capSize / 2);
+      } else if (type === 3) {
+        const pts = []; for (let i = 0; i <= 20; i++) pts.push(`${f(w * 0.1 + w * 0.8 * i / 20)},${f(h * 0.55 - Math.sin(i / 3) * h * 0.18)}`);
+        out += `<rect x="${f(w * 0.08)}" y="${f(h * 0.2)}" width="${f(w * 0.84)}" height="${f(h * 0.6)}" fill="none" stroke="${tick}" stroke-width="2"/>`;
+        out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${needle}" stroke-width="3"/>`;
+        valY = h * 0.14; capY = h * 0.9;
+      } else {
+        valY = cy0; capY = cy0 - valSize * 0.75 - capSize * 0.4;
+      }
+      if (c.text_xy) { capX = cx0 + (Number(c.cap_x) || 0); capY = cy0 + (Number(c.cap_y) || 0); valX = cx0 + (Number(c.val_x) || 0); valY = cy0 + (Number(c.val_y) || 0); }
+      if (showValue) {
+        out += `<text x="${f(valX)}" y="${f(valY)}" font-size="${valSize}" fill="#ffffff" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-weight="600">${sampleValue(c)}</text>`;
+        if (c.units) out += `<text x="${f(valX)}" y="${f(valY + valSize * 0.5 + 12)}" font-size="${Math.max(14, Math.round(valSize * 0.4))}" fill="#bbbbbb" text-anchor="middle" dominant-baseline="central" font-family="sans-serif">${esc(c.units)}</text>`;
+      }
+      const ic = (typeof ICONS !== "undefined" && c.icon && ICONS[c.icon]) ? ICONS[c.icon] : null;
+      const pos = Number(c.icon_pos) || 0, hideCap = ic && (pos === 2 || !c.caption);
+      if (c.caption && !hideCap) out += `<text x="${f(capX)}" y="${f(capY)}" font-size="${capSize}" fill="${capColor}" text-anchor="middle" dominant-baseline="central" font-family="sans-serif">${esc(c.caption)}</text>`;
+      if (ic) {
+        const s = hideCap ? capSize + 12 : capSize, textW = c.caption && !hideCap ? c.caption.length * capSize * 0.58 : 0;
+        let ix = capX - s / 2, iy = capY - s / 2;
+        if (!hideCap && pos === 1) iy = capY - capSize / 2 - s - 2;
+        else if (!hideCap) ix = capX - textW / 2 - 6 - s;
+        out += `<g transform="translate(${f(ix)},${f(iy)}) scale(${(s / 24).toFixed(3)})"><path d="${ic[1]}" fill="${capColor}"/></g>`;
+      }
+      const dispW = Math.round(w * 0.42), dispH = Math.round(h * 0.42);
+      return `<svg class="screenprev" viewBox="0 0 ${w} ${h}" width="${dispW}" height="${dispH}" role="img" aria-label="screen preview">${out}</svg>` +
+             `<div class="dialcap">Screen preview at a sample value (${sampleValue(c)})</div>`;
+    }
+    function refreshPreviews() {
+      pages.forEach((p, pi) => (p.cells || []).forEach((c, ci) => {
+        const el = document.getElementById("prev_" + pi + "_" + ci);
+        if (el) el.innerHTML = previewSvg(c, Number(p.layout) || 0, ci);
+      }));
+    }
+    // Any change in the editor redraws the previews (fields that do not re-render the page included).
+    if (document.addEventListener) {
+      document.addEventListener("input", () => setTimeout(refreshPreviews, 0));
+      document.addEventListener("change", () => setTimeout(refreshPreviews, 0));
     }
 
     // Typing in a number box redraws just that cell's picture, so the box keeps focus.

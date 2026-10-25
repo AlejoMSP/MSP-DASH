@@ -53,9 +53,9 @@ h += ['#ifdef __cplusplus', '}', '#endif',
       '  if (size <= 42) return &font_icons_36; return &font_icons_48;',
       '}',
       ]
-js_h = ['// MADE BY tools/icons/make_icons.py. For the gauge editor (no LVGL needed): [label, SVG path (24x24 viewBox)] per icon,',
+js_h = ['// MADE BY tools/icons/make_icons.py. For the gauge editor (no LVGL needed): [label, SVG path (24x24 viewBox), MDI name] per icon,',
         '// index 0 = none. The same icons as the screen draws (gauge_icons.h).', '#pragma once',
-        '#define GAUGE_ICONS_JS "const ICONS = [[\\"None\\", \\"\\"], %s];\\n"' % ', '.join('[\\"%s\\", \\"%s\\"]' % (l, p) for _, l, _, p in icons)]
+        '#define GAUGE_ICONS_JS "const ICONS = [[\\"None\\", \\"\\", \\"\\"], %s];\\n"' % ', '.join('[\\"%s\\", \\"%s\\", \\"%s\\"]' % (l, p, n) for n, l, _, p in icons)]
 open(os.path.join(SKETCH, 'gauge_icons_js.h'), 'w').write('\n'.join(js_h) + '\n')
 open(os.path.join(SKETCH, 'gauge_icons.h'), 'w').write('\n'.join(h) + '\n')
 open(os.path.join(SKETCH, 'gauge_icon_count.h'), 'w').write('// MADE BY tools/icons/make_icons.py. How many gauge icons this firmware has (gauge_icons.h); no LVGL needed.\n#pragma once\n#define GAUGE_ICON_COUNT %d\n' % len(icons))

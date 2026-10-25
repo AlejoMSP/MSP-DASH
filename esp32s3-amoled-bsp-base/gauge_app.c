@@ -183,6 +183,7 @@ typedef struct {
 typedef struct {
   lv_obj_t *lamp;                  // the rounded rectangle
   lv_obj_t *label;                 // its text
+  lv_obj_t *icon;                  // its icon (gauge_icons.h), NULL when none
   SignalId signal;
   int32_t op;
   float threshold, hysteresis;
@@ -1005,6 +1006,7 @@ static void apply_lamp_look(IndLamp *l, int look) {
   lv_obj_set_style_border_color(l->lamp, lv_color_mix(lv_color_white(), lv_color_hex(bg), LV_OPA_30), 0);   // a faint lighter edge, so a near-black lamp still has an outline
   lv_obj_set_style_text_color(l->label, lv_color_hex(look ? l->onTextColor : l->offTextColor), 0);
   lv_label_set_text_static(l->label, look ? l->onText : l->offText);
+  if (l->icon) lv_obj_set_style_text_color(l->icon, lv_color_hex(look ? l->onTextColor : l->offTextColor), 0);
   l->shown = (int8_t)look;
 }
 
@@ -1057,9 +1059,25 @@ static void build_indicator_page(int pageIndex, PageConfig *cfg) {
     lv_obj_set_style_border_width(l->lamp, 2, 0);
     lv_obj_set_style_pad_all(l->lamp, 0, 0);
 
+    bool hasText = l->onText[0] || l->offText[0];
+    l->icon = NULL;
+    if (c->icon >= 1 && c->icon <= GAUGE_ICON_COUNT) {   // the icon: alone it fills most of the lamp; with text it sits above it
+      int target = hasText ? rects[i].h * 45 / 100 : rects[i].h * 70 / 100;
+      if (target > rects[i].w * 70 / 100) target = rects[i].w * 70 / 100;
+      l->icon = lv_label_create(l->lamp);
+      lv_obj_set_style_text_font(l->icon, gauge_icon_font(target), 0);
+      lv_label_set_text(l->icon, GAUGE_ICON_TEXT[c->icon]);
+      if (hasText) lv_obj_align(l->icon, LV_ALIGN_TOP_MID, 0, rects[i].h / 10);
+      else lv_obj_center(l->icon);
+    }
     l->label = lv_label_create(l->lamp);
-    lv_obj_set_style_text_font(l->label, pick_lamp_font(l->onText, l->offText, rects[i].w, rects[i].h), 0);
-    lv_obj_center(l->label);
+    if (l->icon && hasText) {   // text in the lower half
+      lv_obj_set_style_text_font(l->label, pick_lamp_font(l->onText, l->offText, rects[i].w, rects[i].h * 45 / 100), 0);
+      lv_obj_align(l->label, LV_ALIGN_BOTTOM_MID, 0, -rects[i].h / 12);
+    } else {
+      lv_obj_set_style_text_font(l->label, pick_lamp_font(l->onText, l->offText, rects[i].w, rects[i].h), 0);
+      lv_obj_center(l->label);
+    }
     apply_lamp_look(l, 0);               // every lamp starts in its off look, until its signal says otherwise
   }
   lv_obj_add_event_cb(page, gesture_event_cb, LV_EVENT_GESTURE, NULL);

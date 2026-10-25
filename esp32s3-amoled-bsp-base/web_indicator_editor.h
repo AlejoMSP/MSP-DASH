@@ -20,36 +20,38 @@ R"rawliteral(
     // Ready-made lamps. A threshold lamp is "above" (op 0) or "below" (op 1) a value, in the signal's own units; an ECU on/off
     // flag is 1 or 0, so "flag on" is above 0.5. hyst = hysteresis: once on, the lamp stays on until the value is that far back.
     const IND_PRESETS = [
-      { name:"Low oil pressure",   signal:SIG.OILP,  op:1, threshold:10,   hyst:2,   text:"OIL",   color:IND_RED },
-      { name:"High coolant temp",  signal:SIG.CLT,   op:0, threshold:220,  hyst:5,   text:"TEMP",  color:IND_RED },
-      { name:"High oil temp",      signal:SIG.OILT,  op:0, threshold:240,  hyst:5,   text:"OIL T", color:IND_RED },
-      { name:"Low battery",        signal:SIG.BATTV, op:1, threshold:12,   hyst:0.3, text:"BATT",  color:IND_AMBER },
-      { name:"Lean mixture",       signal:SIG.AFR,   op:0, threshold:15.5, hyst:0.3, text:"LEAN",  color:IND_AMBER },
-      { name:"Low fuel pressure",  signal:SIG.FUELP, op:1, threshold:30,   hyst:2,   text:"FUEL",  color:IND_RED },
-      { name:"Boost",              signal:SIG.MAP,   op:0, threshold:0.5,  hyst:0.3,   text:"BOOST", color:IND_BLUE },
-      { name:"High ethanol (E85)", signal:SIG.FLEX,  op:0, threshold:50,   hyst:2,   text:"E85",   color:IND_GREEN },
-      { name:"Rev limit (by RPM)", signal:SIG.RPM,   op:0, threshold:6800, hyst:100, text:"REV",   color:IND_RED, blink:true },
-      { name:"Check engine light", signal:SIG.CEL,        op:0, threshold:0.5, hyst:0, text:"CHECK ENG", color:IND_AMBER },
-      { name:"Rev limiter active", signal:SIG.REVLIM,     op:0, threshold:0.5, hyst:0, text:"REV LIM",   color:IND_RED, blink:true },
-      { name:"Fan 1",              signal:SIG.FAN,        op:0, threshold:0.5, hyst:0, text:"FAN 1",     color:IND_BLUE },
-      { name:"Fan 2",              signal:SIG.FAN2,       op:0, threshold:0.5, hyst:0, text:"FAN 2",     color:IND_BLUE },
-      { name:"Fuel pump",          signal:SIG.FUELPUMP,   op:0, threshold:0.5, hyst:0, text:"FUEL PUMP", color:IND_GREEN },
-      { name:"Main relay",         signal:SIG.MAINRELAY,  op:0, threshold:0.5, hyst:0, text:"RELAY",     color:IND_GREEN },
-      { name:"O2 heater",          signal:SIG.EGOHEAT,    op:0, threshold:0.5, hyst:0, text:"O2 HEAT",   color:IND_AMBER },
-      { name:"Lambda protection",  signal:SIG.LAMBDAPROT, op:0, threshold:0.5, hyst:0, text:"LAMBDA",    color:IND_AMBER },
-      { name:"Brake pedal",        signal:SIG.BRAKE,      op:0, threshold:0.5, hyst:0, text:"BRAKE",     color:IND_RED },
+      { name:"Low oil pressure",   signal:SIG.OILP,  op:1, threshold:10,   hyst:2,   text:"OIL",   color:IND_RED, icon:"oil" },
+      { name:"High coolant temp",  signal:SIG.CLT,   op:0, threshold:220,  hyst:5,   text:"TEMP",  color:IND_RED, icon:"coolant-temperature" },
+      { name:"High oil temp",      signal:SIG.OILT,  op:0, threshold:240,  hyst:5,   text:"OIL T", color:IND_RED, icon:"oil-temperature" },
+      { name:"Low battery",        signal:SIG.BATTV, op:1, threshold:12,   hyst:0.3, text:"BATT",  color:IND_AMBER, icon:"car-battery" },
+      { name:"Lean mixture",       signal:SIG.AFR,   op:0, threshold:15.5, hyst:0.3, text:"LEAN",  color:IND_AMBER, icon:"molecule-co2" },
+      { name:"Low fuel pressure",  signal:SIG.FUELP, op:1, threshold:30,   hyst:2,   text:"FUEL",  color:IND_RED, icon:"gas-station" },
+      { name:"Boost",              signal:SIG.MAP,   op:0, threshold:0.5,  hyst:0.3,   text:"BOOST", color:IND_BLUE, icon:"car-turbocharger" },
+      { name:"High ethanol (E85)", signal:SIG.FLEX,  op:0, threshold:50,   hyst:2,   text:"E85",   color:IND_GREEN, icon:"fuel" },
+      { name:"Rev limit (by RPM)", signal:SIG.RPM,   op:0, threshold:6800, hyst:100, text:"REV",   color:IND_RED, blink:true, icon:"speedometer" },
+      { name:"Check engine light", signal:SIG.CEL,        op:0, threshold:0.5, hyst:0, text:"CHECK ENG", color:IND_AMBER, icon:"engine" },
+      { name:"Rev limiter active", signal:SIG.REVLIM,     op:0, threshold:0.5, hyst:0, text:"REV LIM",   color:IND_RED, blink:true, icon:"speedometer" },
+      { name:"Fan 1",              signal:SIG.FAN,        op:0, threshold:0.5, hyst:0, text:"FAN 1",     color:IND_BLUE, icon:"fan" },
+      { name:"Fan 2",              signal:SIG.FAN2,       op:0, threshold:0.5, hyst:0, text:"FAN 2",     color:IND_BLUE, icon:"fan" },
+      { name:"Fuel pump",          signal:SIG.FUELPUMP,   op:0, threshold:0.5, hyst:0, text:"FUEL PUMP", color:IND_GREEN, icon:"fuel" },
+      { name:"Main relay",         signal:SIG.MAINRELAY,  op:0, threshold:0.5, hyst:0, text:"RELAY",     color:IND_GREEN, icon:"lightning-bolt" },
+      { name:"O2 heater",          signal:SIG.EGOHEAT,    op:0, threshold:0.5, hyst:0, text:"O2 HEAT",   color:IND_AMBER, icon:"thermometer" },
+      { name:"Lambda protection",  signal:SIG.LAMBDAPROT, op:0, threshold:0.5, hyst:0, text:"LAMBDA",    color:IND_AMBER, icon:"molecule-co2" },
+      { name:"Brake pedal",        signal:SIG.BRAKE,      op:0, threshold:0.5, hyst:0, text:"BRAKE",     color:IND_RED, icon:"car-brake-alert" },
     ];
     // What "+ Add Indicators Page" starts with (by preset name); the user then changes whatever they like.
     const IND_DEFAULT_PAGE = ["Check engine light", "Low oil pressure", "High coolant temp", "Low battery", "Rev limiter active", "Fan 1"];
 
     // The lamp a preset makes. The off look shows the same text, dim on dark grey, like a labelled warning-light panel.
+    // An icon's number from its MDI name (ICONS comes from gauge_icons_js.h); 0 when this firmware does not have it.
+    function iconIdx(name) { const i = (typeof ICONS !== "undefined") ? ICONS.findIndex(ic => ic[2] === name) : -1; return i > 0 ? i : 0; }
     function presetLamp(p) {
-      return { signal: p.signal, op: p.op, threshold: p.threshold, hysteresis: p.hyst || 0,
+      return { signal: p.signal, op: p.op, threshold: p.threshold, hysteresis: p.hyst || 0, icon: iconIdx(p.icon),
                on_text: p.text, off_text: p.text, on_color: p.color, off_color: IND_OFF,
                on_text_color: p.color === IND_AMBER ? 0x000000 : 0xFFFFFF, off_text_color: 0x808080, blink: !!p.blink };
     }
     function blankLamp() {
-      return { signal: 0, op: 0, threshold: 0, hysteresis: 0, on_text: "", off_text: "", on_color: IND_RED, off_color: IND_OFF,
+      return { signal: 0, op: 0, threshold: 0, hysteresis: 0, icon: 0, on_text: "", off_text: "", on_color: IND_RED, off_color: IND_OFF,
                on_text_color: 0xFFFFFF, off_text_color: 0x808080, blink: false };
     }
 
@@ -73,8 +75,9 @@ R"rawliteral(
 
     // The two small previews on a lamp card: how it looks ON and how it looks OFF.
     function lampChip(l, on) {
-      const text = on ? l.on_text : l.off_text;
-      return `<span class="chip" style="background:${hex6(on ? l.on_color : l.off_color)};color:${hex6(on ? l.on_text_color : l.off_text_color)}">${escHtml(text) || "&nbsp;"}</span>`;
+      const text = on ? l.on_text : l.off_text, fg = hex6(on ? l.on_text_color : l.off_text_color);
+      const ic = (typeof ICONS !== "undefined" && l.icon && ICONS[l.icon]) ? `<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:middle;fill:${fg}"><path d="${ICONS[l.icon][1]}"/></svg>${text ? " " : ""}` : "";
+      return `<span class="chip" style="background:${hex6(on ? l.on_color : l.off_color)};color:${fg}">${ic}${escHtml(text) || (ic ? "" : "&nbsp;")}</span>`;
     }
     function refreshChips(pIdx, i) {
       const el = document.getElementById("chips_" + pIdx + "_" + i);
@@ -116,6 +119,7 @@ R"rawliteral(
             <div><label>Hysteresis <input type="number" step="any" min="0" value="${l.hysteresis}" oninput="setLampNumber(${id},'hysteresis',this.value)"></label></div>
           </div>
           <p class="hint">Hysteresis keeps a lamp from flickering: once on it stays on until the value is that far back past the threshold. A lamp is always off while its signal has no data.</p>`}
+          <label>Icon <select onchange="setLampIcon(${id},parseInt(this.value))">${(typeof ICONS !== "undefined" ? ICONS : [["None"]]).map((ic, k) => `<option value="${k}" ${(l.icon || 0) === k ? "selected" : ""}>${ic[0]}</option>`).join("")}</select></label>
           <div class="row2">
             <div><label>On text <input type="text" maxlength="11" value="${escHtml(l.on_text)}" oninput="setLampText(${id},'on_text',this.value)"></label></div>
             <div><label>Off text <input type="text" maxlength="11" value="${escHtml(l.off_text)}" oninput="setLampText(${id},'off_text',this.value)"></label></div>
@@ -197,6 +201,7 @@ R"rawliteral(
     }
     function setLampText(pIdx, i, key, value) { pages[pIdx].indicators[i][key] = value; refreshChips(pIdx, i); }
     function setLampColor(pIdx, i, key, hex) { pages[pIdx].indicators[i][key] = parseInt(hex.substring(1), 16); refreshChips(pIdx, i); }
+    function setLampIcon(pIdx, i, k) { pages[pIdx].indicators[i].icon = k; refreshChips(pIdx, i); }
 
     // =====================================================================================
     // Settings every gauge cell has, shared by both editors

@@ -428,6 +428,11 @@ int main(int argc, char **argv) {
   CHECK(c10.needle_w == 12 && c10.text_xy && c10.cap_x == -50 && c10.cap_y == 300 && c10.val_x == 7 && c10.val_y == -9, "needle width and coordinates load, kept within -300..300");
   c10 = load1("{\"enabled\":true}"); CHECK(!c10.needle_glow, "old configs: no needle glow");
   c10 = load1("{\"enabled\":true}"); CHECK(c10.icon == 0 && c10.icon_pos == 0, "old configs: no icon");
+  { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"kind\":1,\"cols\":2,\"indicators\":[{\"signal\":14,\"icon\":1},{\"signal\":5},{\"signal\":5,\"icon\":500}]}]");
+    static PageConfig pg[MAX_PAGES]; gauge_config_pages_from_json(d.as<JsonArray>(), pg);
+    CHECK(pg[0].indicators[0].icon == 1 && pg[0].indicators[1].icon == 0 && pg[0].indicators[2].icon == 0, "lamp icons load; none or an unknown one = no icon");
+    JsonDocument o; gauge_config_pages_to_json(pg, o);
+    CHECK((o[0]["indicators"][0]["icon"] | 0) == 1 && o[0]["indicators"][1]["icon"].isNull(), "lamp icons save; no icon, no field"); }
   c10 = load1("{\"enabled\":true,\"icon\":1,\"icon_pos\":2}"); CHECK(c10.icon == 1 && c10.icon_pos == 2, "icon and position load");
   c10 = load1("{\"enabled\":true,\"icon\":999,\"icon_pos\":7}"); CHECK(c10.icon == 0 && c10.icon_pos == 0, "an icon this firmware does not have, or a bad position: none / left");
   { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"name\":\"Boost\",\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"name\":\"A very long page name\\tx\",\"kind\":1,\"cols\":2,\"indicators\":[]}]");

@@ -11,5 +11,5 @@ then:
     MDI_FONT=/tmp/mdi/mdi-font-7.4.47 MDI_JS=/tmp/mdi/mdi-js-7.4.47 LV_FONT_CONV=/tmp/node_modules/.bin/lv_font_conv python3 tools/icons/make_icons.py
 
 It rewrites `esp32s3-amoled-bsp-base/font_icons_{14,20,28,36,48}.c`, `gauge_icons.h`, `gauge_icon_count.h` and
-`gauge_icons_js.h`. The script stops if a name is not in MDI. `tests/host/test_icons.c` checks every icon is drawn at
+`gauge_icons_js.h`. The script stops if a name is not in MDI. `icons_sheet.png` shows them all (drawn from the firmware font). `tests/host/test_icons.c` checks every icon is drawn at
 every size.

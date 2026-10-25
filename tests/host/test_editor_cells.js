@@ -83,6 +83,17 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(/<svg viewBox="0 0 24 24"[^>]*><path d="M7,4V6/.test(h), "the chosen icon shows as a preview (the same MDI shape the screen draws)");
     probe.run('pages[0].cells[0].icon = 0; renderPages()');
     check(/Icon position <select[^>]*disabled/.test(probe.run('document.getElementById("pages").innerHTML')), "no icon: the position box is greyed out"); }
+  { probe.run('Object.assign(pages[0].cells[0], { gauge_type: 2, caption: "Oil", show_value: true, min: 0, max: 100, value_divisor: 1, decimals: 0, units: "psi", icon: 6, icon_pos: 0, text_xy: false, needle_color: 0xFF0000, bg_color: 0x000000, tick_color: 0xFFFFFF })');
+    let v = probe.run('previewSvg(pages[0].cells[0], 0, 0)');
+    check(/>Oil<\/text>/.test(v) && />65<\/text>/.test(v) && />psi<\/text>/.test(v), "the screen preview shows the caption, a sample value (65 % of the scale) and the units");
+    check(/stroke="#ff0000"/.test(v) && /fill="#000000"/.test(v), "...in the cell's own needle and background colours");
+    check(new RegExp('<path d="' + JSON.parse(probe.run('JSON.stringify(ICONS[6][1])')).slice(0, 10).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(v), "...with the caption icon");
+    probe.run('Object.assign(pages[0].cells[0], { text_xy: true, cap_x: 0, cap_y: 70, val_x: 0, val_y: 0 })');
+    v = probe.run('previewSvg(pages[0].cells[0], 0, 0)');
+    check(/<text x="233.0" y="303.0"[^>]*>Oil<\/text>/.test(v) && /<text x="233.0" y="233.0"[^>]*>65<\/text>/.test(v), "by coordinates: caption at Y 70 and value at 0 from the cell centre (466 px screen)");
+    probe.run('pages[0].cells[0].icon_pos = 2');
+    check(!/>Oil<\/text>/.test(probe.run('previewSvg(pages[0].cells[0], 0, 0)')), "icon instead of the caption: the caption text is not drawn");
+    check(/width="98" height="98"/.test(probe.run('previewSvg(pages[0].cells[0], 3, 1)')), "a 2x2 cell previews at a quarter of the screen"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

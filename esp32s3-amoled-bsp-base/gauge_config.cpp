@@ -299,6 +299,7 @@ static void serializeIndicator(JsonObject o, const IndicatorConfig *l) {
   o["on_text_color"] = l->on_text_color;
   o["off_text_color"] = l->off_text_color;
   o["blink"] = l->blink;
+  if (l->icon) o["icon"] = l->icon;
 }
 
 static void deserializeIndicator(JsonObject o, IndicatorConfig *l) {
@@ -319,6 +320,8 @@ static void deserializeIndicator(JsonObject o, IndicatorConfig *l) {
   l->on_text_color = (o["on_text_color"] | 0xFFFFFFu) & 0xFFFFFFu;
   l->off_text_color = (o["off_text_color"] | 0x808080u) & 0xFFFFFFu;
   l->blink = o["blink"] | false;
+  l->icon = o["icon"] | 0;
+  if (l->icon < 0 || l->icon > GAUGE_ICON_COUNT) l->icon = 0;
 }
 
 // ---------------------------------------------------------------------------

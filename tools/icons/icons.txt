@@ -1,3 +1,81 @@
 # MDI icon name | label shown in the editor
 # Order matters: an icon's number (saved in the gauge config) is its line number here. Add new icons at the END only.
 engine|Check engine
+engine-outline|Engine (outline)
+engine-off|Engine off
+coolant-temperature|Coolant temperature
+car-coolant-level|Coolant level
+oil|Oil pressure
+oil-temperature|Oil temperature
+oil-level|Oil level
+car-battery|Battery
+battery-alert|Battery warning
+lightning-bolt|Charging / ignition
+flash|Spark / flash
+gas-station|Fuel
+gas-station-outline|Fuel (outline)
+fuel|Fuel can
+fuel-cell|Fuel cell
+car-turbocharger|Turbo
+turbine|Turbine / boost
+air-filter|Intake / air filter
+smoke|Exhaust / smoke
+molecule-co2|Emissions / lambda
+thermometer|Temperature
+thermometer-high|Temperature high
+thermometer-alert|Temperature warning
+water-percent|Humidity
+fan|Fan
+fan-alert|Fan warning
+air-conditioner|Air conditioning
+gauge|Gauge
+speedometer|Speedometer
+speedometer-medium|Speedometer (mid)
+speedometer-slow|Speedometer (low)
+car-speed-limiter|Speed limiter
+car-cruise-control|Cruise control
+car-shift-pattern|Gear / shift
+car-clutch|Clutch
+steering|Steering
+tire|Tire
+car-tire-alert|Tire pressure warning
+car-brake-alert|Brake warning
+car-brake-parking|Parking brake
+car-brake-abs|ABS
+car-brake-hold|Brake hold
+car-traction-control|Traction control
+car-esp|Stability control
+car-light-high|High beam
+car-light-dimmed|Low beam
+car-light-fog|Fog lights
+car-parking-lights|Parking lights
+car-light-alert|Light fault
+hazard-lights|Hazard lights
+arrow-left-bold|Turn left
+arrow-right-bold|Turn right
+car-door|Door open
+car-door-lock|Doors locked
+seatbelt|Seatbelt
+airbag|Airbag
+car-key|Key / immobilizer
+car-defrost-front|Front defrost
+car-defrost-rear|Rear defrost
+wiper|Wiper
+car-windshield|Windshield
+snowflake|Ice / cold
+car-wrench|Service
+wrench|Wrench
+car-cog|Car settings
+car-info|Car info
+car-emergency|Emergency
+alert|Warning
+alert-octagon|Stop / critical
+information|Information
+timer-outline|Timer
+flag-checkered|Race / flag
+crosshairs-gps|GPS
+record-circle|Recording / logging
+car-sports|Car (sports)
+car-convertible|Car (convertible)
+car-side|Car (side)
+car-back|Car (back)

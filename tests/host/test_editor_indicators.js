@@ -58,6 +58,14 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     R('addIndicatorPage()');
     check(R('pages.length') === 2 && R('pages[1].kind') === 1 && R('pages[1].cols') === 2 && R('pages[1].indicators.length') === 6 && R('pages[1].enabled') === true, "adds an indicators page: 2 columns, 6 lamps");
     const L = R('pages[1].indicators');
+    { const names = R('ICONS.map(i => i[2])');
+      check(R('IND_PRESETS').every(p => p.icon && names.includes(p.icon)), "every lamp preset has an icon this firmware has (MDI name)");
+      check(L.every(l => l.icon > 0), "the default page's lamps come with their icons");
+      check(names[L[0].icon] === "engine", "check engine lamp: the engine icon");
+      R('setLampIcon(1, 0, 0)'); check(R('pages[1].indicators[0].icon') === 0, "the icon can be removed");
+      R('setLampIcon(1, 0, ' + names.indexOf("oil") + ')');
+      const chips = R('document.getElementById("chips_1_0") ? document.getElementById("chips_1_0").innerHTML : lampChip(pages[1].indicators[0], true)');
+      check(/<svg viewBox="0 0 24 24"/.test(chips), "the on/off previews show the icon"); }
     check(L.map(l => l.on_text).join("|") === "CHECK ENG|OIL|TEMP|BATT|REV LIM|FAN 1", "starting lamps: check engine, oil, temperature, battery, rev limiter, fan: " + L.map(l => l.on_text).join("|"));
     check(L[0].signal === 14 && L[0].op === 0 && L[0].threshold === 0.5 && L[0].on_color === 0xFFB300 && L[0].on_text_color === 0x000000, "check engine: an ECU flag, amber with black text (readable)");
     check(L[1].signal === 5 && L[1].op === 1 && L[1].threshold === 10 && L[1].hysteresis === 2 && L[1].on_color === 0xE53935, "oil: oil pressure BELOW 10 psi, hysteresis 2, red");
