@@ -202,3 +202,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 171 | 2026-10-21 | (this commit) | Configurable sensors stage 1: 16 custom slots (SIG_C1..C16), hub /custom page (CAN field decoder with live preview), MSN1 names packet to the screens (kept in NVS), has_mask 64 bit; fixed the hub dropping signals past 32. Hub build 22 |
 | hub 22 fix | 2026-10-23 | (this commit) | custom_slot_info written over several lines with extern "C": the Arduino prototype scan read the one-liner as static. Test guards against one-line functions with 'static' inside |
 | hub 23 | 2026-10-24 | (this commit) | CC1101 433 MHz listen mode on the hub (/rf): bursts gated by RSSI, pulses, half-bit time, Manchester bits and bytes, for identifying the tire sensors |
+| hub 24 | 2026-10-24 | (this commit) | 433 MHz: no SPI traffic while recording a burst, ISR ignores edges during/just after SPI reads (the 1 ms RSSI poll was showing up as pulses) |

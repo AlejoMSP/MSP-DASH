@@ -24,8 +24,10 @@
 
 #define RF_BURSTS 10              // the last 10 bursts are kept
 #define RF_MIN_PULSES 24          // shorter bursts are noise
-#define RF_GAP_MS 3               // signal below the threshold this long ends a burst
 #define RF_EDGE_RING 2048
+#define RF_CAPTURE_MS 30          // once a signal is heard: record this long with NO SPI traffic, then check again
+#define RF_CAPTURE_MAX_MS 150     // the longest burst kept
+#define RF_SPI_QUIET_US 40        // edges during an SPI read and this long after it are ignored (crosstalk)
 
 typedef struct {
   uint32_t ms;                    // when (millis)
@@ -52,13 +54,21 @@ static volatile int s_rfBurstHead = 0, s_rfBurstCount = 0;
 static volatile uint32_t s_rfBurstTotal = 0;
 static portMUX_TYPE s_rfMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Every SPI read puts a short blip on GDO0 (crosstalk on the wiring: build 23 showed a pulse exactly every 1 ms,
+// the RSSI poll rate). The ISR ignores edges during an SPI transfer and RF_SPI_QUIET_US after it, and the task
+// stops polling while it records a burst.
+static volatile bool s_rfSpiBusy = false;
+static volatile uint32_t s_rfSpiEndUs = 0;
+
 // ---- edges from the interrupt: time of the edge and the level AFTER it ----
 static volatile uint32_t s_rfEdgeUs[RF_EDGE_RING];
 static volatile uint8_t s_rfEdgeLv[RF_EDGE_RING];
 static volatile uint32_t s_rfEdgeHead = 0;
 static void IRAM_ATTR rfEdgeIsr() {
+  uint32_t now = micros();
+  if (s_rfSpiBusy || now - s_rfSpiEndUs < RF_SPI_QUIET_US) return;
   uint32_t h = s_rfEdgeHead;
-  s_rfEdgeUs[h % RF_EDGE_RING] = micros();
+  s_rfEdgeUs[h % RF_EDGE_RING] = now;
   s_rfEdgeLv[h % RF_EDGE_RING] = (uint8_t)digitalRead(RF_GDO0);
   s_rfEdgeHead = h + 1;
 }
@@ -71,21 +81,27 @@ static bool rfSelect() {
   return true;
 }
 static void rfWrite(uint8_t a, uint8_t v) {
+  s_rfSpiBusy = true;
   s_rfSpi.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
   if (rfSelect()) { s_rfSpi.transfer(a); s_rfSpi.transfer(v); }
   digitalWrite(RF_CS, HIGH); s_rfSpi.endTransaction();
+  s_rfSpiEndUs = micros(); s_rfSpiBusy = false;
 }
 static uint8_t rfRead(uint8_t a, bool status) {
+  s_rfSpiBusy = true;
   uint8_t v = 0xFF;
   s_rfSpi.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
   if (rfSelect()) { s_rfSpi.transfer(a | (status ? 0xC0 : 0x80)); v = s_rfSpi.transfer(0); }
   digitalWrite(RF_CS, HIGH); s_rfSpi.endTransaction();
+  s_rfSpiEndUs = micros(); s_rfSpiBusy = false;
   return v;
 }
 static void rfStrobe(uint8_t c) {
+  s_rfSpiBusy = true;
   s_rfSpi.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
   if (rfSelect()) s_rfSpi.transfer(c);
   digitalWrite(RF_CS, HIGH); s_rfSpi.endTransaction();
+  s_rfSpiEndUs = micros(); s_rfSpiBusy = false;
 }
 static int rfRssiDbm() {
   uint8_t r = rfRead(0x34, true);
@@ -134,35 +150,49 @@ static void rfFinishBurst(const uint16_t *w, int n, uint8_t firstLevel, int peak
   portEXIT_CRITICAL(&s_rfMux);
 }
 
+// Turns the edges recorded since readTail (up to now) into pulse widths.
+static int rfCollect(uint32_t &readTail, uint16_t *w, int n, uint32_t &prevUs, uint8_t &firstLevel, uint8_t &lastLevel) {
+  uint32_t head = s_rfEdgeHead;
+  if (head - readTail > RF_EDGE_RING) readTail = head - RF_EDGE_RING;   // fell behind: skip what was overwritten
+  for (; readTail != head; readTail++) {
+    uint32_t t = s_rfEdgeUs[readTail % RF_EDGE_RING];
+    uint8_t lvAfter = s_rfEdgeLv[readTail % RF_EDGE_RING];
+    if (prevUs && lvAfter == lastLevel) continue;                       // an edge was masked: keep the levels alternating
+    if (prevUs) {
+      uint32_t d = t - prevUs;
+      if (n == 0) firstLevel = lastLevel;                               // the level of the pulse that just ended
+      if (n < RF_MAX_PULSES) w[n++] = d > 65535 ? 65535 : (uint16_t)d;
+    }
+    prevUs = t; lastLevel = lvAfter;
+  }
+  return n;
+}
+
+// Idle: read the signal strength every 1 ms. Above the threshold: stop all SPI traffic and record for
+// RF_CAPTURE_MS, check the strength once, and keep recording (up to RF_CAPTURE_MAX_MS) while it is still there.
 static void rfTask(void *) {
   static uint16_t w[RF_MAX_PULSES];
-  int n = 0, peak = -120; uint8_t firstLevel = 0;
-  bool active = false; uint32_t lastAbove = 0, readTail = s_rfEdgeHead, prevUs = 0;
   // Attached here so the interrupt runs on core 0: the DHT22 read switches interrupts off on core 1 for ~5 ms.
   attachInterrupt(digitalPinToInterrupt(RF_GDO0), rfEdgeIsr, CHANGE);
   for (;;) {
     vTaskDelay(1);
     if (s_rfReconfig) { s_rfReconfig = false; rfConfigure(); }
     int rssi = rfRssiDbm(); s_rfRssi = rssi;
-    uint32_t now = millis();
-    if (rssi >= s_rfThr) {
-      if (!active) { active = true; n = 0; peak = rssi; prevUs = 0; readTail = s_rfEdgeHead; }   // drop edges from before
-      lastAbove = now; if (rssi > peak) peak = rssi;
+    if (rssi < s_rfThr) continue;
+    // a signal: record it with the SPI bus quiet
+    uint32_t readTail = s_rfEdgeHead > 64 ? s_rfEdgeHead - 64 : 0;      // keep the last few edges: the start of the preamble
+    uint32_t prevUs = 0; uint8_t firstLevel = 0, lastLevel = 0;
+    int n = 0, peak = rssi;
+    uint32_t start = millis();
+    for (;;) {
+      vTaskDelay(pdMS_TO_TICKS(RF_CAPTURE_MS));
+      n = rfCollect(readTail, w, n, prevUs, firstLevel, lastLevel);
+      if (millis() - start >= RF_CAPTURE_MAX_MS || n >= RF_MAX_PULSES) break;
+      int r = rfRssiDbm(); s_rfRssi = r;
+      if (r < s_rfThr) break;
+      if (r > peak) peak = r;
     }
-    uint32_t head = s_rfEdgeHead;
-    if (head - readTail > RF_EDGE_RING) readTail = head - RF_EDGE_RING;     // fell behind: skip what was overwritten
-    for (; readTail != head; readTail++) {
-      uint32_t t = s_rfEdgeUs[readTail % RF_EDGE_RING];
-      uint8_t lvAfter = s_rfEdgeLv[readTail % RF_EDGE_RING];
-      if (!active) continue;
-      if (prevUs) {
-        uint32_t d = t - prevUs;
-        if (n == 0) firstLevel = lvAfter ^ 1;                              // the pulse that just ended had the other level
-        if (n < RF_MAX_PULSES) w[n++] = d > 65535 ? 65535 : (uint16_t)d;
-      }
-      prevUs = t;
-    }
-    if (active && now - lastAbove > RF_GAP_MS) { active = false; rfFinishBurst(w, n, firstLevel, peak); n = 0; }
+    rfFinishBurst(w, n, firstLevel, peak);
   }
 }
 
