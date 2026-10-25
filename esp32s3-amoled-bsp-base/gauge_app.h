@@ -87,6 +87,11 @@ extern volatile int g_requested_page; // -1 = no change requested, 0-7 = switch 
 // timer callback).
 extern volatile int g_page_nav_delta;
 
+// Hub buttons (build 172): hold Prev = hide the full-screen warning (like a tap), and short messages
+// ("Buttons: this screen", "Marker 3") shown for 1.5 s. Both are handled inside the LVGL timer like the above.
+extern volatile int g_alert_ack_req;
+void gauge_app_popup(const char *text);   // safe to call from any task
+
 #ifdef __cplusplus
 }
 #endif

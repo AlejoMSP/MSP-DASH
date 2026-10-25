@@ -53,6 +53,13 @@ int main() {
   CHECK(exists(P(1)) && rows(P(1)) >= 3 && sd_logging_is_active(), "RPM above 400: log_1.csv with a header and rows every 500 ms");
   CHECK(std::string(sd_logging_status_text()).find("log_1.csv") != std::string::npos, "status names the file");
 
+  { std::ifstream f(P(1)); std::string h; std::getline(f, h);
+    CHECK(h == "millis,RPM,CLT,marker", "the header ends with a marker column"); }
+  CHECK(sd_logging_mark(3), "a marker while logging is accepted");
+  tick(600);
+  { std::ifstream f(P(1)); std::string l, last; int marked = 0; while (std::getline(f, l)) { last = l; if (l.size() > 2 && l.substr(l.size() - 2) == ",3") marked++; }
+    CHECK(marked == 1, "marker 3 lands in exactly one row's marker column"); }
+  CHECK(!sd_logging_mark(0) && !sd_logging_mark(-1), "marker numbers must be 1 or more");
   printf("2. the stop delay keeps one file across a short stop\n");
   set(SIG_RPM, 0); tick(5000);
   CHECK(sd_logging_is_active() && !exists(P(2)), "5 s after the engine stops it is still logging into log_1");
@@ -120,6 +127,7 @@ int main() {
   set(SIG_TPS, 99); tick(1000);
   CHECK(!sd_logging_is_active() && !exists(P(1)), "nothing written and the logging dot stays off");
   CHECK(std::string(sd_logging_status_text()).find("No SD card") != std::string::npos, "status says there is no card");
+  CHECK(!sd_logging_mark(5), "no card: a marker is refused (the screen says so)");
 
   clean();
   printf("\n%d passed, %d failed\n", pass, fail);

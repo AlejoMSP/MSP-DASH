@@ -37,6 +37,7 @@ static uint32_t s_lastRowMs = 0;
 static const uint32_t LOG_INTERVAL_MS = 500;
 static volatile bool s_isLoggingActive = false;
 static char s_status[96] = "Starting...";
+static volatile int s_pendingMark = 0;      // marker to write in the next row (0 = none)
 
 static bool validTrigger(const SdLogTrigger *t) {
   if (t->mode >= LOG_START_COUNT || t->stop_delay_s > LOG_STOP_DELAY_MAX) return false;
@@ -80,6 +81,7 @@ bool sd_logging_set_trigger(const SdLogTrigger *t) {
 }
 
 bool sd_logging_is_active(void) { return s_isLoggingActive; }
+bool sd_logging_mark(int n) { if (!s_logging || !sd_storage_is_mounted() || n <= 0) return false; s_pendingMark = n; return true; }
 const char *sd_logging_status_text(void) { return s_status; }
 
 // Is the start condition true right now? A signal with no live data never counts.
@@ -113,7 +115,7 @@ static bool startSession(void) {
     if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
     fprintf(f, ",%s", gauge_config_signal_name((SignalId)sig));
   }
-  fprintf(f, "\n");
+  fprintf(f, ",marker\n");   // hub: press both buttons to put a number here
   fclose(f);
   s_logging = true;
   s_lastRowMs = millis() - LOG_INTERVAL_MS;   // first row right away
@@ -130,7 +132,7 @@ static void endSession(const char *why) {
 static const char *fileName(void) { const char *p = strrchr(s_logPath, '/'); return p ? p + 1 : s_logPath; }
 
 void sd_logging_loop(void) {
-  if (!sd_storage_is_mounted()) { s_isLoggingActive = false; return; }
+  if (!sd_storage_is_mounted()) { s_logging = false; s_isLoggingActive = false; return; }   // card gone: the session ends
   uint32_t now = millis();
 
   // The simulator feeds fake values: never write those to a log.
@@ -165,6 +167,7 @@ void sd_logging_loop(void) {
     if (gauge_config_signal_has_data((SignalId)sig)) fprintf(f, ",%.3f", gauge_config_signal_value((SignalId)sig));
     else fprintf(f, ",");
   }
-  fprintf(f, "\n");
+  int mark = s_pendingMark; s_pendingMark = 0;
+  if (mark) fprintf(f, ",%d\n", mark); else fprintf(f, ",\n");
   fclose(f);
 }

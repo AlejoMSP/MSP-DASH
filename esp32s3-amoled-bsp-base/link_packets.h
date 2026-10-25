@@ -23,7 +23,10 @@ static_assert(sizeof(LinkPacket) <= 250, "an ESP-NOW packet is 250 bytes at most
 
 // "MSC1": a command from the hub (page next/prev, brightness); target "" = all screens
 #define LINK_CMD_MAGIC 0x4D534331u
-enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3 };
+enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3,
+       LINK_CMD_SELECT = 4,      // the hub's buttons now control `target` ("" = all screens): that screen shows a pop-up
+       LINK_CMD_ALERT_ACK = 5,   // hide the full-screen warning (snoozed 30 s, like a tap)
+       LINK_CMD_LOG_MARK = 6 };  // marker number `value` in the SD log (the logging screen writes it)
 typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
 
 // "MSH1": a screen in remote role says hello every 2 s (its IP, build and name); the hub uses it for the online lights

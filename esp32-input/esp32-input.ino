@@ -16,7 +16,6 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include "wifi_config.h"
-#include "input_btn.h"
 #include <Preferences.h>
 #include "driver/twai.h"
 #include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
@@ -25,11 +24,12 @@
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 #include "speed_sensors.h" // the GPS reader (host-tested)
 #include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
+#include "btn_logic.h"       // short / long / both-button gestures (host-tested)
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 27
+#define INPUT_BUILD 28
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -165,17 +165,14 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   p.magic = LINK_CMD_MAGIC; p.seq = ++s_seq; p.cmd = cmd; p.value = value;
   strncpy(p.target, target, sizeof(p.target) - 1);
   for (int i = 0; i < 3; i++) { esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)); delay(4); }
-  snprintf(s_last, sizeof(s_last), "%s %d", cmd == LINK_CMD_PAGE_NEXT ? "next page" : cmd == LINK_CMD_PAGE_PREV ? "previous page" : "brightness", value);
+  const char *what = cmd == LINK_CMD_PAGE_NEXT ? "next page" : cmd == LINK_CMD_PAGE_PREV ? "previous page" : cmd == LINK_CMD_SELECT ? "buttons control"
+                   : cmd == LINK_CMD_ALERT_ACK ? "clear warning" : cmd == LINK_CMD_LOG_MARK ? "log marker" : "brightness";
+  if (cmd == LINK_CMD_SELECT) snprintf(s_last, sizeof(s_last), "%s %s", what, target[0] ? target : "all screens");
+  else if (cmd == LINK_CMD_ALERT_ACK) snprintf(s_last, sizeof(s_last), "%s", what);
+  else snprintf(s_last, sizeof(s_last), "%s %d%s%s", what, value, target[0] ? " to " : "", target);
   Serial.printf("sent: %s\n", s_last);
 }
 
-// ---- buttons: 30 ms debounce, act on press ----
-static Btn s_next = {BTN_NEXT, true, 0}, s_prev = {BTN_PREV, true, 0};
-static bool pressed(Btn &b) {
-  bool now = digitalRead(b.pin);
-  if (now != b.last && millis() - b.changed > 30) { b.last = now; b.changed = millis(); return now == LOW; }
-  return false;
-}
 
 // ---- brightness settings (saved; edited on this board's web page) ----
 // Mode auto: lights off = day %. Lights on = night min % at the dimmer's lowest, rising to night max % at its highest.
@@ -700,9 +697,40 @@ void setup() {
   if (s_wifiUp) setupWeb();
 }
 
+// ---- buttons (btn_logic.h): short = page, hold Next = choose screen, hold Prev = clear warning, both = log marker ----
+static BtnState s_btn = {};   // all zero = released (same as btn_init)
+static char s_target[LINK_NAME_LEN + 1] = "";   // the screen the buttons control; "" = all
+static uint32_t s_lastBtnMs = 0;
+static int s_markN = 0;
+#define BTN_TARGET_IDLE_MS 60000                  // back to all screens after a minute without a press
+static void chooseNextScreen() {
+  const char *names[SCREEN_MAX]; static char copy[SCREEN_MAX][LINK_NAME_LEN + 1];
+  portENTER_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX; i++) {
+    bool on = s_screens[i].used && millis() - s_screens[i].lastMs < SCREEN_OFFLINE_MS;
+    strcpy(copy[i], on ? s_screens[i].name : "");
+  }
+  portEXIT_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX; i++) names[i] = copy[i];
+  int k = btn_next_target(s_target, names, SCREEN_MAX);
+  strcpy(s_target, k < 0 ? "" : copy[k]);
+  sendCmd(LINK_CMD_SELECT, 0, s_target);   // only that screen (or all) shows the pop-up
+}
+static void handleButtons() {
+  int a = btn_step(&s_btn, millis(), digitalRead(BTN_NEXT) == LOW, digitalRead(BTN_PREV) == LOW);
+  if (a) s_lastBtnMs = millis();
+  switch (a) {
+    case BTN_NEXT_SHORT: sendCmd(LINK_CMD_PAGE_NEXT, 0, s_target); break;
+    case BTN_PREV_SHORT: sendCmd(LINK_CMD_PAGE_PREV, 0, s_target); break;
+    case BTN_NEXT_LONG:  chooseNextScreen(); break;
+    case BTN_PREV_LONG:  sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
+    case BTN_BOTH:       sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
+  }
+  if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
+}
+
 void loop() {
-  if (pressed(s_next)) sendCmd(LINK_CMD_PAGE_NEXT, 0, "");
-  if (pressed(s_prev)) sendCmd(LINK_CMD_PAGE_PREV, 0, "");
+  handleButtons();
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   sim_loop();

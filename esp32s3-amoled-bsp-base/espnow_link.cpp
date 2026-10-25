@@ -1,5 +1,7 @@
 // espnow_link.cpp - see espnow_link.h.
 #include "simulator.h"
+#include "sd_storage.h"
+#include "sd_logging.h"
 #include "espnow_link.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
@@ -66,6 +68,14 @@ static bool handleCmd(const uint8_t *data, int len) {
   if (c.cmd == LINK_CMD_PAGE_NEXT) g_page_nav_delta = 1;
   else if (c.cmd == LINK_CMD_PAGE_PREV) g_page_nav_delta = -1;
   else if (c.cmd == LINK_CMD_BRIGHTNESS) { if (c.value != lcd_get_brightness_pct()) lcd_set_brightness_pct(c.value); }
+  else if (c.cmd == LINK_CMD_SELECT) gauge_app_popup(c.target[0] ? "Buttons: this screen" : "Buttons: all screens");
+  else if (c.cmd == LINK_CMD_ALERT_ACK) g_alert_ack_req = 1;
+  else if (c.cmd == LINK_CMD_LOG_MARK) {
+    char t[40];
+    if (sd_storage_is_mounted()) snprintf(t, sizeof t, sd_logging_mark(c.value) ? "Marker %d logged" : "Marker %d: not logging", c.value);
+    else snprintf(t, sizeof t, "Marker %d", c.value);
+    gauge_app_popup(t);
+  }
   return true;
 }
 
