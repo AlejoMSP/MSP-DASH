@@ -60,6 +60,16 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const c = JSON.parse(probe.run('JSON.stringify(pages[0].cells[0])'));
     check(c.signal === 28 && c.min === 0 && c.max === 100 && c.rest === 0 && c.units === "%" && c.decimals === 1 && c.has_warning === false,
       "picking it fills the scale, units and decimals the hub gave it: " + [c.min, c.max, c.units, c.decimals].join(", ")); }
+  { const P = JSON.parse(probe.run('JSON.stringify(COLOR_PRESETS)'));
+    const L = c => { const f = x => (x /= 255) <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); return 0.2126 * f(c >> 16 & 255) + 0.7152 * f(c >> 8 & 255) + 0.0722 * f(c & 255); };
+    const cr = (a, b) => { const x = L(a), y = L(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    check(P.length === 10 && new Set(P.map(p => p[0])).size === 10, "10 colour presets, all named differently");
+    check(P.every(p => cr(p[1], p[3]) >= 3 && cr(p[2], p[3]) >= 4.5 && cr(0xFFFFFF, p[3]) >= 7),
+      "every preset: needle 3:1 or better against the face, ticks 4.5:1, the white readout 7:1 (WCAG contrast)");
+    probe.run('applyCellPreset(0, 0, 7)');
+    const c = JSON.parse(probe.run('JSON.stringify(pages[0].cells[0])'));
+    check(c.needle_color === 0xD7262E && c.tick_color === 0xF2E6C9 && c.bg_color === 0x1C1A14, "picking a preset sets the cell's needle, tick and background colours");
+    check(/Needle glow/.test(require('fs').readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp', 'utf8')), "the editor has the Needle glow box"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

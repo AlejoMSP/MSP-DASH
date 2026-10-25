@@ -385,6 +385,7 @@ R"rawliteral(<div class="pad">
   <div class="bulk">
     <div class="bulk-title">Apply to ALL cells</div>
     <div class="bulk-sub">Sets every cell on every page. Click Save afterward to keep it.</div>
+    <label>Color preset <select id="bulkPreset" onchange="if(this.value!=='')pickBulkPreset(+this.value)"></select></label>
     <div class="bulk-colors">
       <label>Needle<input type="color" id="bulkNeedle" value="#ffffff"></label>
       <label>Tick / Dial<input type="color" id="bulkTick" value="#ffffff"></label>
@@ -430,7 +431,7 @@ R"rawliteral(
       return { enabled:false, signal:0, gauge_type:0, min:0, max:100, rest:0, caption:"",
         needle_color:0xFFFFFF, tick_color:0xFFFFFF, bg_color:0x000000, value_divisor:1.0,
         tick_count:26, major_nth:5, refresh_hz:10, show_value:false, value_font_size:28, decimals:1, h_align:0, tick_font_size:28, caption_font_size:0, caption_on_face:false, units:"", v_align:0, start_deg:225, end_deg:135,
-        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, dial_x:0, dial_y:0, peak_hold:false, peak_hold_s:3, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
+        low_crit_on:false, low_crit:0, low_warn_on:false, low_warn:0, high_warn_on:false, high_warn:0, high_crit_on:false, high_crit:0, zone_style:1, needle_hub_pct:0, needle_tip_pct:0, needle_w:6, needle_glow:false, dial_x:0, dial_y:0, peak_hold:false, peak_hold_s:3, text_xy:false, cap_x:0, cap_y:0, val_x:0, val_y:0,
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
@@ -540,6 +541,7 @@ R"rawliteral(
           <label><input type="checkbox" ${c.peak_hold?"checked":""} onchange="setCellField(${pIdx},${cIdx},'peak_hold',this.checked)"> Peak hold: a shadow needle stays at the highest reading</label>
           ${c.peak_hold ? `<label>Hold for (seconds, 1 to 10) <input type="number" min="1" max="10" value="${c.peak_hold_s||3}" onchange="setCellField(${pIdx},${cIdx},'peak_hold_s',Math.min(10,Math.max(1,parseInt(this.value)||3)))"></label>` : ""}
           <label>Needle thickness (px) <input type="number" min="1" max="20" step="1" value="${c.needle_w||6}" onchange="setCellField(${pIdx},${cIdx},'needle_w',Math.min(20,Math.max(1,parseInt(this.value)||6)))"></label>
+          <label><input type="checkbox" ${c.needle_glow?"checked":""} onchange="setCellField(${pIdx},${cIdx},'needle_glow',this.checked)"> Needle glow: a soft halo of the needle colour behind it</label>
           <p class="hint">Needle length trim, as a percent of the dial's radius. 0 and 0 is the normal needle. Both ends together can trim at most 85.</p>
           ` : ""}
           ${c.gauge_type===3 ? `
@@ -550,6 +552,7 @@ R"rawliteral(
           </div>
           <p style="font-size:0.75em;color:#888;margin:2px 0">Trend graphs take 100 samples across the history window and ignore Refresh Rate. Min and Max set the vertical range.</p>
           ` : ""}
+          <label>Color preset <select onchange="if(this.value!=='')applyCellPreset(${pIdx},${cIdx},+this.value)">${presetOptions()}</select></label>
           <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
           <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
           <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
@@ -854,6 +857,36 @@ R"rawliteral(
       document.getElementById("status").textContent = "Needle applied locally - click Save to persist.";
     }
 
+    // Ten colour sets seen on real gauges, each with strong contrast between the needle, the ticks and the face.
+    // [name, needle, ticks/dial, background]
+    const COLOR_PRESETS = [
+      ["Classic: white on black, red needle", 0xFF3B30, 0xFFFFFF, 0x000000],
+      ["Racing orange",                      0xFF8C00, 0xE8E8E8, 0x000000],
+      ["Night amber (easy on the eyes)",     0xFF5A00, 0xFFB000, 0x000000],
+      ["Arctic blue",                        0x00B4FF, 0xCFE8FF, 0x06121F],
+      ["Neon: cyan ticks, magenta needle",   0xFF2E88, 0x7DF9FF, 0x000000],
+      ["Teal dial, coral needle",            0xFF6B3D, 0x66FFD9, 0x001414],
+      ["Motorsport yellow needle",           0xFFE600, 0xFFFFFF, 0x000000],
+      ["Vintage: cream dial, red needle",    0xD7262E, 0xF2E6C9, 0x1C1A14],
+      ["Carbon grey",                        0xFF1744, 0xF5F5F5, 0x1E1E1E],
+      ["Green phosphor",                     0xFFFFFF, 0x39FF14, 0x000000],
+    ];
+    function presetOptions() { return '<option value="">Pick one...</option>' + COLOR_PRESETS.map((p, i) => `<option value="${i}">${p[0]}</option>`).join(""); }
+    function applyCellPreset(pIdx, cIdx, i) {
+      const p = COLOR_PRESETS[i]; if (!p) return;
+      const c = pages[pIdx].cells[cIdx];
+      c.needle_color = p[1]; c.tick_color = p[2]; c.bg_color = p[3];
+      renderPages();
+      document.getElementById("status").textContent = p[0] + " applied - click Save to keep it.";
+    }
+    function pickBulkPreset(i) {   // fills the three pickers above "Apply colors to All"
+      const p = COLOR_PRESETS[i]; if (!p) return;
+      const hex = v => "#" + v.toString(16).padStart(6, "0");
+      document.getElementById("bulkNeedle").value = hex(p[1]);
+      document.getElementById("bulkTick").value = hex(p[2]);
+      document.getElementById("bulkBg").value = hex(p[3]);
+    }
+
     async function applyColorsToAll() {
       const needle = document.getElementById("bulkNeedle").value.substring(1);
       const tick = document.getElementById("bulkTick").value.substring(1);
@@ -872,6 +905,7 @@ R"rawliteral(
 )rawliteral"
 #include "web_indicator_editor.h"
 R"rawliteral(
+    { const sel = document.getElementById("bulkPreset"); if (sel) sel.innerHTML = presetOptions(); }
     load();
   </script>
 </body>

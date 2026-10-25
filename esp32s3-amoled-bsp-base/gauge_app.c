@@ -140,6 +140,7 @@ typedef struct {
   lv_obj_t *meter;         // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *needle; // NULL for GAUGE_TYPE_NUMBER
   lv_meter_indicator_t *peakNeedle; // shadow needle for peak hold; NULL when off
+  lv_meter_indicator_t *glow[2];    // needle glow: two wider, dimmer copies under the needle; NULL when off
   int32_t peak_val; uint32_t peak_ms; uint32_t peak_hold_ms;
   lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
   int32_t needleHubPct;         // needle trim, % of the dial radius: gap at the centre ...
@@ -544,6 +545,7 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   rt->meter = NULL;
   rt->needle = NULL;
   rt->peakNeedle = NULL;
+  rt->glow[0] = rt->glow[1] = NULL;
   rt->numberLabel = NULL;
   rt->chart = NULL;
   rt->chartSeries = NULL;
@@ -828,6 +830,17 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
                                                 lv_color_mix(needleColor, lv_color_hex(cfg->bg_color), 110), -12);
       lv_meter_set_indicator_value(meter, rt->peakNeedle, cfg->rest_val);
       rt->peak_val = cfg->min_val; rt->peak_ms = 0; rt->peak_hold_ms = (uint32_t)gauge_resolve_peak_s(cfg->peak_hold_s) * 1000u;
+    }
+    // Needle glow: two wider lines of the needle colour mixed into the background, under the needle (LVGL 8 lines
+    // have no shadow). Solid colours, no transparency, so it costs little to draw.
+    rt->glow[0] = rt->glow[1] = NULL;
+    if (cfg->needle_glow) {
+      int nw = gauge_resolve_needle_w(cfg->needle_w);
+      lv_color_t bgc = lv_color_hex(cfg->bg_color);
+      rt->glow[0] = lv_meter_add_needle_line(meter, scale, (uint16_t)(nw * 3 + 4), lv_color_mix(needleColor, bgc, 60), -12);
+      rt->glow[1] = lv_meter_add_needle_line(meter, scale, (uint16_t)(nw * 2 + 2), lv_color_mix(needleColor, bgc, 120), -12);
+      lv_meter_set_indicator_value(meter, rt->glow[0], cfg->rest_val);
+      lv_meter_set_indicator_value(meter, rt->glow[1], cfg->rest_val);
     }
     lv_meter_indicator_t *needle = lv_meter_add_needle_line(meter, scale, (uint16_t)gauge_resolve_needle_w(cfg->needle_w), needleColor, -12);
     lv_meter_set_indicator_value(meter, needle, cfg->rest_val);
@@ -1237,7 +1250,10 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
           lv_chart_set_next_value(c->chart, c->chartSeries, (lv_coord_t)(y + 0.5f));
         }
       } else {
-        if (c->meter) lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
+        if (c->meter) {
+          if (c->glow[0]) { lv_meter_set_indicator_value(c->meter, c->glow[0], displayValue); lv_meter_set_indicator_value(c->meter, c->glow[1], displayValue); }
+          lv_meter_set_indicator_value(c->meter, c->needle, displayValue);
+        }
         if (c->meter && c->peakNeedle) {   // peak hold: rises with the reading, holds the top for the set time, then drops back
           if (!has_data || displayValue >= c->peak_val || (uint32_t)(now - c->peak_ms) >= c->peak_hold_ms) { c->peak_val = displayValue; c->peak_ms = now; }
           lv_meter_set_indicator_value(c->meter, c->peakNeedle, c->peak_val);

@@ -126,6 +126,7 @@ typedef struct {
   bool peak_hold;          // needle/half-moon: a shadow needle stays at the highest reading for peak_hold_s, then resets
   int32_t peak_hold_s;     // 1-10 s, default 3
   int32_t needle_w;        // needle thickness, px (1-20, default 6)
+  bool needle_glow;        // needle/half-moon: a soft halo of the needle colour behind the needle (two wider, dimmer lines)
   bool text_xy;            // place the caption and the readout (+ units under it) by coordinates instead of automatically
   int32_t cap_x, cap_y;    // caption centre, px from the cell's centre (+x right, +y down); -300..300
   int32_t val_x, val_y;    // readout centre, same; the units follow under it

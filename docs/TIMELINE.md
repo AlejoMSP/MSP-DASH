@@ -207,3 +207,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | hub 26 | 2026-10-24 | (this commit) | 433 MHz: the 5 strongest bursts kept separately (noise cannot push them out), All pulses button (/rf/burst), Clear |
 | hub 27 | 2026-10-24 | (this commit) | 433 MHz: pair-based Manchester decoder (stretch correction, glitch merge) - first U912 packet decoded: 44 1D C5 A2 A2 B5 3B 51 0E CD, sent twice |
 | 179 | 2026-10-24 | (this commit) | Hub buttons (hub 28): hold Next = choose screen (pop-up on it), hold Prev = clear warning on all screens, both = SD log marker (new marker column); short presses on release, to the chosen screen |
+| 180 | 2026-10-25 | (this commit) | 10 colour presets (per cell and Apply to All), contrast-checked; needle glow option (two dimmer, wider lines under the needle) |
