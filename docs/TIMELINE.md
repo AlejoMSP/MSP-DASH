@@ -204,3 +204,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | hub 23 | 2026-10-24 | (this commit) | CC1101 433 MHz listen mode on the hub (/rf): bursts gated by RSSI, pulses, half-bit time, Manchester bits and bytes, for identifying the tire sensors |
 | hub 24 | 2026-10-24 | (this commit) | 433 MHz: no SPI traffic while recording a burst, ISR ignores edges during/just after SPI reads (the 1 ms RSSI poll was showing up as pulses) |
 | hub 25 | 2026-10-24 | (this commit) | 433 MHz: automatic threshold (background median + margin), 2-minute signal history chart, hide-noise filter |
+| hub 26 | 2026-10-24 | (this commit) | 433 MHz: the 5 strongest bursts kept separately (noise cannot push them out), All pulses button (/rf/burst), Clear |

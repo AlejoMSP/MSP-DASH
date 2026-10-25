@@ -210,6 +210,9 @@ svg{width:100%;height:140px;background:#000;border:1px solid #222;border-radius:
 <button onclick="save()">Save</button> <span id="msg" class="note"></span>
 <div><label><input type="checkbox" id="hide" checked onchange="draw()"> Hide noise (show only bursts with 24+ Manchester bits)</label></div>
 <div class="note">Tire sensors send when the wheel turns, when the pressure changes, or every few minutes when parked. Watch for a spike when the kit's display changes.</div></div>
+<h3 style="color:#4dd0e1">Strongest bursts</h3><div class="note">The 5 strongest since the last clear. Noise cannot push these out. <button onclick="clr()">Clear</button></div>
+<div id="top"></div><pre id="full" class="mono box" style="display:none;white-space:pre-wrap"></pre>
+<h3 style="color:#4dd0e1">Latest bursts</h3>
 <div id="list"></div>
 <p><a href="/">Back</a></p>
 <script>
@@ -222,7 +225,12 @@ function chart(j){const h=j.hist,n=h.length;if(!n){$("ch").innerHTML="";return;}
  const line=(k,c)=>'<polyline fill="none" stroke="'+c+'" stroke-width="1" points="'+h.map((p,i)=>x(i)+","+y(p[k]).toFixed(1)).join(" ")+'"/>';
  const thr=j.auto?h.map((p,i)=>x(i)+","+y(p[1]+j.margin).toFixed(1)).join(" "):(x(0)+","+y(j.thr)+" 240,"+y(j.thr));
  $("ch").innerHTML=line(1,"#888")+'<polyline fill="none" stroke="#f5a623" stroke-width="0.7" stroke-dasharray="2,2" points="'+thr+'"/>'+line(0,"#4dd0e1");}
+function card(b){return '<div class="b"><b>'+age(b.age)+'</b> | '+b.rssi+' dBm | '+b.pulses+' pulses | half-bit '+b.unit+' us (about '+(b.unit?Math.round(500000/b.unit):0)+' bit/s) | '+b.nbits+' Manchester bits'+(b.inv?' (inverted)':'')+
+ ' <button onclick="full('+b.ms+')">All pulses</button><div class="hex mono">'+(b.hex||'(no Manchester bytes)')+'</div><div class="mono note">bits: '+b.bits+'</div><div class="mono note">first pulses (us, first level '+b.first+'): '+b.w.join(" ")+'</div></div>';}
+async function full(ms){const r=await fetch("/rf/burst?ms="+ms);$("full").style.display="";$("full").textContent=await r.text();}
+async function clr(){await fetch("/rf/clear");$("full").style.display="none";}
 function draw(){const j=last;if(!j)return;const hide=$("hide").checked;const l=j.bursts.filter(b=>!hide||b.nbits>=24);
+ const t=(j.top||[]).slice().sort((a,b)=>b.rssi-a.rssi);$("top").innerHTML=t.length?t.map(card).join(""):'<p class="note">None yet.</p>';
  $("list").innerHTML=l.length?l.map(b=>'<div class="b"><b>'+age(b.age)+'</b> | '+b.rssi+' dBm | '+b.pulses+' pulses | half-bit '+b.unit+' us (about '+(b.unit?Math.round(500000/b.unit):0)+' bit/s) | '+b.nbits+' Manchester bits'+(b.inv?' (inverted)':'')+
  '<div class="hex mono">'+(b.hex||'(no Manchester bytes)')+'</div><div class="mono note">bits: '+b.bits+'</div><div class="mono note">pulses (us, first level '+b.first+'): '+b.w.join(" ")+'</div></div>').join("")
  :'<p class="note">'+(j.bursts.length&&hide?j.bursts.length+" bursts hidden as noise (untick Hide noise to see them).":"Nothing heard yet above the threshold.")+'</p>';}

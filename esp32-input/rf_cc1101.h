@@ -38,7 +38,8 @@ typedef struct {
   bool inverted;
   char bits[257];                 // first 256 Manchester bits as '0'/'1'
   char hex[3 * 32 + 1];           // first 32 bytes
-  uint16_t w[48];                 // first 48 pulse widths, us
+  uint16_t nw;                    // pulse widths stored (all of them, up to RF_MAX_PULSES)
+  uint16_t w[RF_MAX_PULSES];      // pulse widths, us
   uint8_t firstLevel;
 } RfBurst;
 
@@ -57,6 +58,9 @@ static volatile int s_rfHistHead = 0, s_rfHistCount = 0;
 static volatile int s_rfRssi = -120;
 static volatile bool s_rfReconfig = false;
 static RfBurst s_rfBursts[RF_BURSTS];
+#define RF_TOP 5                              // the strongest bursts are also kept here, so noise cannot push them out
+static RfBurst s_rfTop[RF_TOP];
+static volatile int s_rfTopCount = 0;
 static volatile int s_rfBurstHead = 0, s_rfBurstCount = 0;
 static volatile uint32_t s_rfBurstTotal = 0;
 static portMUX_TYPE s_rfMux = portMUX_INITIALIZER_UNLOCKED;
@@ -167,7 +171,8 @@ static inline int rfThreshold() { return s_rfAuto ? s_rfFloor + s_rfMargin : s_r
 static void rfFinishBurst(const uint16_t *w, int n, uint8_t firstLevel, int peak) {
   if (n < RF_MIN_PULSES) return;
   static uint8_t lv[RF_MAX_BITS * 2], bits[RF_MAX_BITS], bytes[RF_MAX_BYTES];
-  RfBurst b; memset(&b, 0, sizeof b);
+  static RfBurst b;   // 1.3 kB: static, not on the task stack
+  memset(&b, 0, sizeof b);
   b.ms = millis(); b.rssi = (int8_t)peak; b.pulses = n; b.firstLevel = firstLevel;
   b.unit = (uint16_t)rf_estimate_unit(w, n);
   int m = rf_pulses_to_levels(w, n, firstLevel, b.unit, lv, sizeof lv);
@@ -176,8 +181,16 @@ static void rfFinishBurst(const uint16_t *w, int n, uint8_t firstLevel, int peak
   b.nbits = nbits; b.inverted = inv;
   for (int i = 0; i < nbits && i < 256; i++) b.bits[i] = bits[i] ? '1' : '0';
   rf_hex(bytes, nbytes, b.hex);
-  for (int i = 0; i < n && i < 48; i++) b.w[i] = w[i];
+  b.nw = n > RF_MAX_PULSES ? RF_MAX_PULSES : n;
+  memcpy(b.w, w, b.nw * sizeof(uint16_t));
   portENTER_CRITICAL(&s_rfMux);
+  // strongest list, kept in order: replace the weakest if this one is stronger
+  if (s_rfTopCount < RF_TOP) s_rfTop[s_rfTopCount++] = b;
+  else {
+    int weakest = 0;
+    for (int i = 1; i < RF_TOP; i++) if (s_rfTop[i].rssi < s_rfTop[weakest].rssi) weakest = i;
+    if (b.rssi > s_rfTop[weakest].rssi) s_rfTop[weakest] = b;
+  }
   s_rfBursts[s_rfBurstHead] = b;
   s_rfBurstHead = (s_rfBurstHead + 1) % RF_BURSTS;
   if (s_rfBurstCount < RF_BURSTS) s_rfBurstCount++;

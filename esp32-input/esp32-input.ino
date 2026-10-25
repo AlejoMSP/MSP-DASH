@@ -29,7 +29,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 25
+#define INPUT_BUILD 26
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -510,20 +510,42 @@ static void setupWeb() {
       j += "["; j += String((int)s_rfHistPeak[i]); j += ","; j += String((int)s_rfHistFloor[i]); j += k ? "]," : "]";
     }
     j += "],\"bursts\":[";
+    // newest bursts, then the strongest ones; only the first 48 pulses here (/rf/burst gives all of them)
+    static RfBurst copy[RF_BURSTS + RF_TOP];
     portENTER_CRITICAL(&s_rfMux);
-    int count = s_rfBurstCount, head = s_rfBurstHead;
-    static RfBurst copy[RF_BURSTS];
-    memcpy(copy, s_rfBursts, sizeof copy);
+    int count = s_rfBurstCount, head = s_rfBurstHead, top = s_rfTopCount;
+    for (int k = 0; k < count; k++) copy[k] = s_rfBursts[(head - 1 - k + RF_BURSTS) % RF_BURSTS];
+    for (int k = 0; k < top; k++) copy[count + k] = s_rfTop[k];
     portEXIT_CRITICAL(&s_rfMux);
-    for (int k = 0; k < count; k++) {
-      const RfBurst &r = copy[(head - 1 - k + RF_BURSTS) % RF_BURSTS];   // newest first
-      snprintf(b, sizeof b, "%s{\"age\":%lu,\"rssi\":%d,\"pulses\":%u,\"unit\":%u,\"nbits\":%u,\"inv\":%s,\"first\":%u,\"bits\":\"",
-               k ? "," : "", (unsigned long)(millis() - r.ms), r.rssi, r.pulses, r.unit, r.nbits, r.inverted ? "true" : "false", r.firstLevel);
+    auto one = [&](const RfBurst &r, bool first) {
+      snprintf(b, sizeof b, "%s{\"ms\":%lu,\"age\":%lu,\"rssi\":%d,\"pulses\":%u,\"unit\":%u,\"nbits\":%u,\"inv\":%s,\"first\":%u,\"bits\":\"",
+               first ? "" : ",", (unsigned long)r.ms, (unsigned long)(millis() - r.ms), r.rssi, r.pulses, r.unit, r.nbits, r.inverted ? "true" : "false", r.firstLevel);
       j += b; j += r.bits; j += "\",\"hex\":\""; j += r.hex; j += "\",\"w\":[";
-      for (int i = 0; i < 48 && i < r.pulses; i++) { j += String(r.w[i]); if (i + 1 < 48 && i + 1 < r.pulses) j += ","; }
+      for (int i = 0; i < 48 && i < r.nw; i++) { if (i) j += ","; j += String(r.w[i]); }
       j += "]}";
-    }
+    };
+    for (int k = 0; k < count; k++) one(copy[k], k == 0);
+    j += "],\"top\":[";
+    for (int k = 0; k < top; k++) one(copy[count + k], k == 0);
     server.send(200, "application/json", j + "]}");
+  });
+  // all pulses of one of the strongest bursts (?ms= its time), as plain text for copying
+  server.on("/rf/burst", HTTP_GET, []() {
+    uint32_t ms = strtoul(server.arg("ms").c_str(), NULL, 10);
+    static RfBurst r; bool found = false;
+    portENTER_CRITICAL(&s_rfMux);
+    for (int k = 0; k < s_rfTopCount && !found; k++) if (s_rfTop[k].ms == ms) { r = s_rfTop[k]; found = true; }
+    for (int k = 0; k < s_rfBurstCount && !found; k++) if (s_rfBursts[k].ms == ms) { r = s_rfBursts[k]; found = true; }
+    portEXIT_CRITICAL(&s_rfMux);
+    if (!found) { server.send(404, "text/plain", "That burst is no longer kept"); return; }
+    String t; t.reserve(r.nw * 5 + 100);
+    t += "rssi "; t += String((int)r.rssi); t += " dBm, "; t += String((int)r.pulses); t += " pulses, first level "; t += String((int)r.firstLevel); t += ", ";   // String(int): += on an int8_t would add a character t += s_rfOok ? "OOK" : "2-FSK"; t += "\n";
+    for (int i = 0; i < r.nw; i++) { t += String(r.w[i]); t += (i % 20 == 19) ? "\n" : " "; }
+    server.send(200, "text/plain", t);
+  });
+  server.on("/rf/clear", HTTP_GET, []() {
+    portENTER_CRITICAL(&s_rfMux); s_rfTopCount = 0; s_rfBurstCount = 0; portEXIT_CRITICAL(&s_rfMux);
+    server.send(200, "text/plain", "Cleared");
   });
   server.on("/rf/set", HTTP_GET, []() {
     if (server.hasArg("mod")) s_rfOok = server.arg("mod") == "ook";
