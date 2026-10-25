@@ -36,7 +36,7 @@ const cells = [{enabled:true,signal:1,caption:"RPM",value_divisor:1,has_warning:
 const lamp = (sig, op, thr, hyst, on, off) => ({ signal: sig, op, threshold: thr, hysteresis: hyst, on_text: on, off_text: off });
 const webPages = [{enabled:true,layout:3,cells},
                   {enabled:true,layout:0,cells:[{enabled:true,signal:1,caption:"RPM BIG",value_divisor:1000,decimals:2}, cells[1]]},
-                  {enabled:true,kind:1,indicators:[lamp(5,1,40,3,"OIL","oil"), lamp(17,0,0.5,0,"FAN","fan"), lamp(4,0,15,0,"A<b>","x")]},
+                  {enabled:true,kind:1,name:"Lamps <1>",indicators:[lamp(5,1,40,3,"OIL","oil"), lamp(17,0,0.5,0,"FAN","fan"), lamp(4,0,15,0,"A<b>","x")]},
                   {enabled:false,layout:0,cells:[{enabled:true,signal:9,caption:"HIDDEN",value_divisor:1}]}];
 let statusFail = true; const urls = [];
 global.fetch = async (url) => {
@@ -67,7 +67,7 @@ const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m
   check(/Connecting/.test(status()), "says Connecting: " + status());
 
   console.log("2. one line per sensor, grouped by page");
-  check(heads().join(",") === "Page 1,Page 2,Page 3", "enabled pages only, numbered as on the screen: " + heads().join(","));
+  check(heads().join(",") === "Page 1,Page 2,Page 3: Lamps &lt;1&gt;", "enabled pages only, numbered as on the screen, with the name when set (escaped): " + heads().join(","));
   check(!html().includes("HIDDEN"), "a disabled page is left out");
   check(rows().length === 4 + 1 + 3, "4 + 1 (1-cell layout shows only its first cell) + 3 lamps = 8 lines: " + rows().length);
   check(rows().slice(0, 4).every(r => r.val === "--"), "no data yet: --");

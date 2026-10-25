@@ -161,8 +161,10 @@ typedef struct {
 
 // A page: a chosen layout template plus however many cells that
 // layout needs (unused cells beyond the layout's count are ignored) - or, for an indicators page, a grid of lamps.
+#define GAUGE_PAGE_NAME_LEN 16   // including the terminating 0
 typedef struct {
   bool enabled;    // false = this page is skipped in the page cycle
+  char name[GAUGE_PAGE_NAME_LEN];   // "" = no name ("Page 3"); shown in the editor, the front page and a pop-up on switching
   LayoutType layout;
   CellConfig cells[MAX_CELLS_PER_PAGE];
   // ---- indicator pages (kind == PAGE_INDICATORS): layout and cells are unused ----

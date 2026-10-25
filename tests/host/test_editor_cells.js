@@ -73,6 +73,9 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     const c = JSON.parse(probe.run('JSON.stringify(pages[0].cells[0])'));
     check(c.needle_color === 0xD7262E && c.tick_color === 0xF2E6C9 && c.bg_color === 0x1C1A14, "picking a preset sets the cell's needle, tick and background colours");
     check(/Needle glow/.test(require('fs').readFileSync(__dirname + '/../../esp32s3-amoled-bsp-base/web_monitor.cpp', 'utf8')), "the editor has the Needle glow box"); }
+  { probe.run('pages[0].name = "Boost <x>"; renderPages()');
+    const h = probe.run('document.getElementById("pages").innerHTML');
+    check(/class="pname"[^>]*value="Boost &lt;x&gt;"/.test(h || ""), "each page has a name box, showing the saved name (escaped)"); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

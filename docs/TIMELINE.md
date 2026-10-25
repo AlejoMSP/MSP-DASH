@@ -209,3 +209,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 179 | 2026-10-24 | (this commit) | Hub buttons (hub 28): hold Next = choose screen (pop-up on it), hold Prev = clear warning on all screens, both = SD log marker (new marker column); short presses on release, to the chosen screen |
 | 180 | 2026-10-25 | (this commit) | 10 colour presets (per cell and Apply to All), contrast-checked; needle glow option (two dimmer, wider lines under the needle) |
 | 181 | 2026-10-25 | (this commit) | Configurable buttons (hub 29, /buttons): left/right/both x press,1,2,3,5,10 s; actions next/prev page, next gauge, go to page, dim/brighten all, colour scheme (pick or cycle, recoloured live and saved), race mode, clear warning, log marker; 'Release: ...' hint while held |
+| 182 | 2026-10-25 | (this commit) | Page names: name box on every page in the editor (gauge and indicator pages), shown on the front page and as a pop-up when a page is switched to |

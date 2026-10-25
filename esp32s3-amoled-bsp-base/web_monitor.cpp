@@ -225,7 +225,7 @@ function updateLamps() {
           }).join("");
         }
         if (!rows) rows = "<div class='srow'><span class='nm'><small>nothing set on this page</small></span></div>";
-        return `<div class="spage">Page ${pi + 1}</div>` + rows;
+        return `<div class="spage">Page ${pi + 1}${pg.name ? ": " + escHtml(pg.name) : ""}</div>` + rows;
       }).join("");
     }
 
@@ -373,6 +373,7 @@ R"rawliteral(<style>
     .zonerow { display:flex; align-items:center; gap:8px; margin:4px 0; }
     .zonerow label { flex:1; }
     .zonerow input[type=number] { width:92px; margin:0; }
+    .pname { width:9em; margin:0 6px; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
     #status, #boot { text-align:center; margin:8px 0; color:#4dd0e1; min-height:1.2em; }
     #status:empty, #boot:empty { display:none; }
@@ -772,6 +773,7 @@ R"rawliteral(
           <div class="page-card">
             <div class="page-header">
               <strong>Page ${pIdx + 1}</strong>
+              <input type="text" class="pname" maxlength="15" placeholder="Name" value="${escHtml(p.name || "")}" oninput="pages[${pIdx}].name=this.value" title="Page name (up to 15 characters)">
               <select onchange="changeLayout(${pIdx}, parseInt(this.value))">
                 ${LAYOUTS.map((l,v)=>`<option value="${v}" ${p.layout===v?"selected":""}>${l}</option>`).join("")}
               </select>

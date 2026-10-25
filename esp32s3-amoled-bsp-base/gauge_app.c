@@ -192,6 +192,7 @@ typedef struct {
 
 typedef struct {
   lv_obj_t *page;
+  char name[GAUGE_PAGE_NAME_LEN];  // shown in a pop-up when the page is switched to
   int numCells;                    // 0 on an indicators page
   CellRuntime cells[MAX_CELLS_PER_PAGE];
   IndLamp *lamps;                  // indicators pages only: numLamps lamps (allocated when the page is built)
@@ -1204,7 +1205,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
   }
 
   if (g_requested_page >= 0) {   // a page that does not exist is dropped, not kept pending
-    if (g_requested_page < s_num_active_pages) switch_to_page(g_requested_page);
+    if (g_requested_page < s_num_active_pages) { switch_to_page(g_requested_page); if (pages[g_requested_page].name[0]) gauge_app_popup(pages[g_requested_page].name); }
     g_requested_page = -1;
   }
 
@@ -1238,6 +1239,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
     } else {
       int next = (s_current_page + g_page_nav_delta + s_num_active_pages) % s_num_active_pages;
       switch_to_page(next);
+      if (pages[next].name[0]) gauge_app_popup(pages[next].name);   // the page's name, briefly
     }
     g_page_nav_delta = 0;
   }
@@ -1362,6 +1364,8 @@ void build_gauge_app(void) {
   int pageIdx = 0;
   for (int i = 0; i < MAX_PAGES; i++) {
     if (!pageConfigs[i].enabled) continue;
+    strncpy(pages[pageIdx].name, pageConfigs[i].name, GAUGE_PAGE_NAME_LEN - 1);
+    pages[pageIdx].name[GAUGE_PAGE_NAME_LEN - 1] = 0;
     if (pageConfigs[i].kind == PAGE_INDICATORS) build_indicator_page(pageIdx, &pageConfigs[i]);
     else build_page(pageIdx, &pageConfigs[i]);
     pageIdx++;

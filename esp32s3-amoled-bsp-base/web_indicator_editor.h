@@ -138,7 +138,7 @@ R"rawliteral(
       return `
         <div class="page-card">
           <div class="page-header">
-            <strong>Page ${pIdx + 1}</strong> <span class="badge">Indicators</span>
+            <strong>Page ${pIdx + 1}</strong> <input type="text" class="pname" maxlength="15" placeholder="Name" value="${escHtml(p.name || "")}" oninput="pages[${pIdx}].name=this.value" title="Page name (up to 15 characters)"> <span class="badge">Indicators</span>
             <select onchange="setIndCols(${pIdx}, parseInt(this.value))" title="Indicators per row">
               ${[1, 2, 3, 4].map(n => `<option value="${n}" ${cols === n ? "selected" : ""}>${n} column${n > 1 ? "s" : ""}</option>`).join("")}
             </select>

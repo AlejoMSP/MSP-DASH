@@ -324,6 +324,7 @@ void gauge_config_pages_to_json(const PageConfig *pages, JsonDocument &doc) {
     if (!pages[i].enabled) continue; // disabled pages are not written - the editors already compact the list
     JsonObject pageObj = arr.add<JsonObject>();
     pageObj["enabled"] = true;
+    if (pages[i].name[0]) pageObj["name"] = pages[i].name;
     if (pages[i].kind == PAGE_INDICATORS) {        // a page of on/off lamps: no layout, no cells
       pageObj["kind"] = (int)PAGE_INDICATORS;
       pageObj["cols"] = pages[i].ind_cols;
@@ -347,6 +348,9 @@ void gauge_config_pages_from_json(JsonArray arr, PageConfig *pages) {
   for (JsonObject pageObj : arr) {
     if (i >= MAX_PAGES) break;
     pages[i].enabled = pageObj["enabled"] | false;
+    { const char *nm = pageObj["name"] | "";   // control characters become spaces, cut to 15
+      int k = 0; for (; nm[k] && k < GAUGE_PAGE_NAME_LEN - 1; k++) pages[i].name[k] = (nm[k] < 32) ? ' ' : nm[k];
+      pages[i].name[k] = 0; }
     int kind = pageObj["kind"] | 0;                 // a page saved before indicator pages existed has no "kind": a gauge page
     if (kind < 0 || kind >= PAGE_KIND_COUNT) kind = PAGE_GAUGES;
     pages[i].kind = (PageKind)kind;

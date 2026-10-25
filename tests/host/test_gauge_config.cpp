@@ -427,6 +427,12 @@ int main(int argc, char **argv) {
   c10 = load1("{\"enabled\":true,\"needle_w\":12,\"text_xy\":true,\"cap_x\":-50,\"cap_y\":400,\"val_x\":7,\"val_y\":-9}");
   CHECK(c10.needle_w == 12 && c10.text_xy && c10.cap_x == -50 && c10.cap_y == 300 && c10.val_x == 7 && c10.val_y == -9, "needle width and coordinates load, kept within -300..300");
   c10 = load1("{\"enabled\":true}"); CHECK(!c10.needle_glow, "old configs: no needle glow");
+  { JsonDocument d; deserializeJson(d, "[{\"enabled\":true,\"name\":\"Boost\",\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"layout\":0,\"cells\":[{}]},{\"enabled\":true,\"name\":\"A very long page name\\tx\",\"kind\":1,\"cols\":2,\"indicators\":[]}]");
+    static PageConfig pg[MAX_PAGES]; gauge_config_pages_from_json(d.as<JsonArray>(), pg);
+    CHECK(!strcmp(pg[0].name, "Boost") && pg[1].name[0] == 0, "page names load; a page without one has none");
+    CHECK(strlen(pg[2].name) == 15 && !strncmp(pg[2].name, "A very long pag", 15), "a long name is cut to 15 characters (indicator pages too)");
+    JsonDocument o; gauge_config_pages_to_json(pg, o);
+    CHECK(!strcmp(o[0]["name"] | "", "Boost") && o[1]["name"].isNull() && !strcmp(o[2]["name"] | "", "A very long pag"), "names are saved; no name, no field"); }
   c10 = load1("{\"enabled\":true,\"needle_glow\":true}"); CHECK(c10.needle_glow, "needle glow loads");
   c10 = load1("{\"enabled\":true,\"needle_w\":0}"); CHECK(c10.needle_w == 6, "a 0 px needle is 6");
   c10 = load1("{\"enabled\":true,\"dial_x\":-12,\"dial_y\":999}"); CHECK(c10.dial_x == -12 && c10.dial_y == 300, "dial nudge loads, kept within -300..300");
