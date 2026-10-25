@@ -25,10 +25,11 @@
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
 #include "speed_sensors.h" // the GPS reader (host-tested)
 #include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
+#include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 22
+#define INPUT_BUILD 23
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -494,6 +495,36 @@ static void setupWeb() {
     slotsSave();
     server.send(200, "text/plain", "Cleared");
   });
+  // ---- 433 MHz listen mode (/rf) ----
+  server.on("/rf", HTTP_GET, []() { server.send(200, "text/html", RF_HTML); });
+  server.on("/rf.json", HTTP_GET, []() {
+    String j;
+    j.reserve(12000);
+    char b[200];
+    snprintf(b, sizeof b, "{\"ok\":%s,\"part\":%u,\"version\":%u,\"ook\":%s,\"thr\":%d,\"rssi\":%d,\"total\":%lu,\"bursts\":[",
+             s_rfOk ? "true" : "false", s_rfPart, s_rfVersion, s_rfOok ? "true" : "false", s_rfThr, (int)s_rfRssi, (unsigned long)s_rfBurstTotal);
+    j += b;
+    portENTER_CRITICAL(&s_rfMux);
+    int count = s_rfBurstCount, head = s_rfBurstHead;
+    static RfBurst copy[RF_BURSTS];
+    memcpy(copy, s_rfBursts, sizeof copy);
+    portEXIT_CRITICAL(&s_rfMux);
+    for (int k = 0; k < count; k++) {
+      const RfBurst &r = copy[(head - 1 - k + RF_BURSTS) % RF_BURSTS];   // newest first
+      snprintf(b, sizeof b, "%s{\"age\":%lu,\"rssi\":%d,\"pulses\":%u,\"unit\":%u,\"nbits\":%u,\"inv\":%s,\"first\":%u,\"bits\":\"",
+               k ? "," : "", (unsigned long)(millis() - r.ms), r.rssi, r.pulses, r.unit, r.nbits, r.inverted ? "true" : "false", r.firstLevel);
+      j += b; j += r.bits; j += "\",\"hex\":\""; j += r.hex; j += "\",\"w\":[";
+      for (int i = 0; i < 48 && i < r.pulses; i++) { j += String(r.w[i]); if (i + 1 < 48 && i + 1 < r.pulses) j += ","; }
+      j += "]}";
+    }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/rf/set", HTTP_GET, []() {
+    if (server.hasArg("mod")) s_rfOok = server.arg("mod") == "ook";
+    if (server.hasArg("thr")) { int t = server.arg("thr").toInt(); if (t < -110 || t > -30) { server.send(400, "text/plain", "Threshold must be -110 to -30 dBm"); return; } s_rfThr = t; }
+    rfSaveSettings(); s_rfReconfig = true;
+    server.send(200, "text/plain", "Saved");
+  });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -633,6 +664,7 @@ void setup() {
   xTaskCreatePinnedToCore(fuelTask, "fuel", 2048, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(gpsTask, "gps", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(canTxTask, "can_tx", 3072, NULL, 2, NULL, 1);
+  rfBegin();   // CC1101 on GPIO 13/14/27/33/39; carries on without it if not wired
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();

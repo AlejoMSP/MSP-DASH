@@ -31,7 +31,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
 function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
+document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a> | <a href=/rf>433 MHz</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
 if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
 document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
@@ -191,4 +191,32 @@ async function tick(){try{can=await (await fetch("/can.json")).json();if(cur>=0)
 (async()=>{await load();await tick();const want=new URLSearchParams(location.search).get("id");
   if(want){const free=slots.findIndex(s=>!s.name);if(free>=0)edit(free,want);}})();
 setInterval(tick,1000);
+</script></body></html>)HTML";
+// /rf: CC1101 433 MHz listen mode - every burst it hears, as pulses, bits and Manchester bytes.
+static const char RF_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH 433 MHz</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
+.box{background:#111;border-radius:8px;padding:10px;margin:10px 0}.note{color:#888;font-size:13px}.bad{color:#ff6b6b}
+.mono{font-family:monospace;font-size:12px;word-break:break-all}.b{border-top:1px solid #222;padding:8px 0}.hex{color:#4dd0e1;font-size:14px}
+select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px}button{padding:6px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
+#bar{height:8px;background:#222;border-radius:4px;overflow:hidden;margin-top:6px}#barin{height:100%;background:#4dd0e1;width:0}</style></head><body>
+<h2>433 MHz listen</h2>
+<div class="box" id="st">Loading...</div>
+<div class="box">Mode <select id="mod"><option value="fsk">2-FSK (most tire sensors)</option><option value="ook">OOK / ASK (remotes, some sensors)</option></select>
+ Threshold <input id="thr" type="number" min="-110" max="-30" style="width:70px"> dBm <button onclick="save()">Save</button> <span id="msg" class="note"></span>
+<div class="note">Bursts stronger than the threshold are captured. Set it a few dB above the noise shown below. Tire sensors send when the wheel turns, when the pressure changes, or every few minutes when parked; a TPMS tool or letting a little air out makes them send now.</div></div>
+<div id="list"></div>
+<p><a href="/">Back</a></p>
+<script>
+const $=id=>document.getElementById(id);let loaded=false;
+async function save(){const q=new URLSearchParams({mod:$("mod").value,thr:$("thr").value});const r=await fetch("/rf/set?"+q);$("msg").textContent=await r.text();}
+function age(ms){return ms<60000?(ms/1000).toFixed(0)+" s ago":(ms/60000).toFixed(1)+" min ago";}
+async function poll(){try{const j=await (await fetch("/rf.json")).json();
+if(!j.ok){$("st").innerHTML='<span class="bad">CC1101 not found</span> (read part 0x'+j.part.toString(16)+', version 0x'+j.version.toString(16)+'; expected 00 / 14). Check VCC on 3.3 V, GND, and SCK/MOSI/MISO/CSN.';return;}
+const pct=Math.max(0,Math.min(100,(j.rssi+110)*100/80));
+$("st").innerHTML="CC1101 found (version 0x"+j.version.toString(16)+") | listening on 433.92 MHz, "+(j.ook?"OOK":"2-FSK")+" | signal now "+j.rssi+" dBm | bursts heard: "+j.total+'<div id="bar"><div id="barin" style="width:'+pct+'%"></div></div>';
+if(!loaded){$("mod").value=j.ook?"ook":"fsk";$("thr").value=j.thr;loaded=true;}
+$("list").innerHTML=j.bursts.length?j.bursts.map(b=>'<div class="b"><b>'+age(b.age)+'</b> | '+b.rssi+' dBm | '+b.pulses+' pulses | half-bit '+b.unit+' us (about '+(b.unit?Math.round(500000/b.unit):0)+' bit/s) | '+b.nbits+' Manchester bits'+(b.inv?' (inverted)':'')+
+ '<div class="hex mono">'+(b.hex||'(no Manchester bytes)')+'</div><div class="mono note">bits: '+b.bits+'</div><div class="mono note">pulses (us, first level '+b.first+'): '+b.w.join(" ")+'</div></div>').join(""):'<p class="note">Nothing heard yet above '+j.thr+' dBm.</p>';
+}catch(e){$("st").textContent="Could not reach the hub - retrying...";}}
+poll();setInterval(poll,1000);
 </script></body></html>)HTML";

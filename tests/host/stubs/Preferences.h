@@ -28,5 +28,7 @@ public:
   size_t putFloat(const char *k, float v) { store()[ns + "/" + k] = std::to_string(v); return 4; }
   size_t getBytes(const char *k, void *buf, size_t len) { auto it = store().find(ns + "/" + k); if (it == store().end() || it->second.size() != len) return 0; memcpy(buf, it->second.data(), len); return len; }
   size_t putBytes(const char *k, const void *buf, size_t len) { store()[ns + "/" + k] = std::string((const char *)buf, len); return len; }
+  int8_t getChar(const char *k, int8_t def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : (int8_t)std::stoi(it->second); }
+  size_t putChar(const char *k, int8_t v) { store()[ns + "/" + k] = std::to_string(v); return 1; }
   static void wipeAll() { store().clear(); }   // tests: a board with empty NVS
 };
