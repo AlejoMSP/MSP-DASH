@@ -28,6 +28,14 @@
   from here).
 */
 
+// Runtime messages are off unless SERIAL_STREAM is 1 (serial_log.h on the screens; this guard also covers the hub).
+#ifndef RT_LOG
+#if defined(SERIAL_STREAM) && SERIAL_STREAM
+#define RT_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+#define RT_LOG(...) do { } while (0)
+#endif
+#endif
 #include <Arduino.h>
 #include "driver/twai.h"
 #include "gauge_app.h"
@@ -237,7 +245,7 @@ static void canReceiveTask(void *arg) {
         // Should stay at 0 now - if this ever prints, the queue or
         // task priority needs another look.
         if (st.rx_missed_count != lastMissed) {
-          Serial.printf("CAN: %u frames missed (queue full), %u overrun\n",
+          RT_LOG("CAN: %u frames missed (queue full), %u overrun\n",
                         (unsigned)(st.rx_missed_count - lastMissed), (unsigned)st.rx_overrun_count);
           lastMissed = st.rx_missed_count;
         }
@@ -245,10 +253,10 @@ static void canReceiveTask(void *arg) {
         // the controller in bus-off, where it stays dead until told to
         // recover. Without this, gauges would freeze until a reboot.
         if (st.state == TWAI_STATE_BUS_OFF) {
-          Serial.println("CAN: bus-off, starting recovery");
+          RT_LOG("CAN: bus-off, starting recovery\n");
           twai_initiate_recovery();
         } else if (st.state == TWAI_STATE_STOPPED) {
-          Serial.println("CAN: stopped, restarting");
+          RT_LOG("CAN: stopped, restarting\n");
           twai_start();
         }
       }

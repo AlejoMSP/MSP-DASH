@@ -17,6 +17,7 @@
   network, then browse to the board's AP IP (192.168.4.1 by default).
 */
 
+#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
 #include "web_monitor.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
@@ -73,7 +74,7 @@ static SaveResult s_displaySave = { true, "" };
 static void applyConfigBody(const char *body, size_t total) {
   SaveResult &res = s_displaySave;
   res.ok = false;
-  Serial.printf("Display config POST: %u bytes\n", (unsigned)total);
+  RT_LOG("Display config POST: %u bytes\n", (unsigned)total);
   if (total >= CONFIG_POST_MAX) {
     snprintf(res.msg, sizeof(res.msg), "Settings too large (%u bytes, limit %u)", (unsigned)total, (unsigned)CONFIG_POST_MAX);
     return;
@@ -82,7 +83,7 @@ static void applyConfigBody(const char *body, size_t total) {
   DeserializationError err = deserializeJson(doc, body, total);
   if (err) {
     snprintf(res.msg, sizeof(res.msg), "The board could not read the settings (%s)", err.c_str());
-    Serial.println(res.msg);
+    RT_LOG("%s\n", res.msg);
     return;
   }
   if (!doc.is<JsonArray>()) {
@@ -96,7 +97,7 @@ static void applyConfigBody(const char *body, size_t total) {
     res.msg[0] = '\0';
   } else {
     snprintf(res.msg, sizeof(res.msg), "NOT saved to flash: %s. The change is active until the next reboot.", gauge_config_last_error());
-    Serial.println(res.msg);
+    RT_LOG("%s\n", res.msg);
   }
 }
 
@@ -1872,7 +1873,7 @@ void web_monitor_init(void) {
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (index == 0) {
-        Serial.printf("OTA update starting: %s\n", filename.c_str());
+        RT_LOG("OTA update starting: %s\n", filename.c_str());
         // UPDATE_SIZE_UNKNOWN since AsyncWebServer doesn't give us the
         // total content-length at this callback point - Update.h
         // handles this fine, sizing itself from the actual data written.
@@ -1885,7 +1886,7 @@ void web_monitor_init(void) {
       }
       if (final) {
         if (Update.end(true)) {
-          Serial.printf("OTA update complete: %u bytes\n", (unsigned)(index + len));
+          RT_LOG("OTA update complete: %u bytes\n", (unsigned)(index + len));
         } else {
           Update.printError(Serial);
         }
@@ -1964,7 +1965,7 @@ void web_monitor_loop(void) {
   static unsigned long s_lastHeapLog = 0;
   if (now - s_lastHeapLog >= 10000) {
     s_lastHeapLog = now;
-    Serial.printf("Build %d | Heap: internal free=%u largest=%u lowest-ever=%u | PSRAM free=%u\n",
+    RT_LOG("Build %d | Heap: internal free=%u largest=%u lowest-ever=%u | PSRAM free=%u\n",
       FW_BUILD_NUMBER,
       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),

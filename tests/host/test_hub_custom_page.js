@@ -1,8 +1,7 @@
 // Drives the hub's /custom page (esp32-input/hub_pages.h) with a fake hub: the list, the editor, the live preview
 // (its JS decoder must match custom_can_decode() in custom_slots.h) and what Save sends.
 const fs = require('fs'), path = require('path'), vm = require('vm');
-const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
-const script = PAGES.match(/CUSTOM_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1].match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = require('./hub_page.js').hubScript('CUSTOM_HTML');
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
 const empty = i => ({ i, name: "", unit: "", dec: 0, min: 0, max: 0, src: 0, id: 0, start: 0, bits: 0, bit: 0, be: 0, sgn: 0, scale: 0, offset: 0, has: false, value: 0 });

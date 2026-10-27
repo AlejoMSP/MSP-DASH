@@ -4,18 +4,27 @@
 #pragma once
 #include <Arduino.h>
 
+// The navigation bar on every hub page (HUB_NAV, styled by HUB_NAV_STYLE inside each page's <style>).
+#define HUB_NAV_STYLE ".nav{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px;padding:6px;background:#0b1a1d;border-radius:8px;position:sticky;top:0;z-index:5}\n.nav a{color:#4dd0e1;text-decoration:none;padding:6px 10px;border-radius:5px;font-size:14px}.nav a:hover{background:#1d2b2e}"
+#define HUB_NAV "<div class=\"nav\"><a href=\"/\">Hub</a><a href=\"/sensors\">Sensors</a><a href=\"/custom\">Custom sensors</a><a href=\"/buttons\">Buttons</a><a href=\"/simulator\">Simulator</a><a href=\"/rf\">433 MHz</a><a href=\"/can\">Raw CAN</a><a href=\"/update\">Firmware</a></div>"
+
 static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Hub</title>
-<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:480px;margin:auto;padding:12px}h2{color:#4dd0e1}
-label{display:block;margin:10px 0 4px}input,select{width:100%;padding:6px;box-sizing:border-box;background:#111;color:#ddd;border:1px solid #333}
-button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.live{background:#111;padding:10px;border-radius:6px}
-.row{display:flex;gap:8px}.row>*{flex:1}.note{color:#999;font-size:13px}
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
+h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
+label{display:block;margin:10px 0 4px}input,select{width:100%;padding:6px;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px}
+button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;border-radius:6px}.row{display:flex;gap:8px}.row>*{flex:1}.note{color:#999;font-size:13px}
 .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:middle}.on{background:#2e7d32}.off{background:#e53935}
-.scr{padding:4px 0}.scr a{color:#4dd0e1}</style></head><body>
+.scr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid #222}.scr:first-child{border-top:0}
+.scr .who{flex:1 1 200px}.scr a.btn{background:#1d2b2e;color:#4dd0e1;text-decoration:none;padding:5px 10px;border-radius:5px;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.kv{background:#000;border-radius:6px;padding:8px}
+.kv b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:2px}details summary{cursor:pointer;color:#4dd0e1}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>MSP-DASH Hub</h2>
-<h3 style="color:#4dd0e1;margin:8px 0">Screens</h3><div class="live" id="scr">Waiting for screens...</div>
-<h3 style="color:#4dd0e1;margin:8px 0">Hub</h3><div class="live" id="live">Loading...</div>
-<h3 style="color:#4dd0e1;margin:8px 0">Speed</h3><div class="live" id="spd">Loading...</div>
-<p class="note">Speed comes from rusEFI (the hall sensor is wired to the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p>
+<div class="card"><h3>Screens</h3><div id="scr">Waiting for screens...</div></div>
+<div class="card"><h3>Status</h3><div class="grid" id="stat"></div></div>
+<div class="card"><h3>Sensors on the hub</h3><div class="grid" id="sens"></div>
+<p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
+<div class="card"><details><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
 <div class="row"><label>Night, dimmer lowest (%)<input type="number" id="nmin" min="5" max="100"></label>
@@ -25,35 +34,38 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000}.
 <div class="row"><button type="button" onclick="grab('dlo')">Use now as lowest</button><button type="button" onclick="grab('dhi')">Use now as highest</button></div>
 <label>Lights count as on above (V)<input type="number" id="lon" step="0.1"></label>
 <button type="button" onclick="save()">Save</button> <span id="msg" class="note"></span>
-<p class="note">Turn the lights on, roll the dimmer all the way down and press "Use now as lowest", all the way up and press "Use now as highest", then Save.</p>
-<p><a href="/update" style="color:#4dd0e1">Firmware update</a></p>
+<p class="note">Turn the lights on, roll the dimmer all the way down and press "Use now as lowest", all the way up and press "Use now as highest", then Save.</p></details></div>
 <script>
-let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];
-function grab(id){document.getElementById(id).value=st.dimV.toFixed(1);}
+let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];const $=id=>document.getElementById(id);
+const kv=(k,v)=>'<div class="kv"><b>'+k+'</b>'+v+'</div>';
+function grab(id){$(id).value=st.dimV.toFixed(1);}
 async function poll(){try{st=await (await fetch("/state")).json();
-document.getElementById("live").innerHTML="Lights: "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"ON":"off")+")<br>Dimmer: "+st.dimV.toFixed(1)+" V<br>Brightness sent: "+st.bri+" %<br>Build "+st.build+" | "+st.ip+" | channel "+st.ch+"<br>Last command: "+st.last+"<br>ECU: "+st.ecu+" (detected from CAN)<br>Signals live: "+st.live+" | data packets sent: "+st.sent+" | <a href=/sensors>Sensors</a> | <a href=/can>Raw CAN</a> | <a href=/simulator>Simulator</a> | <a href=/custom>Custom Sensors</a> | <a href=/rf>433 MHz</a> | <a href=/buttons>Buttons</a><br>Simulator: "+st.sim+"<br>Ambient: "+st.dht+"<br>Fuel: "+st.fuel+" %<br>EGT: "+st.egt+" | sent to CAN: "+st.egtsent;
-if(!poll.done){ids.forEach(i=>document.getElementById(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
-async function save(){const q=ids.map(i=>i+"="+encodeURIComponent(document.getElementById(i).value)).join("&");
-document.getElementById("msg").textContent=await (await fetch("/save?"+q)).text();}
+$("stat").innerHTML=kv("ECU",st.ecu)+kv("Signals live",st.live)+kv("Simulator",st.sim)+kv("Last button / command",st.last)+kv("Data packets sent",st.sent)+kv("Hub","build "+st.build+"<br>"+st.ip+", channel "+st.ch);
+$("brisum").textContent="| "+st.bri+" % now | lights "+st.lightsV.toFixed(1)+" V ("+(st.lightsOn?"on":"off")+") | dimmer "+st.dimV.toFixed(1)+" V";
+if(!poll.done){ids.forEach(i=>$(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
+async function save(){const q=ids.map(i=>i+"="+encodeURIComponent($(i).value)).join("&");$("msg").textContent=await (await fetch("/save?"+q)).text();}
 function ago(ms){return ms<60000?Math.round(ms/1000)+" s ago":Math.round(ms/60000)+" min ago";}
 async function scr(){try{const l=await (await fetch("/screens.json")).json();
-l.sort((a,b)=>a.ip<b.ip?-1:1);
-document.getElementById("scr").innerHTML=l.length?l.map(s=>'<div class="scr"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
-(s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+'<a href="http://'+s.ip+'/">'+s.ip+'</a> | build '+s.build+' | '+s.mac+'</span></div>').join(''):
+const order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
+l.sort((a,b)=>order(a.name)-order(b.name)||(a.ip<b.ip?-1:1));
+$("scr").innerHTML=l.length?l.map(s=>{const u="http://"+s.ip;return '<div class="scr"><span class="who"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
+(s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+s.ip+' | build '+s.build+' | '+s.mac+'</span></span>'+
+'<a class="btn" href="'+u+'/">Live</a><a class="btn" href="'+u+'/gauges">Gauges</a><a class="btn" href="'+u+'/log-channels">Logging</a><a class="btn" href="'+u+'/sd">SD card</a><a class="btn" href="'+u+'/settings">Settings</a></div>';}).join(''):
 'No screens heard yet. Screens set to main do not say hello.';}catch(e){}}
 async function spd(){try{const g=await (await fetch("/speed.json")).json();
-const gps=!g.gpsok?"not connected (no data on R17 / GPIO 16)":!g.fix?"no fix yet ("+g.sats+" satellites)":g.gpsmph.toFixed(1)+" mph, "+g.sats+" satellites";
-const ecu=g.ecuok?g.ecumph.toFixed(1)+" mph":"no data from rusEFI";
-const cmp=g.ecuok&&g.fix&&g.gpsmph>10&&g.ecumph>1?" | difference "+((g.ecumph-g.gpsmph)/g.gpsmph*100).toFixed(1)+" % | factor "+(g.gpsmph/g.ecumph).toFixed(3):"";
-document.getElementById("spd").innerHTML="rusEFI: "+ecu+"<br>GPS: "+gps+cmp;}catch(e){}}
-poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,500);
+const gps=!g.gpsok?"not connected":!g.fix?"no fix ("+g.sats+" sats)":g.gpsmph.toFixed(1)+" mph, "+g.sats+" sats";
+const ecu=g.ecuok?g.ecumph.toFixed(1)+" mph":"no data";
+const cmp=g.ecuok&&g.fix&&g.gpsmph>10&&g.ecumph>1?((g.ecumph-g.gpsmph)/g.gpsmph*100).toFixed(1)+" % (factor "+(g.gpsmph/g.ecumph).toFixed(3)+")":"--";
+$("sens").innerHTML=kv("Ambient",st.dht||"--")+kv("Fuel",(st.fuel!=null?st.fuel+" %":"--"))+kv("EGT",(st.egt||"--")+"<br><span class=note>"+(st.egtsent||0)+" frames to CAN</span>")+
+kv("Speed (rusEFI)",ecu)+kv("GPS",gps)+kv("Speed difference",cmp);}catch(e){}}
+poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,1000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:640px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #222}th{color:#999;font-weight:normal}
 .v{font-family:monospace;text-align:right}.tag{padding:1px 6px;border-radius:4px;font-size:12px}.hub{background:#1b5e20}.sim{background:#e65100}.can{background:#0d47a1}
-.stale td{color:#666}.note{color:#999;font-size:13px}</style></head><body>
+.stale td{color:#666}.note{color:#999;font-size:13px})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Sensors</h2><div class="note" id="sum"></div>
 <table><thead><tr><th>Signal</th><th class="v">Value</th><th>Source</th><th class="v">Age</th></tr></thead><tbody id="t"></tbody></table>
 <p class="note">Hub = a sensor wired to this board. ECU = decoded from a CAN frame. Grey = not heard for 2 s.</p>
@@ -90,7 +102,7 @@ static const char SIM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta n
 .statebox{margin:12px 0;padding:10px;border-radius:8px;background:#111;text-align:center}.statebox.on{background:#f5a623;color:#000;font-weight:bold}
 .btnrow{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}button{padding:10px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
 #msg{text-align:center;margin:10px 0;min-height:1.2em;color:#4dd0e1}#msg.bad{color:#ff6b6b}
-.sl{margin:10px 0}.sl label{display:flex;justify-content:space-between;font-size:.85em;color:#4dd0e1}.sl input{width:100%}</style></head><body>
+.sl{margin:10px 0}.sl label{display:flex;justify-content:space-between;font-size:.85em;color:#4dd0e1}.sl input{width:100%})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Bench Simulator</h2>
 <div class="warnbox"><b>This feeds FAKE values</b> to every screen, so you can test with no ECU connected. It switches itself off after 10 minutes without a change, at every reboot of the hub, and the moment a real CAN frame arrives. The screens say SIMULATED and the main screen does not log while it runs.</div>
 <div id="state" class="statebox">Loading...</div>
@@ -129,7 +141,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 .box{background:#111;border-radius:8px;padding:12px;margin:12px 0}label{display:block;margin:6px 0 2px;color:#4dd0e1;font-size:13px}
 input,select{width:100%;box-sizing:border-box;padding:6px;background:#000;color:#ddd;border:1px solid #333;border-radius:4px}
 .row{display:flex;gap:8px}.row>div{flex:1}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px;margin:8px 8px 0 0}
-button.del{background:#c62828;color:#fff}#preview{font-family:monospace;font-size:18px;color:#4dd0e1;margin-top:8px}#msg{min-height:1.2em;color:#4dd0e1}#msg.bad{color:#ff6b6b}</style></head><body>
+button.del{background:#c62828;color:#fff}#preview{font-family:monospace;font-size:18px;color:#4dd0e1;margin-top:8px}#msg{min-height:1.2em;color:#4dd0e1}#msg.bad{color:#ff6b6b})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Custom Sensors</h2>
 <p class="note">Read any value from a CAN frame and send it to the screens. Each slot shows up in the screens' gauge, lamp and logging lists under its name within a few seconds, no reflash.</p>
 <table><thead><tr><th>Slot</th><th>Name</th><th>From</th><th class="v">Value</th><th></th></tr></thead><tbody id="list"></tbody></table>
@@ -198,7 +210,7 @@ static const char RF_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta na
 .box{background:#111;border-radius:8px;padding:10px;margin:10px 0}.note{color:#888;font-size:13px}.bad{color:#ff6b6b}
 .mono{font-family:monospace;font-size:12px;word-break:break-all}.b{border-top:1px solid #222;padding:8px 0}.hex{color:#4dd0e1;font-size:14px}
 select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px}button{padding:6px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
-svg{width:100%;height:140px;background:#000;border:1px solid #222;border-radius:4px}</style></head><body>
+svg{width:100%;height:140px;background:#000;border:1px solid #222;border-radius:4px})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>433 MHz listen</h2>
 <div class="box" id="st">Loading...</div>
 <div class="box"><svg id="ch" viewBox="0 0 240 100" preserveAspectRatio="none"></svg>
@@ -214,7 +226,7 @@ svg{width:100%;height:140px;background:#000;border:1px solid #222;border-radius:
 <div id="top"></div><pre id="full" class="mono box" style="display:none;white-space:pre-wrap"></pre>
 <h3 style="color:#4dd0e1">Latest bursts</h3>
 <div id="list"></div>
-<p><a href="/">Back</a></p>
+
 <script>
 const $=id=>document.getElementById(id);let loaded=false,last=null;
 function shape(){$("mbox").style.display=$("auto").checked?"":"none";$("tbox").style.display=$("auto").checked?"none":"";}
@@ -247,7 +259,7 @@ static const char BUTTONS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><me
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;vertical-align:top}th{color:#4dd0e1;text-align:left}
 select{width:100%;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;margin:2px 0}
-.note{color:#888;font-size:13px}#msg{color:#4dd0e1;min-height:1.2em}#msg.bad{color:#ff6b6b}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px}</style></head><body>
+.note{color:#888;font-size:13px}#msg{color:#4dd0e1;min-height:1.2em}#msg.bad{color:#ff6b6b}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Buttons</h2>
 <p class="note">Left = GPIO 26 (L15), right = GPIO 25 (L14). Hold a button and let go: the action for the longest time you reached runs
 (if nothing is set at that time, the last one you passed). While you hold, the screens show what letting go will do.
@@ -256,7 +268,7 @@ Page actions go to the screen chosen with "Next gauge" (all screens until you ch
 <table><thead><tr><th>Hold</th><th>Left</th><th>Right</th><th>Both</th></tr></thead><tbody id="grid"></tbody></table>
 <div id="msg"></div>
 <p><button onclick="defaults()">Back to the defaults</button></p>
-<p><a href="/">Back</a></p>
+
 <script>
 const LEVELS=["Press","1 s","2 s","3 s","5 s","10 s"];const GOTO=4,COLOR=7,RACE=8,CYCLE=255;
 let cfg=null;const $=id=>document.getElementById(id);

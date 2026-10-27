@@ -91,6 +91,12 @@ static bool handleCmd(const uint8_t *data, int len) {
     else snprintf(t, sizeof t, "Release: %s", a < BA_COUNT ? BA_NAMES[a] : "?");
     gauge_app_popup(t);
   }
+  else if (c.cmd == LINK_CMD_SHOW_IP) {   // this screen's name and address (and the hub's), 5 s
+    char t[48], nm[ESPNOW_NAME_LEN + 1];
+    espnow_link_name(nm);
+    snprintf(t, sizeof t, "%s\n%s\nhub .%d", nm, WiFi.localIP().toString().c_str(), c.value);
+    gauge_app_popup_ms(t, 5000);
+  }
   else if (c.cmd == LINK_CMD_LOG_MARK) {
     char t[40];
     if (sd_storage_is_mounted()) snprintf(t, sizeof t, sd_logging_mark(c.value) ? "Marker %d logged" : "Marker %d: not logging", c.value);

@@ -13,6 +13,7 @@
   - Uses POSIX file I/O on the ESP-IDF VFS mount (sd_storage.cpp).
 */
 
+#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
 #include "sd_logging.h"
 #include "sd_storage.h"
 #include "gauge_config.h"
@@ -109,7 +110,7 @@ static bool startSession(void) {
   FILE *f = fopen(s_logPath, "w");
   if (!f) {
     snprintf(s_status, sizeof(s_status), "Could not create log_%d.csv on the SD card", n);
-    Serial.println(s_status);
+    RT_LOG("%s\n", s_status);
     return false;
   }
   fprintf(f, "millis");
@@ -121,14 +122,14 @@ static bool startSession(void) {
   fclose(f);
   s_logging = true;
   s_lastRowMs = millis() - LOG_INTERVAL_MS;   // first row right away
-  Serial.printf("SD logging started: %s\n", s_logPath);
+  RT_LOG("SD logging started: %s\n", s_logPath);
   return true;
 }
 
 static void endSession(const char *why) {
   if (!s_logging) return;
   s_logging = false;
-  Serial.printf("SD logging stopped (%s): %s\n", why, s_logPath);
+  RT_LOG("SD logging stopped (%s): %s\n", why, s_logPath);
 }
 
 static const char *fileName(void) { const char *p = strrchr(s_logPath, '/'); return p ? p + 1 : s_logPath; }

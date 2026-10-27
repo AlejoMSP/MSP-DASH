@@ -2,8 +2,7 @@
 // The simulator moved from the screens to the hub in screen build 162 / hub build 15.
 const fs = require('fs');
 const path = require('path');
-const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
-const script = PAGES.match(/SIM_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1].match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = require('./hub_page.js').hubScript('SIM_HTML');
 
 // ---- fake browser ----
 const timers = [];

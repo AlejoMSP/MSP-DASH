@@ -90,8 +90,11 @@ static int s_racePrevPage = -1;
 static char s_popupStaged[48];
 static volatile uint32_t s_popupSeq = 0;
 static uint32_t s_popupShownSeq = 0, s_popupUntil = 0;
+static volatile uint32_t s_popupMs = POPUP_MS;
 static lv_obj_t *s_popup = NULL, *s_popupLabel = NULL;
-void gauge_app_popup(const char *text) {
+void gauge_app_popup(const char *text) { gauge_app_popup_ms(text, POPUP_MS); }
+void gauge_app_popup_ms(const char *text, uint32_t ms) {
+  s_popupMs = ms;
   strncpy(s_popupStaged, text, sizeof(s_popupStaged) - 1);
   s_popupStaged[sizeof(s_popupStaged) - 1] = 0;
   s_popupSeq++;
@@ -1284,7 +1287,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
       char t[48]; memcpy(t, s_popupStaged, sizeof t); t[sizeof t - 1] = 0;
       set_label_if_changed(s_popupLabel, t);
       lv_obj_clear_flag(s_popup, LV_OBJ_FLAG_HIDDEN);
-      s_popupUntil = now + POPUP_MS;
+      s_popupUntil = now + s_popupMs;
     } else if (!lv_obj_has_flag(s_popup, LV_OBJ_FLAG_HIDDEN) && time_reached(now, s_popupUntil)) {
       lv_obj_add_flag(s_popup, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1437,7 +1440,8 @@ void build_gauge_app(void) {
   build_alert_overlay(); // created before the logging dot so the dot stays on top of it
   // pop-up for the hub buttons: on the system layer, above the warning overlay
   s_popup = lv_obj_create(lv_layer_sys());
-  lv_obj_set_size(s_popup, 300, 70);
+  lv_obj_set_size(s_popup, 340, LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_ver(s_popup, 14, 0);
   lv_obj_align(s_popup, LV_ALIGN_BOTTOM_MID, 0, -60);
   lv_obj_set_style_radius(s_popup, 35, 0);
   lv_obj_set_style_bg_color(s_popup, lv_color_hex(0x003840), 0);
@@ -1450,6 +1454,9 @@ void build_gauge_app(void) {
   lv_obj_set_style_text_color(s_popupLabel, lv_color_white(), 0);
   lv_obj_set_style_text_font(s_popupLabel, &lv_font_montserrat_28, 0);
   lv_label_set_text(s_popupLabel, "");
+  lv_obj_set_width(s_popupLabel, 310);
+  lv_obj_set_style_text_align(s_popupLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(s_popupLabel, LV_LABEL_LONG_WRAP);
   lv_obj_center(s_popupLabel);
   lv_obj_add_flag(s_popup, LV_OBJ_FLAG_HIDDEN);
 

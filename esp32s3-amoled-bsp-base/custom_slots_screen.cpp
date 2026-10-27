@@ -2,6 +2,7 @@
 // Values arrive in the hub's data packet (espnow_link.cpp). Names, units, decimals and the template scale arrive in
 // the hub's "MSN1" packets; they are kept in NVS so the gauges show the right name right after a reboot, before the
 // hub's next MSN1 (it sends them every 10 s).
+#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
 #include "custom_slots.h"
 #include <Arduino.h>
 #include <Preferences.h>
@@ -54,5 +55,5 @@ void custom_slots_loop(void) {
   portEXIT_CRITICAL(&s_mux);
   Preferences p;
   if (p.begin("slots", false)) { p.putBytes("info", s_info, sizeof s_info); p.end(); }
-  Serial.println("Custom sensor names updated from the hub");
+  RT_LOG("Custom sensor names updated from the hub\n");
 }

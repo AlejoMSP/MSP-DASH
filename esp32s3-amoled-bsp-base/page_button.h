@@ -16,6 +16,7 @@
   full-screen alert.
 */
 
+#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
 #include "gauge_app.h"
 
 #define BOOT_BTN_PIN 0
@@ -30,7 +31,7 @@ static void checkPageButton() {
   if (btnState == LOW && lastBtnState == HIGH && (now - lastBtnChange) > DEBOUNCE_MS) {
     lastBtnChange = now;
     g_page_nav_delta = 1;
-    Serial.println("BOOT pressed: next page / dismiss alert");
+    RT_LOG("BOOT pressed: next page / dismiss alert\n");
   }
   lastBtnState = btnState;
 }

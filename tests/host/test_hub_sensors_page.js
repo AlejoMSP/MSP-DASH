@@ -2,8 +2,8 @@
 // alphabetically, and CAN frames that no sensor reads listed under "On the bus, not decoded".
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const HUB = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'esp32-input.ino'), 'utf8');
-const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
-const html = PAGES.match(/SENSORS_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1];
+const PAGES = require('./hub_page.js').SRC;
+const html = require('./hub_page.js').hubPage('SENSORS_HTML');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r => setImmediate(r)); };

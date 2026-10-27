@@ -1,7 +1,6 @@
 // The hub's /buttons page (esp32-input/hub_pages.h) with a fake hub: the 6 x 3 grid, the page / colour choices, saving.
 const fs = require('fs'), path = require('path'), vm = require('vm');
-const PAGES = fs.readFileSync(path.join(__dirname, '..', '..', 'esp32-input', 'hub_pages.h'), 'utf8');
-const script = PAGES.match(/BUTTONS_HTML\[\] PROGMEM = R"HTML\(([\s\S]*?)\)HTML"/)[1].match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = require('./hub_page.js').hubScript('BUTTONS_HTML');
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
 const actions = ["Nothing", "Next page", "Previous page", "Next gauge (choose screen)", "Go to page", "Dim all", "Brighten all", "Color scheme", "Race mode", "Clear warning", "Log marker"];

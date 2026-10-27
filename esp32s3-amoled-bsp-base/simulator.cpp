@@ -2,6 +2,7 @@
   simulator.cpp - see simulator.h for the safety rules.
 */
 
+#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
 #include "simulator.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
@@ -162,7 +163,7 @@ void sim_start(bool manual) {
   s_stopReason[0] = '\0';
   sim_demo_values(0.0f, s_values);    // manual mode starts from the idle values
   s_active = true;
-  Serial.printf("Simulator ON (%s). Real CAN traffic, a reboot or 10 idle minutes will switch it off.\n", manual ? "manual" : "demo");
+  RT_LOG("Simulator ON (%s). Real CAN traffic, a reboot or 10 idle minutes will switch it off.\n", manual ? "manual" : "demo");
 }
 
 void sim_stop(const char *why) {
@@ -176,7 +177,7 @@ void sim_stop(const char *why) {
   g_flag_seen = 0;
   strncpy(s_stopReason, why ? why : "stopped", sizeof(s_stopReason) - 1);
   s_stopReason[sizeof(s_stopReason) - 1] = '\0';
-  Serial.printf("Simulator OFF: %s\n", s_stopReason);
+  RT_LOG("Simulator OFF: %s\n", s_stopReason);
 }
 
 void sim_notify_real_frame(void) {

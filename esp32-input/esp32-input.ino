@@ -27,11 +27,19 @@
 #include "color_presets.h"   // copied in: the 10 colour schemes
 #include "button_actions.h"  // copied in: the actions the buttons can run (/buttons page)
 #include "btn_logic.h"       // press / hold-time events (host-tested)
+// Runtime serial messages are off unless SERIAL_STREAM is 1; boot messages always print (same macro as can_parsing.h).
+#ifndef RT_LOG
+#if defined(SERIAL_STREAM) && SERIAL_STREAM
+#define RT_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+#define RT_LOG(...) do { } while (0)
+#endif
+#endif
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 29
+#define INPUT_BUILD 30
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -169,11 +177,12 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   for (int i = 0; i < 3; i++) { esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)); delay(4); }
   const char *what = cmd == LINK_CMD_PAGE_NEXT ? "next page" : cmd == LINK_CMD_PAGE_PREV ? "previous page" : cmd == LINK_CMD_SELECT ? "buttons control"
                    : cmd == LINK_CMD_ALERT_ACK ? "clear warning" : cmd == LINK_CMD_LOG_MARK ? "log marker" : cmd == LINK_CMD_GOTO_PAGE ? "go to page"
-                   : cmd == LINK_CMD_COLOR ? "color scheme" : cmd == LINK_CMD_RACE ? "race mode" : cmd == LINK_CMD_HINT ? "hint" : "brightness";
+                   : cmd == LINK_CMD_COLOR ? "color scheme" : cmd == LINK_CMD_RACE ? "race mode" : cmd == LINK_CMD_HINT ? "hint"
+                   : cmd == LINK_CMD_SHOW_IP ? "show IP" : "brightness";
   if (cmd == LINK_CMD_SELECT) snprintf(s_last, sizeof(s_last), "%s %s", what, target[0] ? target : "all screens");
   else if (cmd == LINK_CMD_ALERT_ACK) snprintf(s_last, sizeof(s_last), "%s", what);
   else snprintf(s_last, sizeof(s_last), "%s %d%s%s", what, value, target[0] ? " to " : "", target);
-  Serial.printf("sent: %s\n", s_last);
+  RT_LOG("sent: %s\n", s_last);   // runtime: off unless SERIAL_STREAM (can_parsing.h defines RT_LOG)
 }
 
 
@@ -420,6 +429,7 @@ static void runAction(const BtnBinding *b) {
       break;
     case BA_CLEAR_WARNING: sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
     case BA_LOG_MARK: sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
+    case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;   // every screen: its name and IP
   }
 }
 static void handleButtons() {
