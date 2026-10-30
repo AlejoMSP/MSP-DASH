@@ -13,7 +13,7 @@ R"rawliteral(
     // Signal numbers = the order of SignalId in gauge_config.h (tests/host/test_editor_indicators.js checks this table against that file).
     const SIG = { RPM:1, CLT:2, MAP:3, AFR:4, OILP:5, OILT:6, FUELP:7, FLEX:8, TPS:9, BATTV:10,
                   REVLIM:11, MAINRELAY:12, FUELPUMP:13, CEL:14, EGOHEAT:15, LAMBDAPROT:16, FAN:17, FAN2:18, BRAKE:19, EGT:20, IAT:21, AMBT:22, HUM:23, FUEL:24, VSS:25, GPS_SPD:26, GPS_SATS:27,
-                  C1:28, C2:29, C3:30, C4:31, C5:32, C6:33, C7:34, C8:35, C9:36, C10:37, C11:38, C12:39, C13:40, C14:41, C15:42, C16:43 };
+                  C1:28, C2:29, C3:30, C4:31, C5:32, C6:33, C7:34, C8:35, C9:36, C10:37, C11:38, C12:39, C13:40, C14:41, C15:42, C16:43, CLOCK:44 };
     const SIGNAL_UNITS = { 1:"rpm", 2:"F", 3:"psi", 4:"AFR", 5:"psi", 6:"F", 7:"psi", 8:"%", 9:"%", 10:"V", 20:"F", 21:"F", 22:"F", 23:"%", 24:"%", 25:"mph", 26:"mph", 27:"sats" };
     const IND_RED = 0xE53935, IND_AMBER = 0xFFB300, IND_GREEN = 0x43A047, IND_BLUE = 0x1E88E5, IND_OFF = 0x2A2A2A;
 
@@ -227,6 +227,10 @@ R"rawliteral(
     function setCellSignal(pIdx, cIdx, sig) {
       const c = pages[pIdx].cells[cIdx];
       c.signal = sig;
+      if (sig === SIG.CLOCK) {   // the clock: a number gauge, 12-hour style, AM/PM shown by itself
+        c.gauge_type = 1; c.decimals = 0; c.units = ""; c.has_warning = false; c.alert_fullscreen = false; c.value_divisor = 1;
+        renderPages(); return;
+      }
       const info = signalInfo(sig);
       if (info && info.custom && !info.unused) {   // a custom slot: its scale, units and decimals come from the hub
         c.min = Math.floor(info.min); c.max = Math.ceil(info.max); c.rest = c.min;

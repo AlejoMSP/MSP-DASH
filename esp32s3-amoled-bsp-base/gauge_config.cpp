@@ -14,6 +14,7 @@
 
 #include "gauge_config.h"
 #include "custom_slots.h"
+#include "screen_clock.h"   // SIG_CLOCK
 #include "gauge_icon_count.h"   // GAUGE_ICON_COUNT (no LVGL needed here)
 #include "gauge_config_json.h"
 #include "gauge_style.h"
@@ -534,6 +535,7 @@ const char *gauge_config_last_error(void) { return s_lastError; }
 size_t gauge_config_saved_bytes(int which) { return (which == 0 || which == 1) ? s_savedBytes[which] : 0; }
 
 const char *gauge_config_signal_name(SignalId sig) {
+  if (sig == SIG_CLOCK) return "Clock";
   if (gauge_signal_is_custom(sig)) {   // named on the hub's /custom page; "Custom 3" until it is
     static char fallback[CUSTOM_SLOTS][12];
     int i = sig - SIG_C1;
@@ -576,6 +578,12 @@ const char *gauge_config_signal_name(SignalId sig) {
 
 float gauge_config_signal_value(SignalId sig) {
   if (gauge_signal_is_custom(sig)) return g_custom_val[sig - SIG_C1];
+  if (sig == SIG_CLOCK) {   // local minutes since midnight (with seconds as a fraction)
+    uint32_t u; int16_t o;
+    if (!screen_clock_now(&u, &o)) return 0;
+    int32_t t = (int32_t)(((int64_t)u + o * 60) % 86400); if (t < 0) t += 86400;
+    return t / 60.0f;
+  }
   switch (sig) {
     case SIG_RPM: return g_rpm;
     case SIG_CLT: return g_clt_f;
@@ -603,6 +611,7 @@ float gauge_config_signal_value(SignalId sig) {
 
 bool gauge_config_signal_has_data(SignalId sig) {
   bool seen;
+  if (sig == SIG_CLOCK) { uint32_t u; int16_t o; return screen_clock_now(&u, &o); }   // known once the hub sent the time
   if (gauge_signal_is_custom(sig)) seen = g_custom_has[sig - SIG_C1];
   else switch (sig) {
     case SIG_RPM: seen = g_rpm_has_data; break;
@@ -660,6 +669,7 @@ void gauge_config_log_init(void) {
 bool gauge_config_is_log_enabled(SignalId sig) {
   if (sig < 0 || sig >= SIG_COUNT) return false;
   if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) return false;   // slot not set up: no empty column
+  if (sig == SIG_CLOCK) return false;   // the log has its own time column
   return s_logEnabled[sig];
 }
 

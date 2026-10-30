@@ -40,7 +40,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 31
+#define INPUT_BUILD 32
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -517,11 +517,13 @@ static void setupWeb() {
   server.on("/sim.json", HTTP_GET, []() {
     String j = "{\"active\":" + String(sim_is_active() ? "true" : "false") + ",\"manual\":" + String(sim_is_manual() ? "true" : "false") +
                ",\"seconds_left\":" + String(sim_seconds_left()) + ",\"stop_reason\":\"" + String(sim_last_stop_reason()) + "\",\"signals\":[";
+    bool first = true;
     for (int sig = 1; sig < SIG_COUNT; sig++) {
+      if (sig == SIG_CLOCK || (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0])) continue;   // not simulated / not set up
       SimRange r = sim_range(sig);
       char b[120];
-      snprintf(b, sizeof b, "%s{\"id\":%d,\"min\":%g,\"max\":%g,\"step\":%g,\"value\":%g}", sig > 1 ? "," : "", sig, (double)r.min, (double)r.max, (double)r.step, (double)sim_value(sig));
-      j += b;
+      snprintf(b, sizeof b, "%s{\"id\":%d,\"min\":%g,\"max\":%g,\"step\":%g,\"value\":%g}", first ? "" : ",", sig, (double)r.min, (double)r.max, (double)r.step, (double)sim_value(sig));
+      j += b; first = false;
     }
     j += "]}";
     server.send(200, "application/json", j);

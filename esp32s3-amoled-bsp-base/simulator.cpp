@@ -32,6 +32,7 @@ const char *sim_last_stop_reason(void) { return s_stopReason; }
 float sim_value(int sig) { return (sig > 0 && sig < SIG_COUNT) ? s_values[sig] : 0.0f; }
 
 SimRange sim_range(int sig) {
+  if (sig == SIG_CLOCK) return {0, 1440, 1};   // the real time from the GPS: never simulated (sim_apply leaves it alone)
   if (gauge_signal_is_custom(sig)) {   // a custom slot: its own gauge scale from the hub's /custom page
     const CustomSlotInfo *in = custom_slot_info(sig - SIG_C1);
     if (in->max > in->min) return {in->min, in->max, (in->max - in->min) / 100.0f};

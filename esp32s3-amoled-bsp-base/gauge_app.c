@@ -25,6 +25,8 @@
 #include "gauge_app.h"
 #include "color_presets.h"
 #include "gauge_icons.h"
+#include "screen_clock.h"
+#include "gps_time.h"
 #include "gauge_config.h"
 #include "sd_logging.h"
 #include "simulator.h"
@@ -151,6 +153,7 @@ typedef struct {
   lv_meter_indicator_t *glow[2];    // needle glow: two wider, dimmer copies under the needle; NULL when off
   lv_meter_scale_t *scale;          // the dial scale (recoloured live by a colour preset)
   lv_obj_t *iconLabel;              // the caption icon (gauge_icons.h); NULL when none
+  lv_obj_t *ampmLabel;              // Clock gauge, 12-hour style: the AM/PM under the time; NULL otherwise
   lv_color_t iconColor;             // its normal colour (it flashes red/white with a warning)
   int32_t peak_val; uint32_t peak_ms; uint32_t peak_hold_ms;
   lv_point_t needleStart;       // where the needle is drawn FROM when it is trimmed (needle_trim_cb points LVGL at this)
@@ -544,6 +547,7 @@ static lv_obj_t *s_capLabel = NULL;
 // at its size. Placed last, after the caption has its final spot (automatic, aligned or by coordinates).
 static void attach_caption_icon(lv_obj_t *container, const CellConfig *cfg, CellRuntime *rt) {
   rt->iconLabel = NULL;
+  rt->ampmLabel = NULL;
   if (cfg->icon < 1 || cfg->icon > GAUGE_ICON_COUNT || !s_capLabel) return;
   lv_obj_update_layout(container);
   const lv_font_t *capFont = lv_obj_get_style_text_font(s_capLabel, 0);
@@ -620,7 +624,8 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
   if (cfg->gauge_type == GAUGE_TYPE_NUMBER) {
     char sample[24];
     readout_sample(cfg, sample, sizeof(sample));
-    bool hasUnits = cfg->units[0] != '\0';
+    bool clock12 = cfg->signal == SIG_CLOCK && cfg->decimals == 0 && cfg->units[0] == '\0';   // AM/PM under the time
+    bool hasUnits = cfg->units[0] != '\0' || clock12;
     // The block is caption above, number, units below. Room for the caption and units is planned from the size asked for
     // (they may shrink to fit afterwards); the number is the biggest size that fits where it will stand.
     float capHReq = (float)font_line_h(caption_font_exact(cfg->caption_font_size));
@@ -658,8 +663,9 @@ static void build_cell(lv_obj_t *page, CellRect rect, CellConfig *cfg, CellRunti
       lv_obj_add_flag(unitsLabel, LV_OBJ_FLAG_USER_3);   // units: placed by coordinates when the cell asks
       lv_obj_set_style_text_color(unitsLabel, lv_color_hex(0xA0A0A0), 0);
       if (unitsFont) lv_obj_set_style_text_font(unitsLabel, unitsFont, 0);
-      lv_label_set_text(unitsLabel, cfg->units);
+      lv_label_set_text(unitsLabel, clock12 ? "AM" : cfg->units);
       lv_obj_align_to(unitsLabel, numLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+      if (clock12) rt->ampmLabel = unitsLabel;
     }
   } else if (cfg->gauge_type == GAUGE_TYPE_HISTOGRAM) {
     int32_t sec = cfg->history_sec;
@@ -1341,6 +1347,15 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
       char buf[16];
       if (has_data && isfinite(value)) snprintf(buf, sizeof(buf), "%.*f", (int)c->decimals, value);   // the big fonts only have digits: never feed them "nan"/"inf"
       else snprintf(buf, sizeof(buf), "--");
+      if (c->signal == SIG_CLOCK && has_data) {   // the clock: 12 or 24 hour, with or without seconds (the digit fonts have ':')
+        uint32_t u; int16_t o; screen_clock_now(&u, &o);
+        int32_t t = (int32_t)(((int64_t)u + o * 60) % 86400); if (t < 0) t += 86400;
+        int h = t / 3600, m = t / 60 % 60, sec = t % 60, h12 = h % 12 == 0 ? 12 : h % 12;
+        bool is24 = c->decimals >= 1, withSec = c->decimals == 2;   // 0: 2:32 PM, 1: 14:32, 2: 14:32:05
+        if (withSec) snprintf(buf, sizeof(buf), "%d:%02d:%02d", is24 ? h : h12, m, sec);
+        else snprintf(buf, sizeof(buf), is24 ? "%02d:%02d" : "%d:%02d", is24 ? h : h12, m);
+        if (c->ampmLabel) set_label_if_changed(c->ampmLabel, h < 12 ? "AM" : "PM");
+      }
 
       if (c->gauge_type == GAUGE_TYPE_NUMBER) {
         if (c->numberLabel) set_label_if_changed(c->numberLabel, buf);

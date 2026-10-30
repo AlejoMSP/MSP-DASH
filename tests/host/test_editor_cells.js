@@ -94,6 +94,15 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     probe.run('pages[0].cells[0].icon_pos = 2');
     check(!/>Oil<\/text>/.test(probe.run('previewSvg(pages[0].cells[0], 0, 0)')), "icon instead of the caption: the caption text is not drawn");
     check(/width="98" height="98"/.test(probe.run('previewSvg(pages[0].cells[0], 3, 1)')), "a 2x2 cell previews at a quarter of the screen"); }
+  { probe.run('pages[0].cells.push(Object.assign(emptyCell(), { enabled: true })); setCellSignal(0, 1, 44)');
+    const c = JSON.parse(probe.run('JSON.stringify(pages[0].cells[1])'));
+    check(c.signal === 44 && c.gauge_type === 1 && c.decimals === 0 && c.units === "", "picking Clock makes a number gauge, 12-hour style");
+    check(/>2:32 PM<\/text>/.test(probe.run('previewSvg(pages[0].cells[1], 3, 1)')), "the preview shows a sample time, 2:32 PM");
+    probe.run('pages[0].cells[1].decimals = 2');
+    check(/>14:32:05<\/text>/.test(probe.run('previewSvg(pages[0].cells[1], 3, 1)')), "24-hour with seconds: 14:32:05");
+    probe.run('pages[0].layout = 1; renderPages()');
+    { const h = probe.run('document.getElementById("pages").innerHTML'); check(/Clock style/.test(h), "the Decimals box becomes Clock style for the clock"); }
+    probe.run('pages[0].layout = 0; pages[0].cells.pop(); renderPages()'); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

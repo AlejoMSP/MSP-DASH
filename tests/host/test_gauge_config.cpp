@@ -6,6 +6,8 @@
 #include "Arduino.h"
 #include "Preferences.h"
 #include "FFat.h"
+#include "screen_clock.h"
+#include "gps_time.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
 #include "gauge_config_json.h"
@@ -289,7 +291,7 @@ int main(int argc, char **argv) {
   {
     static const char *NAMES[9] = { "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal" };
     bool namesOk = true; for (int i = 0; i < 9; i++) if (strcmp(gauge_config_signal_name((SignalId)(SIG_FIRST_FLAG + i)), NAMES[i]) != 0) namesOk = false;
-    CHECK(namesOk && SIG_COUNT == 44 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (44 signals in all, 16 of them custom slots)");
+    CHECK(namesOk && SIG_COUNT == 45 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (45 signals in all: 16 custom slots, then the clock)");
     CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(SIG_EGT) && !gauge_signal_is_flag(SIG_IAT) && !gauge_signal_is_flag(SIG_AMBT) && !gauge_signal_is_flag(SIG_HUM) && !gauge_signal_is_flag(SIG_FUEL) && !gauge_signal_is_flag(0), "which signals are flags");
     g_fake_millis = 50000; g_flag_bits = 0; g_flag_seen = 0;
     CHECK(!gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 0.0f, "before any frame: no data");
@@ -459,6 +461,11 @@ int main(int argc, char **argv) {
     CHECK(map && map->min_val == -15 && map->max_val == 30 && map->rest_val == 0, "the default boost gauge is -15 to 30 psi and rests at 0 (atmosphere)"); }
 
   wipe();
+  printf("clock signal\n");
+  CHECK(!gauge_config_signal_has_data(SIG_CLOCK) && !strcmp(gauge_config_signal_name(SIG_CLOCK), "Clock"), "the clock: no data until the hub sends the time");
+  screen_clock_set(gt_epoch(2026, 10, 26, 18, 32, 30), -240);
+  CHECK(gauge_config_signal_has_data(SIG_CLOCK) && fabsf(gauge_config_signal_value(SIG_CLOCK) - (14 * 60 + 32.5f)) < 0.05f, "then it reads local minutes since midnight (14:32:30 -> 872.5)");
+  CHECK(!gauge_config_is_log_enabled(SIG_CLOCK), "and is not a log column (the log has its own time)");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

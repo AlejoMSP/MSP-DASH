@@ -25,7 +25,7 @@ void gauge_config_mark_signal_active(SignalId s) { marks[s]++; }
 
 static int pass = 0, fail = 0;
 #define CHECK(c, m) do { if (c) pass++; else { fail++; printf("  FAIL: %s (line %d)\n", m, __LINE__); } } while (0)
-static const int NSIG = SIG_COUNT - 1;      // every real signal: the ten analog ones plus the nine on/off flags
+static const int NSIG = SIG_COUNT - 2;      // every simulated signal (all but SIG_NONE and the real clock)
 static bool allFlags(bool v) { return (v ? g_flag_seen == (uint16_t)((1u << SIG_FLAG_COUNT) - 1) : g_flag_seen == 0) && g_rpm_has_data == v && g_clt_has_data == v && g_boost_has_data == v && g_afr_has_data == v && g_oilp_has_data == v &&
                                       g_oilt_has_data == v && g_fuelp_has_data == v && g_flex_has_data == v && g_tps_has_data == v && g_battv_has_data == v && g_egt_has_data == v && g_iat_has_data == v; }
 static int totalMarks() { int n = 0; for (int i = 0; i < SIG_COUNT; i++) n += marks[i]; return n; }
@@ -65,7 +65,8 @@ int main() {
   sim_loop();
   CHECK(allFlags(true), "every signal (ten analog + nine flags) has data");
   CHECK(g_rpm > 800 && g_rpm < 900, "RPM written");
-  for (int s = 1; s < SIG_COUNT; s++) if (marks[s] != 1) { CHECK(false, "each signal marked active once on the first tick"); break; }
+  for (int s = 1; s < SIG_COUNT; s++) if (s != SIG_CLOCK && marks[s] != 1) { CHECK(false, "each signal marked active once on the first tick"); break; }
+  CHECK(marks[SIG_CLOCK] == 0, "the clock is never simulated (it is the real time)");
   int m0 = totalMarks();
   g_fake_millis += 20; sim_loop();
   CHECK(totalMarks() == m0, "no extra write within 50ms (about 20 updates a second)");

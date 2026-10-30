@@ -197,6 +197,11 @@ function updateLamps() {
     // Reads the screen's own pages (/gauges.json), so there is nothing extra to set up.
     function cellValueText(c, raw) {
       if (raw === undefined) return { text: "--", warn: false };
+      if (c.signal === 44) {   // the clock (minutes since midnight)
+        const t = Math.floor(raw * 60) % 86400, h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60, p2 = n => String(n).padStart(2, "0");
+        const st = Number(c.decimals) || 0;
+        return { text: st === 2 ? p2(h) + ":" + p2(m) + ":" + p2(s) : st === 1 ? p2(h) + ":" + p2(m) : ((h % 12) || 12) + ":" + p2(m) + (h < 12 ? " AM" : " PM"), warn: false };
+      }
       const div = c.value_divisor || 1;
       const scaled = raw / div;
       const dec = [0, 1, 2].includes(Number(c.decimals)) ? Number(c.decimals) : 1;
@@ -499,8 +504,10 @@ R"rawliteral(
               ${VALUE_SIZES.map(([v,n])=>`<option value="${v}" ${c.value_font_size===v?"selected":""}>${n}</option>`).join("")}
             </select>
           </label>
-          <label>Decimals
-            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>
+          ${c.signal === 44 ? `<label>Clock style
+            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${[[0,"12-hour (2:32 PM)"],[1,"24-hour (14:32)"],[2,"24-hour with seconds (14:32:05)"]].map(([v,n]) => `<option value="${v}" ${(Number(c.decimals)||0)===v?"selected":""}>${n}</option>`).join("")}</select></label>
+          <p class="hint">The time comes from the hub's GPS (time zone on the hub's Clock card). Shows -- until the GPS has given it.</p>` : `<label>Decimals
+            <select onchange="setCellField(${pIdx},${cIdx},'decimals',parseInt(this.value))">${decimalsOptions(c.decimals)}</select></label>`}
           <label>Caption alignment
             <select onchange="setCellField(${pIdx},${cIdx},'h_align',parseInt(this.value))">${[[0,"Center"],[1,"Left"],[2,"Right"]].map(([v,n]) => `<option value="${v}" ${(c.h_align||0)===v?"selected":""}>${n}</option>`).join("")}</select></label>
           <label><input type="checkbox" ${c.text_xy?"checked":""} onchange="setTextXY(${pIdx},${cIdx},this.checked)"> Place text by coordinates</label>
@@ -694,7 +701,14 @@ R"rawliteral(
       return [H, H];
     }
     const hexc = v => "#" + ((Number(v) >>> 0) & 0xFFFFFF).toString(16).padStart(6, "0");
+    function clockText(minutes, style) {   // the screen's clock styles: 0 = 2:32 PM, 1 = 14:32, 2 = 14:32:05
+      const t = Math.floor(minutes * 60) % 86400, h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60, p2 = n => String(n).padStart(2, "0");
+      if (style === 2) return p2(h) + ":" + p2(m) + ":" + p2(s);
+      if (style === 1) return p2(h) + ":" + p2(m);
+      return ((h % 12) || 12) + ":" + p2(m) + (h < 12 ? " AM" : " PM");
+    }
     function sampleValue(c) {
+      if (c.signal === 44) return clockText(14 * 60 + 32 + 5 / 60, Number(c.decimals) || 0);
       const mn = Number(c.min) || 0, mx = Number(c.max) || 0, raw = mn + (mx - mn) * 0.65;
       const div = Number(c.value_divisor) || 1, dec = Math.max(0, Math.min(3, Number(c.decimals) || 0));
       return (raw / div).toFixed(dec);
@@ -1783,6 +1797,7 @@ void web_monitor_init(void) {
     for (int sig = 1; sig < SIG_COUNT; sig++) {
       if (gauge_signal_is_flag(sig)) continue;   // on/off flags have no level
       if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) continue;   // custom slot not set up
+      if (sig == SIG_CLOCK) continue;   // not a reading to log or to start logging on
       JsonObject o = arr.add<JsonObject>(); o["id"] = sig; o["name"] = gauge_config_signal_name((SignalId)sig);
     }
     String out; serializeJson(doc, out);
@@ -1812,6 +1827,7 @@ void web_monitor_init(void) {
     JsonArray arr = doc.to<JsonArray>();
     for (int sig = 1; sig < SIG_COUNT; sig++) { // skip SIG_NONE
       if (gauge_signal_is_custom(sig) && !custom_slot_info(sig - SIG_C1)->name[0]) continue;   // custom slot not set up
+      if (sig == SIG_CLOCK) continue;   // not a reading to log or to start logging on
       JsonObject o = arr.add<JsonObject>();
       o["id"] = sig;
       o["name"] = gauge_config_signal_name((SignalId)sig);

@@ -46,6 +46,8 @@ typedef enum {
   // ---- 16 custom slots (custom_slots.h): set up on the hub's /custom page, named by the hub ----
   SIG_C1, SIG_C2, SIG_C3, SIG_C4, SIG_C5, SIG_C6, SIG_C7, SIG_C8,
   SIG_C9, SIG_C10, SIG_C11, SIG_C12, SIG_C13, SIG_C14, SIG_C15, SIG_C16,
+  SIG_CLOCK,       // local time from the hub's GPS (screen_clock.h): value = minutes since midnight. A number gauge
+                   // shows it as a clock; its "decimals" picks the style: 0 = 2:32 PM, 1 = 14:32, 2 = 14:32:05
   SIG_COUNT
 } SignalId;
 

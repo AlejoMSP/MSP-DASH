@@ -61,7 +61,7 @@ int main() {
 
   printf("3. packets fit ESP-NOW\n");
   CHECK(sizeof(SlotsPacket) <= 250 && sizeof(LinkPacket) <= 250, "MSN1 and MSD1 are 250 bytes or less");
-  CHECK(SIG_COUNT == 44 && SIG_C16 == 43 && SIG_C1 == 28, "16 custom slots after the 27 fixed signals (44 in all)");
+  CHECK(SIG_COUNT == 45 && SIG_C16 == 43 && SIG_C1 == 28 && SIG_CLOCK == 44, "16 custom slots after the 27 fixed signals, then the clock (45 in all)");
   CHECK(sizeof(((LinkPacket *)0)->has_mask) == 8, "the data packet's has-data mask is 64 bits");
 
   printf("4. the screen keeps the names from the hub\n");
