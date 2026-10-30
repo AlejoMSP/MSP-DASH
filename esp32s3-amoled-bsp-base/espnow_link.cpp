@@ -1,5 +1,7 @@
 // espnow_link.cpp - see espnow_link.h.
 #include "simulator.h"
+#include "screen_clock.h"
+#include "gps_time.h"
 #include "button_actions.h"
 #include "color_presets.h"
 #include "sd_storage.h"
@@ -108,6 +110,9 @@ static bool handleCmd(const uint8_t *data, int len) {
 
 static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (custom_slots_on_packet(data, len)) return;   // custom sensor names from the hub
+  if (len >= (int)sizeof(TimePacket) && ((const TimePacket *)data)->magic == TIME_MAGIC) {   // the hub's GPS clock
+    const TimePacket *tp = (const TimePacket *)data; screen_clock_set(tp->utc, tp->offset_min); return;
+  }
   if (handleCmd(data, len)) return;
   if (len < (int)offsetof(HelloPacket, name)) return;
   HelloPacket hb; memset(&hb, 0, sizeof(hb)); memcpy(&hb, data, len < (int)sizeof(hb) ? len : sizeof(hb));
@@ -132,6 +137,9 @@ static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int le
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (handleCmd(data, len)) return;
   if (custom_slots_on_packet(data, len)) return;   // custom sensor names from the hub
+  if (len >= (int)sizeof(TimePacket) && ((const TimePacket *)data)->magic == TIME_MAGIC) {
+    const TimePacket *tp = (const TimePacket *)data; screen_clock_set(tp->utc, tp->offset_min); return;
+  }
   if (len < (int)offsetof(LinkPacket, v) || ((const LinkPacket *)data)->magic != PKT_MAGIC) return;
   portENTER_CRITICAL(&s_mux);
   memset(&s_rx, 0, sizeof(s_rx));

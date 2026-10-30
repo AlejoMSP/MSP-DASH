@@ -6,6 +6,8 @@
 #include "sd_storage.h"
 #include "gauge_config.h"
 #include "simulator.h"
+#include "screen_clock.h"
+#include "gps_time.h"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -54,7 +56,7 @@ int main() {
   CHECK(std::string(sd_logging_status_text()).find("log_1.csv") != std::string::npos, "status names the file");
 
   { std::ifstream f(P(1)); std::string h; std::getline(f, h);
-    CHECK(h == "millis,RPM,CLT,marker", "the header ends with a marker column"); }
+    CHECK(h == "millis,time,RPM,CLT,marker", "header: millis, time, the channels, marker"); }
   CHECK(sd_logging_mark(3), "a marker while logging is accepted");
   tick(600);
   { std::ifstream f(P(1)); std::string l, last; int marked = 0; while (std::getline(f, l)) { last = l; if (l.size() > 2 && l.substr(l.size() - 2) == ",3") marked++; }
@@ -122,6 +124,18 @@ int main() {
   { SdLogTrigger t; sd_logging_get_trigger(&t);
     CHECK(t.mode == LOG_START_SIGNAL && t.sig == SIG_TPS && t.above && fabsf(t.level - 85.5f) < 0.01f && t.stop_delay_s == 30, "all five fields come back from NVS"); }
 
+  printf("8b. with the hub's GPS clock: dated file names and a time column\n");
+  { trig(LOG_START_KEY_ON, 0); lose(SIG_RPM); tick(200);
+    screen_clock_set(gt_epoch(2026, 10, 26, 18, 32, 5), -240);
+    set(SIG_RPM, 900); tick(600);
+    std::string dated = std::string(SD_MOUNT_POINT) + "/2026-10-26_14-32-0";
+    bool found = false; std::string fn;
+    for (int s2 = 5; s2 <= 7 && !found; s2++) { fn = dated + std::to_string(s2) + ".csv"; found = exists(fn); }
+    CHECK(found, "the file is named by the local date and time: 2026-10-26_14-32-05.csv");
+    std::ifstream f(fn); std::string h, r; std::getline(f, h); std::getline(f, r);
+    CHECK(r.find(",2026-10-26 14:32:0") != std::string::npos, "each row has the local time after millis");
+    CHECK(std::string(sd_logging_status_text()).find("2026-10-26_14-32-0") != std::string::npos, "the status names the dated file");
+    lose(SIG_RPM); tick(200); remove(fn.c_str()); }
   printf("9. no SD card\n");
   g_mounted = false; sd_logging_init(); clean();
   set(SIG_TPS, 99); tick(1000);

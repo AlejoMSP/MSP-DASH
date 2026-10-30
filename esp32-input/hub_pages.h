@@ -24,6 +24,11 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <div class="card"><h3>Status</h3><div class="grid" id="stat"></div></div>
 <div class="card"><h3>Sensors on the hub</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
+<div class="card"><details><summary><b>Clock</b> <span class="note" id="clk"></span></summary>
+<p class="note">From the GPS. The screens name their log files by it and stamp each row with it.</p>
+<label>Time zone<select id="tzstd"><option value="-300">Eastern</option><option value="-360">Central</option><option value="-420">Mountain</option><option value="-480">Pacific</option><option value="-540">Alaska</option><option value="-600">Hawaii</option><option value="0">UTC</option></select></label>
+<label><input type="checkbox" id="tzdst" style="width:auto"> US daylight saving time</label>
+<button type="button" onclick="saveTz()">Save</button> <span id="tzmsg" class="note"></span></details></div>
 <div class="card"><details><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
@@ -58,7 +63,10 @@ const ecu=g.ecuok?g.ecumph.toFixed(1)+" mph":"no data";
 const cmp=g.ecuok&&g.fix&&g.gpsmph>10&&g.ecumph>1?((g.ecumph-g.gpsmph)/g.gpsmph*100).toFixed(1)+" % (factor "+(g.gpsmph/g.ecumph).toFixed(3)+")":"--";
 $("sens").innerHTML=kv("Ambient",st.dht||"--")+kv("Fuel",(st.fuel!=null?st.fuel+" %":"--"))+kv("EGT",(st.egt||"--")+"<br><span class=note>"+(st.egtsent||0)+" frames to CAN</span>")+
 kv("Speed (rusEFI)",ecu)+kv("GPS",gps)+kv("Speed difference",cmp);}catch(e){}}
-poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,1000);
+async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
+if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
+async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
+poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>

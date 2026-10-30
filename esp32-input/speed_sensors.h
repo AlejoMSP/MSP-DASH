@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gps_time.h"   // copied in: RMC time/date -> UTC seconds
 
 #define KNOTS_TO_MPH       1.150779f
 
@@ -21,6 +22,7 @@ typedef struct {
   uint32_t ggaCount;  // good GGA sentences
   uint32_t badCount;  // sentences with a wrong checksum
   bool newRmc;        // set when an RMC arrives; the caller clears it
+  uint32_t utc;       // RMC date and time as UTC seconds since 1970; 0 = not known yet
   bool newGga;
 } GpsParser;
 
@@ -54,6 +56,8 @@ static inline bool gps_sentence(GpsParser *g, const char *s) {
     gps_field(s, 2, f, sizeof f); g->fix = (f[0] == 'A');
     gps_field(s, 7, f, sizeof f); g->mph = f[0] ? (float)atof(f) * KNOTS_TO_MPH : 0.0f;
     if (!g->fix) g->mph = 0.0f;
+    { char t[16], d[12]; gps_field(s, 1, t, sizeof t); gps_field(s, 9, d, sizeof d);
+      uint32_t u = gt_from_rmc(t, d); if (u) g->utc = u; }   // the time can be good before the position is
     g->rmcCount++; g->newRmc = true;
     return true;
   }

@@ -22,6 +22,7 @@
 #include "gauge_app.h"
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
 #include "web_monitor.h"   // raw CAN tracker, used by the /can page
+#include "gps_time.h"       // copied in: GPS date/time, the MST1 packet
 #include "speed_sensors.h" // the GPS reader (host-tested)
 #include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
 #include "color_presets.h"   // copied in: the 10 colour schemes
@@ -39,7 +40,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 30
+#define INPUT_BUILD 31
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -278,6 +279,17 @@ static void egtTask(void *) {
 #define GPS_RX_PIN 16
 #define GPS_TX_PIN 17
 static GpsParser s_gps;
+static volatile uint32_t s_gpsUtcMs = 0;   // millis() when s_gps.utc was last set
+// Time zone for the screens' log names and timestamps (saved): standard offset in minutes, US daylight saving on/off.
+static int s_tzStd = -300; static bool s_tzDst = true;
+static void tzLoad() { Preferences p; p.begin("time", true); s_tzStd = p.getInt("std", -300); s_tzDst = p.getUChar("dst", 1); p.end(); }
+static void tzSave() { Preferences p; p.begin("time", false); p.putInt("std", s_tzStd); p.putUChar("dst", s_tzDst); p.end(); }
+static uint32_t gpsUtcNow() {   // 0 = the GPS has not given the time in the last minute
+  uint32_t u = s_gps.utc, at = s_gpsUtcMs;
+  if (!u || !at || millis() - at > 60000) return 0;
+  return u + (millis() - at) / 1000;
+}
+static int tzOffsetNow(uint32_t utc) { return s_tzStd + ((s_tzDst && gt_us_dst(utc, s_tzStd)) ? 60 : 0); }
 static volatile uint32_t s_gpsBytes = 0, s_gpsLastByteMs = 0;
 static void gpsTask(void *) {
   gps_init(&s_gps);
@@ -288,6 +300,7 @@ static void gpsTask(void *) {
     while (Serial2.available()) {
       char c = (char)Serial2.read(); s_gpsBytes++; s_gpsLastByteMs = millis();
       if (!gps_feed(&s_gps, c) || simOwns()) continue;
+      if (s_gps.newRmc && s_gps.utc) s_gpsUtcMs = millis();
       if (s_gps.newRmc) { s_gps.newRmc = false; if (s_gps.fix) { g_gps_mph = s_gps.mph; g_gps_has_data = true; markLocal(SIG_GPS_SPD, SRC_HUB_GPS); } }
       if (s_gps.newGga) { s_gps.newGga = false; if (s_gps.fix) { g_gps_sats = s_gps.sats; g_sats_has_data = true; markLocal(SIG_GPS_SATS, SRC_HUB_GPS); } }
     }
@@ -665,6 +678,20 @@ static void setupWeb() {
     server.send(200, "text/plain", "Saved");
   });
   server.on("/buttons/defaults", HTTP_GET, []() { btn_defaults(s_bind); bindSave(); server.send(200, "text/plain", "Back to the defaults"); });
+  // ---- clock from the GPS (/time.json, /time/set) ----
+  server.on("/time.json", HTTP_GET, []() {
+    uint32_t u = gpsUtcNow(); char t[24] = "";
+    if (u) gt_format(u, tzOffsetNow(u), 0, t, sizeof t);
+    char b[140];
+    snprintf(b, sizeof b, "{\"known\":%s,\"local\":\"%s\",\"std\":%d,\"dst\":%s}", u ? "true" : "false", t, s_tzStd, s_tzDst ? "true" : "false");
+    server.send(200, "application/json", b);
+  });
+  server.on("/time/set", HTTP_GET, []() {
+    int std = server.arg("std").toInt();
+    if (std < -720 || std > 840) { server.send(400, "text/plain", "Offset must be -12:00 to +14:00"); return; }
+    s_tzStd = std; s_tzDst = server.arg("dst") == "1"; tzSave();
+    server.send(200, "text/plain", "Saved");
+  });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -793,6 +820,7 @@ void setup() {
 
   slotsLoad();   // custom sensor slots, before CAN starts decoding them
   bindLoad();    // button actions (/buttons)
+  tzLoad();      // time zone for the GPS clock
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;
@@ -816,6 +844,13 @@ void loop() {
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   sim_loop();
+  { static uint32_t lastTime = 0;   // GPS date/time to the screens (log names and timestamps), every 10 s
+    uint32_t u = gpsUtcNow();
+    if (s_wifiUp && u && millis() - lastTime > 10000) {
+      lastTime = millis();
+      TimePacket tp; tp.magic = TIME_MAGIC; tp.utc = u; tp.offset_min = (int16_t)tzOffsetNow(u);
+      esp_now_send(BCAST, (const uint8_t *)&tp, sizeof tp);
+    } }
   { static uint32_t lastNames = 0;   // custom slot names to the screens: on a change and every 10 s
     if (s_wifiUp && (s_slotsChanged || millis() - lastNames > SLOTS_MS)) { s_slotsChanged = false; lastNames = millis(); slotsSendNames(); } }
   if (s_wifiUp) server.handleClient();

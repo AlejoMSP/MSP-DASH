@@ -18,6 +18,7 @@
 #include "sd_storage.h"
 #include "gauge_config.h"
 #include "simulator.h"
+#include "screen_clock.h"   // the hub's GPS date/time: file names and the time column
 #include <Arduino.h>
 #include <Preferences.h>
 #include <stdio.h>
@@ -104,16 +105,22 @@ static bool conditionNow(void) {
 }
 
 static bool startSession(void) {
-  int n = (s_prefsOpen ? s_prefs.getInt("session", 0) : 0) + 1;
-  if (s_prefsOpen) s_prefs.putInt("session", n);
-  snprintf(s_logPath, sizeof(s_logPath), "%s/log_%d.csv", SD_MOUNT_POINT, n);
+  // Named by the date and time when the hub's GPS has given it ("2026-10-26_14-32-05.csv"), else numbered (log_7.csv).
+  char stamp[24];
+  if (screen_clock_text(1, stamp, sizeof stamp)) snprintf(s_logPath, sizeof(s_logPath), "%s/%s.csv", SD_MOUNT_POINT, stamp);
+  else {
+    int n = (s_prefsOpen ? s_prefs.getInt("session", 0) : 0) + 1;
+    if (s_prefsOpen) s_prefs.putInt("session", n);
+    snprintf(s_logPath, sizeof(s_logPath), "%s/log_%d.csv", SD_MOUNT_POINT, n);
+  }
   FILE *f = fopen(s_logPath, "w");
   if (!f) {
-    snprintf(s_status, sizeof(s_status), "Could not create log_%d.csv on the SD card", n);
+    const char *nm = strrchr(s_logPath, '/');
+    snprintf(s_status, sizeof(s_status), "Could not create %s on the SD card", nm ? nm + 1 : s_logPath);
     RT_LOG("%s\n", s_status);
     return false;
   }
-  fprintf(f, "millis");
+  fprintf(f, "millis,time");
   for (int sig = 1; sig < SIG_COUNT; sig++) {
     if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
     fprintf(f, ",%s", gauge_config_signal_name((SignalId)sig));
@@ -164,7 +171,8 @@ void sd_logging_loop(void) {
   s_lastRowMs = now;
   FILE *f = fopen(s_logPath, "a");
   if (!f) return;
-  fprintf(f, "%lu", (unsigned long)now);
+  char when[24]; screen_clock_text(0, when, sizeof when);   // "" while the time is not known
+  fprintf(f, "%lu,%s", (unsigned long)now, when);
   for (int sig = 1; sig < SIG_COUNT; sig++) {
     if (!gauge_config_is_log_enabled((SignalId)sig)) continue;
     if (gauge_config_signal_has_data((SignalId)sig)) fprintf(f, ",%.3f", gauge_config_signal_value((SignalId)sig));
