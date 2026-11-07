@@ -7,3 +7,8 @@ cp $H/*.ino $H/*.h $T/
 for f in can_parsing.h can_flags.h gauge_config.h link_packets.h simulator.h simulator.cpp custom_slots.h color_presets.h button_actions.h gps_time.h; do cp $S/$f $T/; done
 (echo '#include "hub_extra.h"'; cat $T/esp32-input.ino) > $T/main.cpp
 if g++ -std=c++17 -fsyntax-only -w -Istubs_hub -Istubs -I$T $T/main.cpp 2> $T/err.txt; then echo "OK hub sketch"; else head -40 $T/err.txt; echo "FAILED hub sketch"; exit 1; fi
+# the sketch's other source files (simulator.cpp, copied in): only the hub folder on the include path, as on Daniel's PC
+for c in $T/*.cpp; do
+  [ "$(basename $c)" = main.cpp ] && continue
+  if g++ -std=c++17 -fsyntax-only -w -include hub_extra.h -Istubs_hub -Istubs -I$T $c 2> $T/err.txt; then echo "OK hub $(basename $c)"; else head -20 $T/err.txt; echo "FAILED hub $(basename $c)"; exit 1; fi
+done

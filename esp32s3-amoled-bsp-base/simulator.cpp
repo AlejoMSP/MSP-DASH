@@ -2,7 +2,15 @@
   simulator.cpp - see simulator.h for the safety rules.
 */
 
-#include "serial_log.h"   // RT_LOG: runtime messages off unless SERIAL_STREAM
+// Runtime messages are off unless SERIAL_STREAM is 1. Defined here rather than through serial_log.h because the hub
+// copies this file in and does not have serial_log.h (same guard as can_parsing.h).
+#ifndef RT_LOG
+#if defined(SERIAL_STREAM) && SERIAL_STREAM
+#define RT_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+#define RT_LOG(...) do { } while (0)
+#endif
+#endif
 #include "simulator.h"
 #include "gauge_app.h"
 #include "gauge_config.h"
