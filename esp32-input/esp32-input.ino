@@ -37,10 +37,12 @@
 #endif
 #endif
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
+#include "oled_panel.h"      // warning-light panel on the SSD1306 OLED (host-tested)
+#include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 32
+#define INPUT_BUILD 33
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -461,6 +463,52 @@ static void handleButtons() {
   if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
 }
 
+// ---- OLED warning panel (oled_panel.h): 0.96" SSD1306 on GPIO 5 (SDA, R15) / 15 (SCL, R21); seatbelt input GPIO 2 (R20) ----
+#define BELT_PIN 2
+static OledConfig s_oled;
+static uint8_t s_oledBuf[1024];            // what the display shows (also sent to the /oled page as a live picture)
+static volatile bool s_oledLit[OLED_LAMPS];
+static bool s_oledOk = false;
+static void oledLoad() {
+  Preferences p; p.begin("oled", true);
+  if (p.getBytes("cfg", &s_oled, sizeof s_oled) != sizeof s_oled) oled_defaults(&s_oled);
+  p.end();
+  for (int i = 0; i < OLED_LAMPS; i++) if (s_oled.lamp[i].icon > OLED_ICON_COUNT || s_oled.lamp[i].op > OLED_SEATBELT) s_oled.lamp[i].icon = 0;
+}
+static void oledSave() { Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
+static void oledTask(void *) {
+  pinMode(BELT_PIN, INPUT_PULLUP);
+  s_oledOk = oledBegin();
+  Serial.printf("OLED: %s\n", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)");
+  int lastContrast = -1;
+  for (;;) {
+    bool lit[OLED_LAMPS];
+    bool beltLow = digitalRead(BELT_PIN) == LOW;
+    for (int i = 0; i < OLED_LAMPS; i++) {
+      const OledLamp *l = &s_oled.lamp[i];
+      SignalId sg = (SignalId)(l->sig < SIG_COUNT ? l->sig : 0);
+      lit[i] = oled_lamp_lit(l, gauge_config_signal_value(sg), gauge_config_signal_has_data(sg), beltLow, s_oled.belt_lit_low);
+      s_oledLit[i] = lit[i];
+    }
+    char idle[16] = "ALL OK", sub[20] = "";
+    uint32_t u = gpsUtcNow();
+    if (u) {   // the GPS clock, 12-hour
+      int32_t t = (int32_t)(((int64_t)u + tzOffsetNow(u) * 60) % 86400); if (t < 0) t += 86400;
+      int h = t / 3600, m = t / 60 % 60;
+      snprintf(idle, sizeof idle, "%d:%02d %s", h % 12 ? h % 12 : 12, m, h < 12 ? "AM" : "PM");
+      strcpy(sub, "ALL OK");
+    }
+    if (!s_canLastRxMs || millis() - s_canLastRxMs > 2000) strcpy(sub, "NO ECU DATA");
+    oled_render(s_oledBuf, &s_oled, lit, (millis() / 400) % 2 == 0, idle, sub);
+    if (s_oledOk) {
+      int pct = s_briPct < 0 ? 100 : s_briPct, contrast = 8 + pct * 247 / 100;   // follows the screens' brightness (night = dimmer)
+      if (abs(contrast - lastContrast) > 4) { oledContrast((uint8_t)contrast); lastContrast = contrast; }
+      oledShow(s_oledBuf);
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
+
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/html", HOME_HTML);
@@ -694,6 +742,34 @@ static void setupWeb() {
     s_tzStd = std; s_tzDst = server.arg("dst") == "1"; tzSave();
     server.send(200, "text/plain", "Saved");
   });
+  // ---- OLED warning panel (/oled) ----
+  server.on("/oled", HTTP_GET, []() { server.send(200, "text/html", OLED_HTML); });
+  server.on("/oled.bin", HTTP_GET, []() { server.send_P(200, "application/octet-stream", (const char *)s_oledBuf, sizeof s_oledBuf); });
+  server.on("/oled.json", HTTP_GET, []() {
+    String j = "{\"found\":"; j += s_oledOk ? "true" : "false";
+    j += ",\"layout\":"; j += String((int)s_oled.layout); j += ",\"belt_lit_low\":"; j += String((int)s_oled.belt_lit_low);
+    j += ",\"belt_low\":"; j += digitalRead(BELT_PIN) == LOW ? "true" : "false"; j += ",\"lamps\":[";
+    for (int i = 0; i < OLED_LAMPS; i++) {
+      const OledLamp &l = s_oled.lamp[i];
+      char b[120]; snprintf(b, sizeof b, "%s{\"icon\":%u,\"sig\":%u,\"op\":%u,\"blink\":%u,\"level\":%g,\"lit\":%s}", i ? "," : "",
+                            l.icon, l.sig, l.op, l.blink, (double)l.level, s_oledLit[i] ? "true" : "false");
+      j += b;
+    }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/oled/set", HTTP_GET, []() {
+    int i = server.arg("i").toInt(), icon = server.arg("icon").toInt(), sig = server.arg("sig").toInt(), op = server.arg("op").toInt();
+    if (i < 0 || i >= OLED_LAMPS || icon < 0 || icon > OLED_ICON_COUNT || sig < 0 || sig >= SIG_COUNT || op < 0 || op > OLED_SEATBELT) { server.send(400, "text/plain", "Bad setting"); return; }
+    OledLamp &l = s_oled.lamp[i];
+    l.icon = icon; l.sig = sig; l.op = op; l.blink = server.arg("blink") == "1"; l.level = server.arg("level").toFloat();
+    oledSave(); server.send(200, "text/plain", "Saved");
+  });
+  server.on("/oled/opts", HTTP_GET, []() {
+    if (server.hasArg("layout")) s_oled.layout = server.arg("layout") == "1" ? OLED_COMPACT : OLED_FIXED;
+    if (server.hasArg("belt")) s_oled.belt_lit_low = server.arg("belt") == "1";
+    oledSave(); server.send(200, "text/plain", "Saved");
+  });
+  server.on("/oled/defaults", HTTP_GET, []() { oled_defaults(&s_oled); oledSave(); server.send(200, "text/plain", "Back to the defaults"); });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -823,6 +899,7 @@ void setup() {
   slotsLoad();   // custom sensor slots, before CAN starts decoding them
   bindLoad();    // button actions (/buttons)
   tzLoad();      // time zone for the GPS clock
+  oledLoad();    // OLED warning panel
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;
@@ -836,6 +913,7 @@ void setup() {
   xTaskCreatePinnedToCore(gpsTask, "gps", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(canTxTask, "can_tx", 3072, NULL, 2, NULL, 1);
   rfBegin();   // CC1101 on GPIO 13/14/27/33/39; carries on without it if not wired
+  xTaskCreatePinnedToCore(oledTask, "oled", 4096, NULL, 1, NULL, 1);   // OLED panel; carries on without it if not wired
   xTaskCreatePinnedToCore(dataTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
 
   if (s_wifiUp) setupWeb();

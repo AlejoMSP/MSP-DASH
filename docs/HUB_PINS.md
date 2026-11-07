@@ -29,6 +29,9 @@ the standard 38-pin DevKitC order. Ground goes to the breadboard ground bar.
 | Terminal | GPIO | Used for | Notes |
 |---|---|---|---|
 | R6 | GND | ground | |
+| R15 | 5 | OLED SDA (0.96" SSD1306, I2C) |
+| R21 | 15 | OLED SCL |
+| R20 | 2 | Seatbelt switch input (pull-up; lit when LOW by default) |
 | R7 | 23 | MAX6675 CS (EGT) | |
 | R8 | 22 | CAN RX (SN65HVD230 CRX) | |
 | R9 | 1 (TX0) | USB serial | do not use |

@@ -36,6 +36,7 @@ public:
   String &operator+=(const String &o) { append(o); return *this; }
   String &operator+=(const char *o) { append(o); return *this; }
   bool startsWith(const String &p) const { return rfind(p, 0) == 0; }
+  void replace(const char *from, const char *to) { size_t n = strlen(from), m = strlen(to), i = 0; if (!n) return; while ((i = find(from, i)) != npos) { std::string::replace(i, n, to); i += m; } }
   int indexOf(char c) const { size_t i = find(c); return i == npos ? -1 : (int)i; }
   String substring(unsigned a, unsigned b = 0xFFFFFFFF) const { return String(substr(a, b == 0xFFFFFFFF ? npos : b - a)); }
 };
