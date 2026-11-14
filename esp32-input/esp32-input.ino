@@ -42,7 +42,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 33
+#define INPUT_BUILD 34
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -743,7 +743,7 @@ static void setupWeb() {
     server.send(200, "text/plain", "Saved");
   });
   // ---- OLED warning panel (/oled) ----
-  server.on("/oled", HTTP_GET, []() { server.send(200, "text/html", OLED_HTML); });
+  server.on("/oled", HTTP_GET, []() { server.send_P(200, "text/html", OLED_HTML, strlen_P(OLED_HTML)); });   // ~30 KB with the icon list: sent straight from flash, not copied into one big String first
   server.on("/oled.bin", HTTP_GET, []() { server.send_P(200, "application/octet-stream", (const char *)s_oledBuf, sizeof s_oledBuf); });
   server.on("/oled.json", HTTP_GET, []() {
     String j = "{\"found\":"; j += s_oledOk ? "true" : "false";

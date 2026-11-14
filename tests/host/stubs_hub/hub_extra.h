@@ -22,3 +22,4 @@ extern HardwareSerial Serial1, Serial2;
 long random(long); long random(long, long);
 #define F(x) (x)
 // String::replace exists on Arduino; the shared stub lacks it, so hub code calls go through this helper type.
+#define strlen_P strlen

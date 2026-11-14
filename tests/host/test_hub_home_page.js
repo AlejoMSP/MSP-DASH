@@ -25,7 +25,7 @@ vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
   check(/100 % now/.test(el("brisum").textContent), "brightness folded away, with a one-line summary");
   for (const p of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML"]) {
     const h = hubPage(p);
-    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /\.nav\{/.test(h), p + " has the navigation bar");
+    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /\.nav\{/.test(h), p + " has the navigation bar (with OLED)");
   }
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

@@ -7,7 +7,7 @@
 
 // The navigation bar on every hub page (HUB_NAV, styled by HUB_NAV_STYLE inside each page's <style>).
 #define HUB_NAV_STYLE ".nav{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px;padding:6px;background:#0b1a1d;border-radius:8px;position:sticky;top:0;z-index:5}\n.nav a{color:#4dd0e1;text-decoration:none;padding:6px 10px;border-radius:5px;font-size:14px}.nav a:hover{background:#1d2b2e}"
-#define HUB_NAV "<div class=\"nav\"><a href=\"/\">Hub</a><a href=\"/sensors\">Sensors</a><a href=\"/custom\">Custom sensors</a><a href=\"/buttons\">Buttons</a><a href=\"/simulator\">Simulator</a><a href=\"/rf\">433 MHz</a><a href=\"/can\">Raw CAN</a><a href=\"/update\">Firmware</a></div>"
+#define HUB_NAV "<div class=\"nav\"><a href=\"/\">Hub</a><a href=\"/sensors\">Sensors</a><a href=\"/custom\">Custom sensors</a><a href=\"/buttons\">Buttons</a><a href=\"/simulator\">Simulator</a><a href=\"/oled\">OLED</a><a href=\"/rf\">433 MHz</a><a href=\"/can\">Raw CAN</a><a href=\"/update\">Firmware</a></div>"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Hub</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
