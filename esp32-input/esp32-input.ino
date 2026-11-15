@@ -481,11 +481,16 @@ static void oledLoad() {
   }
 }
 static void oledSave() { s_oled.version = OLED_CFG_VERSION; Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
+static uint8_t s_inPulled = 0;   // hub input pins already set to INPUT_PULLUP
 static int inputPin(int in) { return in == OLED_IN_GPIO2 ? 2 : in == OLED_IN_GPIO12 ? 12 : in == OLED_IN_GPIO0 ? 0 : -1; }
 // Reads an input (true = LOW). Hub pins get their pull-up the first time; expander pins are pulled up by the chip.
 static bool inputLow(int in) {
   int pin = inputPin(in);
-  if (pin >= 0) { static uint8_t pulled = 0; uint8_t bit = 1 << in; if (!(pulled & bit)) { pinMode(pin, INPUT_PULLUP); pulled |= bit; delay(1); } return digitalRead(pin) == LOW; }
+  if (pin >= 0) {
+    uint8_t bit = 1 << in;
+    if (!(s_inPulled & bit)) { pinMode(pin, INPUT_PULLUP); s_inPulled |= bit; delay(1); }
+    return digitalRead(pin) == LOW;
+  }
   if (in >= OLED_IN_PCF0 && in < OLED_IN_PCF1 + 8) { int e = in >= OLED_IN_PCF1, b = (in - OLED_IN_PCF0) % 8; return s_pcfOk[e] && !((s_pcfBits[e] >> b) & 1); }
   return false;
 }
