@@ -1,12 +1,15 @@
 #pragma once
 #include "Arduino.h"
-enum WebRequestMethod { HTTP_GET = 1, HTTP_POST = 2 };
+enum WebRequestMethod { HTTP_GET = 1, HTTP_POST = 2, HTTP_OPTIONS = 64 };
+class DefaultHeaders { public: static DefaultHeaders &Instance() { static DefaultHeaders d; return d; } void addHeader(const char *, const char *) {} };
 struct AsyncWebParameter { String value() const { return ""; } String name() const { return ""; } };
 struct AsyncWebServerResponse { void addHeader(const char *, const String &) {} };
 class AsyncWebServerRequest {
 public:
   void *_tempObject = nullptr;
   void send(int, const char *, const String &) {}
+  void send(int) {}
+  int method() const { return HTTP_GET; }
   void send(int, const String &, const String &) {}
   void send(AsyncWebServerResponse *) {}
   void send_P(int, const char *, const char *) {}

@@ -381,6 +381,16 @@ R"rawliteral(<style>
     .zonerow label { flex:1; }
     .zonerow input[type=number] { width:92px; margin:0; }
     .pname { width:9em; margin:0 6px; }
+    .copyrow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:0.85em; color:#aaa; margin:4px 0 6px; }
+    .copyrow select { width:auto; margin:0; }
+    .pagebody { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+    .lmap { flex:0 0 210px; text-align:center; } .pagecell { flex:1 1 420px; min-width:0; }
+    .cell { display:flex; flex-direction:row-reverse; gap:12px; align-items:flex-start; }
+    .cellmain { flex:1 1 auto; min-width:0; } .cellside { flex:0 0 auto; position:sticky; top:8px; }
+    @media (max-width:760px) { .cell { flex-direction:column; } .cellside { position:static; align-self:center; } }
+    details.grp { border:1px solid #263238; border-radius:6px; margin:8px 0; padding:0 10px; background:#0d0d0d; }
+    details.grp > summary { cursor:pointer; color:#4dd0e1; font-weight:bold; padding:8px 0; }
+    details.grp[open] { padding-bottom:8px; }
     .screenwrap { text-align:center; margin:6px 0 10px; }
     .screenprev { border:1px solid #333; border-radius:6px; max-width:100%; height:auto; }
     .addpage { width:100%; margin:0 0 14px; background:none; border:1px dashed #4dd0e1; color:#4dd0e1; }
@@ -459,32 +469,23 @@ R"rawliteral(
       return html;
     }
 
+    // Folding setting groups in a cell: which are open is remembered while the page is open (Signal open at first).
+    const GROUP_OPEN = { signal: true };
+    function openGroup(g) { return !!GROUP_OPEN[g]; }
+    function noteGroup(g, open) { GROUP_OPEN[g] = open; }
     function renderCell(pIdx, cIdx, c) {
       return `
         <div class="cell">
+         <div class="cellside"><div class="screenwrap" id="prev_${pIdx}_${cIdx}">${previewSvg(c, (pages[pIdx] && Number(pages[pIdx].layout)) || 0, cIdx)}</div></div>
+         <div class="cellmain">
           <label><input type="checkbox" ${c.enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].enabled=this.checked; renderPages();"> Cell ${cIdx+1} enabled</label>
-          <div class="screenwrap" id="prev_${pIdx}_${cIdx}">${previewSvg(c, (pages[pIdx] && Number(pages[pIdx].layout)) || 0, cIdx)}</div>
+          ${copyCellHtml(pIdx, cIdx)}
           ${!c.enabled ? "" : `
+          <details class="grp" data-g="signal" ${openGroup("signal") ? "open" : ""} ontoggle="noteGroup('signal', this.open)"><summary>Signal and scale</summary>
           <label>Signal <select onchange="setCellSignal(${pIdx},${cIdx},parseInt(this.value))">${signalOptionsHtml(c.signal)}</select></label>
           <label>Gauge Type <select onchange="changeGaugeType(${pIdx},${cIdx},parseInt(this.value))">
             ${GAUGE_TYPES.map((t,v)=>`<option value="${v}" ${c.gauge_type===v?"selected":""}>${t}</option>`).join("")}
           </select></label>
-          <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
-          <div class="row2">
-            <div><label>Icon ${iconSvg(c.icon || 0)} <select onchange="setCellField(${pIdx},${cIdx},'icon',parseInt(this.value))">${ICONS.map((ic,i)=>`<option value="${i}" ${(c.icon||0)===i?"selected":""}>${ic[0]}</option>`).join("")}</select></label></div>
-            <div><label>Icon position <select onchange="setCellField(${pIdx},${cIdx},'icon_pos',parseInt(this.value))" ${c.icon ? "" : "disabled"}>${["Left of the caption","Above the caption","Instead of the caption"].map((t,i)=>`<option value="${i}" ${(c.icon_pos||0)===i?"selected":""}>${t}</option>`).join("")}</select></label></div>
-          </div>
-          <div class="row2">
-            <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
-            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. psi" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
-          </div>
-          ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
-            <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
-          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<div class="row2">
-            <div><label>Move dial X (px) <input type="number" min="-300" max="300" value="${c.dial_x||0}" onchange="setCellField(${pIdx},${cIdx},'dial_x',parseInt(this.value)||0)"></label></div>
-            <div><label>Move dial Y (px) <input type="number" min="-300" max="300" value="${c.dial_y||0}" onchange="setCellField(${pIdx},${cIdx},'dial_y',parseInt(this.value)||0)"></label></div>
-          </div><p class="hint">Nudges the dial from its automatic spot: X to the right, Y down. Negative moves left / up.</p>` : ""}
-          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<label><input type="checkbox" ${c.caption_on_face ? "checked" : ""} onchange="setCellField(${pIdx},${cIdx},'caption_on_face',this.checked)"> Show the caption on the dial face (above the hub)</label>` : ""}
           <div class="row2">
             <div><label>Min <input type="number" value="${c.min}" onchange="pages[${pIdx}].cells[${cIdx}].min=parseInt(this.value)"></label></div>
             <div><label>Max <input type="number" value="${c.max}" onchange="pages[${pIdx}].cells[${cIdx}].max=parseInt(this.value)"></label></div>
@@ -498,6 +499,25 @@ R"rawliteral(
           <div class="row2">
             <div><label>Refresh Rate (Hz) <input type="number" value="${c.refresh_hz}" onchange="pages[${pIdx}].cells[${cIdx}].refresh_hz=parseInt(this.value)"></label></div>
             <div><label><input type="checkbox" ${c.show_value?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].show_value=this.checked"> Show value</label></div>
+          </div>
+          ${c.gauge_type===3 ? `
+          <div class="row2">
+            <div><label>History (seconds, 2-600) <input type="number" min="2" max="600" value="${c.history_sec}" onchange="pages[${pIdx}].cells[${cIdx}].history_sec=parseInt(this.value)"></label></div>
+            <div><label><input type="checkbox" ${c.ref_enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].ref_enabled=this.checked"> Reference line</label></div>
+            <div><label>Reference value <input type="number" step="any" value="${c.ref_value}" onchange="pages[${pIdx}].cells[${cIdx}].ref_value=parseFloat(this.value)"></label></div>
+          </div>
+          <p style="font-size:0.75em;color:#888;margin:2px 0">Trend graphs take 100 samples across the history window and ignore Refresh Rate. Min and Max set the vertical range.</p>
+          ` : ""}
+          </details>
+          <details class="grp" data-g="text" ${openGroup("text") ? "open" : ""} ontoggle="noteGroup('text', this.open)"><summary>Text: caption, icon, value</summary>
+          <label>Caption <input type="text" value="${escHtml(c.caption)}" onchange="pages[${pIdx}].cells[${cIdx}].caption=this.value"></label>
+          <div class="row2">
+            <div><label>Icon ${iconSvg(c.icon || 0)} <select onchange="setCellField(${pIdx},${cIdx},'icon',parseInt(this.value))">${ICONS.map((ic,i)=>`<option value="${i}" ${(c.icon||0)===i?"selected":""}>${ic[0]}</option>`).join("")}</select></label></div>
+            <div><label>Icon position <select onchange="setCellField(${pIdx},${cIdx},'icon_pos',parseInt(this.value))" ${c.icon ? "" : "disabled"}>${["Left of the caption","Above the caption","Instead of the caption"].map((t,i)=>`<option value="${i}" ${(c.icon_pos||0)===i?"selected":""}>${t}</option>`).join("")}</select></label></div>
+          </div>
+          <div class="row2">
+            <div><label>Caption size <select onchange="setCellField(${pIdx},${cIdx},'caption_font_size',parseInt(this.value))">${captionSizeOptions(c.caption_font_size)}</select></label></div>
+            <div><label>Units <input type="text" maxlength="7" value="${escHtml(c.units || "")}" placeholder="e.g. psi" oninput="setCellField(${pIdx},${cIdx},'units',this.value)"></label></div>
           </div>
           <label>Value Text Size
             <select onchange="pages[${pIdx}].cells[${cIdx}].value_font_size=parseInt(this.value)">
@@ -520,6 +540,19 @@ R"rawliteral(
           </div>
           <p class="hint">Pixels from the cell's centre: X to the right, Y down. Units sit under the value. Caption alignment is ignored while this is on.</p>` : ""}
           <p class="hint">Value text size is the big number. A size too big for the cell shrinks to the largest that fits.</p>
+          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<label><input type="checkbox" ${c.caption_on_face ? "checked" : ""} onchange="setCellField(${pIdx},${cIdx},'caption_on_face',this.checked)"> Show the caption on the dial face (above the hub)</label>` : ""}
+          </details>
+          <details class="grp" data-g="look" ${openGroup("look") ? "open" : ""} ontoggle="noteGroup('look', this.open)"><summary>Look: dial, needle, colours</summary>
+          <label>Color preset <select onchange="if(this.value!=='')applyCellPreset(${pIdx},${cIdx},+this.value)">${presetOptions()}</select></label>
+          <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
+          <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
+          ${c.gauge_type !== 3 ? `<label>Gauge position in the cell
+            <select onchange="setCellField(${pIdx},${cIdx},'v_align',parseInt(this.value))">${valignOptions(c.v_align)}</select></label>` : ""}
+          ${(c.gauge_type === 0 || c.gauge_type === 2) ? `<div class="row2">
+            <div><label>Move dial X (px) <input type="number" min="-300" max="300" value="${c.dial_x||0}" onchange="setCellField(${pIdx},${cIdx},'dial_x',parseInt(this.value)||0)"></label></div>
+            <div><label>Move dial Y (px) <input type="number" min="-300" max="300" value="${c.dial_y||0}" onchange="setCellField(${pIdx},${cIdx},'dial_y',parseInt(this.value)||0)"></label></div>
+          </div><p class="hint">Nudges the dial from its automatic spot: X to the right, Y down. Negative moves left / up.</p>` : ""}
           ${(c.gauge_type===0 || c.gauge_type===2) ? `
           <div class="row2">
             <div><label>Dial numbers
@@ -562,18 +595,8 @@ R"rawliteral(
           <label><input type="checkbox" ${c.needle_glow?"checked":""} onchange="setCellField(${pIdx},${cIdx},'needle_glow',this.checked)"> Needle glow: a soft halo of the needle colour behind it</label>
           <p class="hint">Needle length trim, as a percent of the dial's radius. 0 and 0 is the normal needle. Both ends together can trim at most 85.</p>
           ` : ""}
-          ${c.gauge_type===3 ? `
-          <div class="row2">
-            <div><label>History (seconds, 2-600) <input type="number" min="2" max="600" value="${c.history_sec}" onchange="pages[${pIdx}].cells[${cIdx}].history_sec=parseInt(this.value)"></label></div>
-            <div><label><input type="checkbox" ${c.ref_enabled?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].ref_enabled=this.checked"> Reference line</label></div>
-            <div><label>Reference value <input type="number" step="any" value="${c.ref_value}" onchange="pages[${pIdx}].cells[${cIdx}].ref_value=parseFloat(this.value)"></label></div>
-          </div>
-          <p style="font-size:0.75em;color:#888;margin:2px 0">Trend graphs take 100 samples across the history window and ignore Refresh Rate. Min and Max set the vertical range.</p>
-          ` : ""}
-          <label>Color preset <select onchange="if(this.value!=='')applyCellPreset(${pIdx},${cIdx},+this.value)">${presetOptions()}</select></label>
-          <label>Needle Color <input type="color" value="#${c.needle_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].needle_color=parseInt(this.value.substring(1),16)"></label>
-          <label>Tick/Dial Color <input type="color" value="#${c.tick_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].tick_color=parseInt(this.value.substring(1),16)"></label>
-          <label>Background Color <input type="color" value="#${c.bg_color.toString(16).padStart(6,'0')}" onchange="pages[${pIdx}].cells[${cIdx}].bg_color=parseInt(this.value.substring(1),16)"></label>
+          </details>
+          <details class="grp" data-g="warn" ${openGroup("warn") ? "open" : ""} ontoggle="noteGroup('warn', this.open)"><summary>Warning</summary>
           <label><input type="checkbox" ${c.has_warning?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].has_warning=this.checked"> Warning enabled</label>
           <div class="row2">
             <div><label>Threshold <input type="number" value="${c.warning_threshold}" onchange="pages[${pIdx}].cells[${cIdx}].warning_threshold=parseFloat(this.value)"></label></div>
@@ -585,7 +608,9 @@ R"rawliteral(
             </label></div>
           </div>
           <label><input type="checkbox" ${c.alert_fullscreen?"checked":""} onchange="pages[${pIdx}].cells[${cIdx}].alert_fullscreen=this.checked"> Full-screen alert on ANY page (needs Warning enabled; engine running only; BOOT or tap dismisses for 30s)</label>
+          </details>
           `}
+         </div>
         </div>
       `;
     }
@@ -713,7 +738,7 @@ R"rawliteral(
       const div = Number(c.value_divisor) || 1, dec = Math.max(0, Math.min(3, Number(c.decimals) || 0));
       return (raw / div).toFixed(dec);
     }
-    function previewSvg(c, layout, cIdx) {
+    function previewSvg(c, layout, cIdx, bodyOnly) {
       const [w, h] = cellSize(layout, cIdx), cx0 = w / 2, cy0 = h / 2, type = Number(c.gauge_type) || 0;
       const f = v => (+v).toFixed(1), esc = escHtml;
       const bg = hexc(c.bg_color), tick = hexc(c.tick_color), needle = hexc(c.needle_color);
@@ -763,10 +788,91 @@ R"rawliteral(
         else if (!hideCap) ix = capX - textW / 2 - 6 - s;
         out += `<g transform="translate(${f(ix)},${f(iy)}) scale(${(s / 24).toFixed(3)})"><path d="${ic[1]}" fill="${capColor}"/></g>`;
       }
+      if (bodyOnly) return out;
       const dispW = Math.round(w * 0.42), dispH = Math.round(h * 0.42);
       return `<svg class="screenprev" viewBox="0 0 ${w} ${h}" width="${dispW}" height="${dispH}" role="img" aria-label="screen preview">${out}</svg>` +
              `<div class="dialcap">Screen preview at a sample value (${sampleValue(c)})</div>`;
     }
+
+    // ---- copying a cell or a page to this or another screen ----
+    let PEERS = [];   // [{name, ip}] other screens heard on the link (status.json)
+    const MAX_PAGES_JS = 8;
+    function copyMsg(t) { document.getElementById("status").innerHTML = t; }
+    function clone(o) { return JSON.parse(JSON.stringify(o)); }
+    function copyCellHtml(pIdx, cIdx) {
+      const scr = '<option value="">This screen</option>' + PEERS.map(b => `<option value="${b.ip}">${escHtml(b.name)}</option>`).join("");
+      const pg = Array.from({ length: MAX_PAGES_JS }, (_, i) => `<option value="${i}">page ${i + 1}</option>`).join("");
+      const cl = [0, 1, 2, 3].map(i => `<option value="${i}">cell ${i + 1}</option>`).join("");
+      return `<div class="copyrow">Copy this cell to <select id="cs_${pIdx}_${cIdx}">${scr}</select><select id="cp_${pIdx}_${cIdx}">${pg}</select><select id="cc_${pIdx}_${cIdx}">${cl}</select>` +
+             `<button type="button" onclick="copyCell(${pIdx},${cIdx})">Copy</button></div>`;
+    }
+    // Where a copied cell can go: a gauge page (not lamps) whose layout has that many cells.
+    function cellSlotOk(pg, tp, tc) { const p = pg[tp]; return p && p.kind !== 1 && tc < CELLS_PER_LAYOUT[p.layout]; }
+    async function remotePages(ip) { const r = await fetch("http://" + ip + "/gauges.json", { cache: "no-store" }); if (!r.ok) throw new Error("could not read it"); return r.json(); }
+    async function remoteSave(ip, pg) {
+      const r = await fetch("http://" + ip + "/gauges", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pg) });
+      if (!r.ok) throw new Error((await r.text()) || ("it returned " + r.status));
+    }
+    function restartBtn(ip, name) { return ` <button type="button" onclick="restartPeer('${ip}','${escHtml(name).replace(/'/g, "")}')">Restart ${escHtml(name)} now</button>`; }
+    async function restartPeer(ip, name) {
+      try { await fetch("http://" + ip + "/reboot", { method: "POST", headers: { "X-MSP": "1" } }); } catch (e) {}
+      copyMsg(escHtml(name) + " is restarting.");
+    }
+    async function copyCell(pIdx, cIdx) {
+      const ip = document.getElementById(`cs_${pIdx}_${cIdx}`).value, tp = +document.getElementById(`cp_${pIdx}_${cIdx}`).value, tc = +document.getElementById(`cc_${pIdx}_${cIdx}`).value;
+      const cell = clone(pages[pIdx].cells[cIdx]);
+      if (!ip) {
+        if (tp === pIdx && tc === cIdx) { copyMsg("That is this cell."); return; }
+        if (!cellSlotOk(pages, tp, tc)) { copyMsg(`This screen has no gauge page ${tp + 1} with a cell ${tc + 1}.`); return; }
+        pages[tp].cells[tc] = cell; SELECTED[tp] = tc; renderPages();
+        copyMsg(`Copied to page ${tp + 1}, cell ${tc + 1}. Save to keep it.`); return;
+      }
+      const name = (PEERS.find(b => b.ip === ip) || { name: ip }).name;
+      try {
+        copyMsg("Copying to " + escHtml(name) + "...");
+        const pg = await remotePages(ip);
+        if (!cellSlotOk(pg, tp, tc)) { copyMsg(`${escHtml(name)} has no gauge page ${tp + 1} with a cell ${tc + 1}.`); return; }
+        pg[tp].cells[tc] = cell; await remoteSave(ip, pg);
+        copyMsg(`Copied to ${escHtml(name)}, page ${tp + 1}, cell ${tc + 1}. It shows after ${escHtml(name)} restarts.` + restartBtn(ip, name));
+      } catch (e) { copyMsg("Copy to " + escHtml(name) + " FAILED: " + escHtml(e.message || String(e))); }
+    }
+    async function copyPage(pIdx) {
+      const ip = document.getElementById(`pc_${pIdx}`).value; if (!ip) return;
+      const name = (PEERS.find(b => b.ip === ip) || { name: ip }).name;
+      try {
+        copyMsg("Copying the page to " + escHtml(name) + "...");
+        const pg = await remotePages(ip);
+        if (pg.length >= MAX_PAGES_JS) { copyMsg(escHtml(name) + " already has " + MAX_PAGES_JS + " pages."); return; }
+        pg.push(clone(pages[pIdx])); await remoteSave(ip, pg);
+        copyMsg(`Page ${pIdx + 1} added to ${escHtml(name)} as its page ${pg.length}. It shows after ${escHtml(name)} restarts.` + restartBtn(ip, name));
+      } catch (e) { copyMsg("Copy to " + escHtml(name) + " FAILED: " + escHtml(e.message || String(e))); }
+    }
+
+    // ---- the page's layout as a picture of the round screen: click a cell to edit it ----
+    const SELECTED = {};   // page index -> the cell being edited
+    function cellRect(layout, ci) {   // where cell ci sits on the 466 px screen
+      const S = SCREEN_PX, H = S / 2;
+      if (layout === 0) return [0, 0, S, S];
+      if (layout === 1) return [0, ci * H, S, H];
+      if (layout === 2) return ci === 0 ? [0, 0, S, H] : [(ci - 1) * H, H, H, H];
+      return [(ci % 2) * H, Math.floor(ci / 2) * H, H, H];
+    }
+    function layoutMap(pIdx, p, needed, sel) {
+      const S = SCREEN_PX, layout = Number(p.layout) || 0;
+      let g = "";
+      for (let ci = 0; ci < needed; ci++) {
+        const [x, y, w, h] = cellRect(layout, ci), c = p.cells[ci];
+        const inner = c.enabled ? previewSvg(c, layout, ci, true) : `<rect width="${w}" height="${h}" fill="#050505"/><text x="${w / 2}" y="${h / 2}" fill="#555" font-size="28" text-anchor="middle" dominant-baseline="central" font-family="sans-serif">off</text>`;
+        g += `<g transform="translate(${x},${y})" style="cursor:pointer" onclick="selectCell(${pIdx},${ci})">${inner}` +
+             `<rect x="3" y="3" width="${w - 6}" height="${h - 6}" fill="none" stroke="${ci === sel ? "#4dd0e1" : "#333"}" stroke-width="${ci === sel ? 8 : 2}"/>` +
+             `<text x="14" y="34" fill="${ci === sel ? "#4dd0e1" : "#888"}" font-size="26" font-family="sans-serif">${ci + 1}</text></g>`;
+      }
+      return `<div class="lmap"><svg viewBox="0 0 ${S} ${S}" width="210" height="210" role="img" aria-label="page layout">` +
+             `<defs><clipPath id="round_${pIdx}"><circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}"/></clipPath></defs>` +
+             `<g clip-path="url(#round_${pIdx})"><rect width="${S}" height="${S}" fill="#000"/>${g}</g><circle cx="${S / 2}" cy="${S / 2}" r="${S / 2 - 2}" fill="none" stroke="#444" stroke-width="4"/></svg>` +
+             `<div class="hint">${needed > 1 ? "Click a cell to edit it. Editing cell " + (sel + 1) + " of " + needed + "." : "One cell on this page."}</div></div>`;
+    }
+    function selectCell(pIdx, ci) { SELECTED[pIdx] = ci; renderPages(); }
     function refreshPreviews() {
       pages.forEach((p, pi) => (p.cells || []).forEach((c, ci) => {
         const el = document.getElementById("prev_" + pi + "_" + ci);
@@ -874,8 +980,8 @@ R"rawliteral(
         if (p.kind === 1) return renderIndicatorPage(pIdx, p);
         const needed = CELLS_PER_LAYOUT[p.layout];
         while (p.cells.length < needed) p.cells.push(emptyCell());
-        let cellsHtml = "";
-        for (let c = 0; c < needed; c++) cellsHtml += renderCell(pIdx, c, p.cells[c]);
+        const sel = Math.min(SELECTED[pIdx] || 0, needed - 1);
+        const cellsHtml = `<div class="pagebody">${layoutMap(pIdx, p, needed, sel)}<div class="pagecell">${renderCell(pIdx, sel, p.cells[sel])}</div></div>`;
         return `
           <div class="page-card">
             <div class="page-header">
@@ -887,6 +993,7 @@ R"rawliteral(
               <button type="button" title="Move up" onclick="pageAction(${pIdx},'up')" ${pIdx === 0 ? "disabled" : ""}>&uarr;</button>
               <button type="button" title="Move down" onclick="pageAction(${pIdx},'down')" ${pIdx === pages.length - 1 ? "disabled" : ""}>&darr;</button>
               <button type="button" onclick="pageAction(${pIdx},'copy')">Copy</button>
+              ${PEERS.length ? `<select id="pc_${pIdx}" onchange="if(this.value)copyPage(${pIdx})"><option value="">Copy to screen...</option>${PEERS.map(b => `<option value="${b.ip}">${escHtml(b.name)}</option>`).join("")}</select>` : ""}
               <button type="button" onclick="pageAction(${pIdx},'empty')">Empty</button>
               <button type="button" class="danger" onclick="pageAction(${pIdx},'delete')">Delete</button>
             </div>
@@ -908,6 +1015,10 @@ R"rawliteral(
         pages = await pagesRes.json();
         const signalsRes = await fetch("/signals.json");
         signalActivity = await signalsRes.json();
+        try {   // the other screens, for "copy to another screen"
+          const st = await (await fetch("/status.json")).json();
+          PEERS = ((st.link && st.link.boards) || []).filter(b => b.ip && b.ip !== "0.0.0.0" && b.ip !== st.ip && b.name && b.age_ms < 15000).map(b => ({ name: b.name, ip: b.ip }));
+        } catch (e) { PEERS = []; }
         renderPages();
         loaded = true;
         document.getElementById("status").textContent = "";
@@ -1910,6 +2021,14 @@ void web_monitor_init(void) {
     }
   );
 
+  // Cross-origin access: the gauge editor on one screen copies cells and pages to another screen, and the hub's
+  // Dashboard reads the center screen's logging status. All boards are on the car's own network.
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, X-MSP");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.onNotFound([](AsyncWebServerRequest *request) {   // a browser's pre-flight check before a cross-origin POST
+    if (request->method() == HTTP_OPTIONS) request->send(200); else request->send(404, "text/plain", "Not found");
+  });
   server.addHandler(&ws);
   server.begin();
 }

@@ -5,9 +5,9 @@ let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; 
 const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
 function run(api) {
   const els = {}; const el = id => els[id] || (els[id] = { innerHTML: "", textContent: "", getContext: () => ({ createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: () => {} }) });
-  const ctx = { document: { getElementById: el }, setInterval: () => 0, console, Uint8Array, Uint8ClampedArray, encodeURIComponent, Promise,
+  const ctx = { document: { getElementById: el }, setInterval: () => 0, setTimeout: () => 0, AbortController, Date, console, Uint8Array, Uint8ClampedArray, encodeURIComponent, Promise,
     fetch: async u => ({ json: async () => { if (!(u in api)) throw new Error("no " + u); return api[u]; }, arrayBuffer: async () => new ArrayBuffer(1024) }) };
-  vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx); return el;
+  vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx); el.again = () => vm.runInContext('tick()', ctx); return el;
 }
 const tileOf = (h, name) => { const m = h.match(new RegExp('<a class="tile ([a-z]*)" href="([^"]*)"><b>' + name + '</b><span>([^<]*)</span>')); return m ? { cls: m[1], href: m[2], text: m[3] } : null; };
 (async () => {
@@ -16,6 +16,7 @@ const tileOf = (h, name) => { const m = h.match(new RegExp('<a class="tile ([a-z
     "/sim.json": { active: false }, "/time.json": { known: true, local: "2026-11-15 14:32:05" },
     "/screens.json": [{ name: "Right", online: true, ip: "192.168.55.203", build: 194 }, { name: "Left", online: true, ip: "192.168.55.201", build: 194 }, { name: "Center", online: true, ip: "192.168.55.202", build: 194 }],
     "/oled.json": { lamps: [{ state: 0, sig: 14, op: 0 }, { state: 0, sig: 10, op: 2 }] },
+    "http://192.168.55.202/status.json": { logging: "Logging to 2026-11-15_14-32-05.csv" },
     "/sensors.json": [{ sig: 1, v: 3250.4, age: 50 }, { sig: 3, v: 7.26, age: 50 }, { sig: 2, v: 188, age: 9000 }, { sig: 45, v: -0.42, age: 20 }] };
   let el = run(good); await settle();
   let h = el("tiles").innerHTML;
@@ -26,6 +27,9 @@ const tileOf = (h, name) => { const m = h.match(new RegExp('<a class="tile ([a-z
   check(tileOf(h, "Warnings").cls === "ok" && tileOf(h, "Warnings").text === "none", "no warnings: green");
   check(tileOf(h, "Clock").text === "14:32", "clock from the GPS");
   check(el("lit").textContent === "Nothing lit", "nothing lit");
+  el = run(good); await settle(); el.again(); await settle();
+  const lt = tileOf(el("tiles").innerHTML, "Logging");
+  check(lt && lt.cls === "ok" && /^Logging to 2026-11-15_14-32/.test(lt.text) && lt.text.endsWith("..."), "Logging tile: the center screen's status, green while logging (shortened)");
   const r = el("read").innerHTML;
   check(/<b>RPM<\/b><span>3250<\/span>/.test(r) && /<b>Boost psi<\/b><span>7.3<\/span>/.test(r) && /<b>Lateral G<\/b><span>-0.42<\/span>/.test(r), "readings with their decimals");
   check(/<b>Coolant F<\/b><span>--<\/span>/.test(r) && /<b>Oil psi<\/b><span>--<\/span>/.test(r), "stale or missing readings show --");

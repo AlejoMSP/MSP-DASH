@@ -100,9 +100,9 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
     check(/>2:32 PM<\/text>/.test(probe.run('previewSvg(pages[0].cells[1], 3, 1)')), "the preview shows a sample time, 2:32 PM");
     probe.run('pages[0].cells[1].decimals = 2');
     check(/>14:32:05<\/text>/.test(probe.run('previewSvg(pages[0].cells[1], 3, 1)')), "24-hour with seconds: 14:32:05");
-    probe.run('pages[0].layout = 1; renderPages()');
+    probe.run('pages[0].layout = 1; selectCell(0, 1)');
     { const h = probe.run('document.getElementById("pages").innerHTML'); check(/Clock style/.test(h), "the Decimals box becomes Clock style for the clock"); }
-    probe.run('pages[0].layout = 0; pages[0].cells.pop(); renderPages()'); }
+    probe.run('pages[0].layout = 0; pages[0].cells.pop(); selectCell(0, 0)'); }
   { const fwSizes = STYLE.match(/GAUGE_CAPTION_SIZES\[GAUGE_CAPTION_SIZE_COUNT\] = \{([^}]*)\}/)[1].split(",").map(s => +s.trim());
     const js = probe.run('CAPTION_SIZES.map(s => s[0])');
     check(JSON.stringify(js) === JSON.stringify([0, ...fwSizes]) && fwSizes.join() === "14,20,28,36,48", "the editor offers 'Normal' (0) and exactly the firmware's caption sizes: " + fwSizes.join(", ")); }

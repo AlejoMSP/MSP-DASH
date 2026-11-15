@@ -220,6 +220,7 @@ red), each switched on by itself, drawn as coloured arc BANDS behind the tick ma
   radius above it, inside the ticks, the readout then at the bottom); the dial's Top / Bottom placement measured from its real
   position (Top: highest point at the top of the cell; Bottom: lowest point just above the caption/readout stack; an arc that
   sits above its hub; a half moon moves a lot, a 270 degree dial a little) and number cells' Top / Bottom.
+- `test_editor_layout.js`: editor step 4: layout picture and cell choice, folding groups, pinned preview, copy a cell (this screen, another screen), copy a page, restart button.
 - `test_editor_cells.js`: both editors. CONTRACT: the editor's default scales and caption sizes are read from `gauge_style.h` and
   must match. Choosing a signal sets its scale (and not for MAP/RPM/ethanol/throttle/battery), the controls per gauge type, the
   face checkbox only in the display editor, HTML escaping, new-cell defaults, saving.

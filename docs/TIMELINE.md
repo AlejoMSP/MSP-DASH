@@ -226,3 +226,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 42) | 2026-11-15 | (this commit) | Web UI step 3: Setup in task order with jump links; Firmware page updates the hub (progress bar) and every ticked screen from one .bin |
 | 202 | 2026-11-15 | (this commit) | Screens send their uptime in the hello (hub 43 shows it); Firmware page treats a dropped connection as normal and confirms the update by the screen restarting |
 | (hub 44) | 2026-11-15 | (this commit) | MCP23017 16-input expanders replace the PCF8574 (board 1 at 0x27, board 2 at 0x26): lamp inputs MCP23017 #1/#2 PA0-PB7, I2C card names them, pin doc updated |
+| 204 | 2026-11-15 | (this commit) | Web UI step 4: gauge editor with a clickable layout picture, folding groups, pinned preview, copy cell/page to another screen; screens allow cross-origin requests; hub 45 Dashboard Logging tile shows the center screen's status |

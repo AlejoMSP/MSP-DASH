@@ -39,10 +39,20 @@ const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"O
 20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const $=id=>document.getElementById(id),j=async u=>(await fetch(u)).json(),order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
 const tile=(k,v,cls,href)=>'<a class="tile '+cls+'" href="'+href+'"><b>'+k+'</b><span>'+v+'</span></a>';
+// The center screen's logging status (screens from build 203 allow this cross-origin read). Asked every 5 s.
+let logText="on Center",logCls="",logAt=0;
+async function logStatus(scr){
+ if(Date.now()-logAt<5000)return;logAt=Date.now();
+ const c=(scr||[]).find(s=>/^cent(er|re)$/i.test(s.name||""))||(scr||[])[0];if(!c||!c.online){logText="Center offline";logCls="warn";return;}
+ try{const ctl=new AbortController();setTimeout(()=>ctl.abort(),2500);const st=await (await fetch("http://"+c.ip+"/status.json",{signal:ctl.signal})).json();
+  const t=st.logging||"";logText=t.length>28?t.slice(0,27)+"...":(t||"no status");logCls=/no sd/i.test(t)?"bad":/logging to|started/i.test(t)?"ok":"";}
+ catch(e){logText="on Center";logCls="";}}
 const KEY=[[1,"RPM",0],[3,"Boost psi",1],[2,"Coolant F",0],[5,"Oil psi",0],[6,"Oil F",0],[10,"Battery V",1],[25,"Speed mph",0],[45,"Lateral G",2]];
 async function tick(){
  let st={},can={},spd={},sim={},scr=[],ol={lamps:[]},tm={},sens=[];
  try{[st,can,spd,sim,scr,ol,tm,sens]=await Promise.all(["/state","/can.json","/speed.json","/sim.json","/screens.json","/oled.json","/time.json","/sensors.json"].map(u=>j(u).catch(()=>({}))));}catch(e){}
+ if(!Array.isArray(scr))scr=[];if(!Array.isArray(sens))sens=[];   // a failed request gives {}: treat as an empty list
+ logStatus(scr);
  const on=(scr||[]).filter(s=>s.online).length,tot=(scr||[]).length;
  const w=(ol.lamps||[]).filter(l=>l.state===1).length,d=(ol.lamps||[]).filter(l=>l.state===2).length;
  const canOk=can.state===1&&can.total>0,ecu=st.ecu||"--";
@@ -54,7 +64,7 @@ async function tick(){
   tile("Simulator",sim.active?"ON, "+sim.seconds_left+" s left":"off",sim.active?"warn":"ok","/simulator")+
   tile("Clock",tm.known?tm.local.slice(11,16):"no GPS time",tm.known?"ok":"warn","/setup")+
   tile("Brightness",(st.bri!=null?st.bri:"--")+" %",st.bri>0?"ok":"warn","/setup")+
-  tile("Logging","on Center","","/screen?s=Center&p=log-channels");
+  tile("Logging",logText,logCls,"/screen?s=Center&p=log-channels");
  $("lit").textContent=(ol.lamps||[]).map((l,i)=>l.state?"spot "+(i+1)+" "+(l.state===2?"DANGER":"warning")+(l.op===3?" (input)":" ("+(NAME[l.sig]||"signal "+l.sig)+")"):"").filter(x=>x).join(" | ")||"Nothing lit";
  const by={};(sens||[]).forEach(x=>by[x.sig]=x);
  $("read").innerHTML=KEY.map(k=>{const x=by[k[0]],fresh=x&&x.age<3000;return '<div><b>'+k[1]+'</b><span>'+(fresh?x.v.toFixed(k[2]):"--")+'</span></div>';}).join("");

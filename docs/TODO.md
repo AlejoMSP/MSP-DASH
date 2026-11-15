@@ -9,10 +9,7 @@ Open work, newest ideas at the bottom of each group. Tick items off (or delete t
       as a slot's source, with a divider multiplier (see "Voltage dividers" below: 1.667 for 0-5 V sensors, 5.70 for
       12 V signals), then scale/offset or a calibration table into the reading. Live volts already show on Setup > I2C bus.
 - [ ] Configurable sensors stage 3: DBC presets. Stage 4: move the fixed hub sensors onto slots.
-- [ ] Web UI step 4: gauge editor rework - layout picture to click a cell, folding groups (Signal / Look / Text /
-      Warning), copy a cell or page to another screen, preview pinned beside the settings.
 - [ ] Web UI: one save model everywhere (unsaved-changes bar with Save / Undo) and pop-up messages.
-- [ ] Dashboard Logging tile: show whether the center screen is logging (needs a CORS header on the screen's status reply).
 - [ ] Screens: put every screen GPIO in one header and a pin table, checked by a test (as done for the hub).
 - [ ] fps numbers from the needle pages; decide if the needle redraw rework is worth doing.
 - [ ] TPMS decode (U912 kit): capture each tire at two pressures next to the kit display, paste the hex, decode the fields.
