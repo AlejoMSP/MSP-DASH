@@ -116,7 +116,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <div class="row"><button type="button" onclick="imuSet()">Save mounting</button><button type="button" onclick="imuZero()">Zero (car still and level)</button></div>
 <span id="imsg" class="note"></span></details></div>
 <div class="card" id="i2c"><h3>I2C bus</h3><div class="grid" id="i2c"></div>
-<p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it. ADS1115 inputs read 0 to 3.3 V; an input with nothing connected drifts.</p></div>
+<p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it.</p></div>
 <div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
 <div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div></div>
@@ -148,10 +148,9 @@ $("imu").innerHTML=kv("Lateral",m.lat.toFixed(2)+" G")+kv("Accel / brake",m.lon.
 if(!imu.done){$("ifwd").value=String(m.fwd);$("ileft").value=String(m.left);imu.done=1;}}catch(e){}}
 async function imuSet(){$("imsg").textContent=await (await fetch("/imu/set?fwd="+$("ifwd").value+"&left="+$("ileft").value)).text();}
 async function imuZero(){$("imsg").textContent=await (await fetch("/imu/zero")).text();}
-const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x20:"MCP23017",0x21:"MCP23017",0x22:"MCP23017",0x23:"MCP23017",0x24:"MCP23017",0x25:"MCP23017",0x26:"MCP23017",0x27:"MCP23017",0x48:"ADS1115",0x49:"ADS1115",0x4A:"ADS1115",0x4B:"ADS1115"};
+const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x20:"MCP23017",0x21:"MCP23017",0x22:"MCP23017",0x23:"MCP23017",0x24:"MCP23017",0x25:"MCP23017",0x26:"MCP23017",0x27:"MCP23017"};
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
-if(b.ads)h+=b.adsv.map((v,i)=>kv("ADS1115 A"+i,v.toFixed(3)+" V")).join("");
 $("i2c").innerHTML=h;}catch(e){}}
 poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
 </script></body></html>)HTML";

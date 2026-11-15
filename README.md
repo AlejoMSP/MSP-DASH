@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 204**, **hub 46**.
+Current builds: **screens 204**, **hub 47**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
@@ -46,7 +46,7 @@ expanders, two page buttons, dash dimmer and lights-on inputs. Every GPIO with i
 - OLED warning panel (`/oled`): 8 lamps with icons, WARNING and DANGER levels, signal or wire-input triggers, plus
   pages (big number, values, G-meter, clock); a lit lamp takes the screen over.
 - Bench simulator (`/simulator`) that drives every screen without the car.
-- One web app at the hub's address, with a side menu: Dashboard (status tiles, warning panel, key readings), Setup (brightness, clock, accelerometer, I2C), Screens (each screen's own pages, picked Left / Center / Right), OLED, Live and custom sensors, Buttons, Logging, Firmware, Simulator, Raw CAN, 433 MHz.
+- One web app at the hub's address, with a side menu: Dashboard (status tiles, warning panel, key readings), Setup (brightness, clock, accelerometer, I2C devices), Screens (each screen's own pages, picked Left / Center / Right), OLED, Live and custom sensors, Buttons, Logging, Firmware, Simulator, Raw CAN, 433 MHz.
 
 ## Getting started
 
@@ -114,6 +114,6 @@ script (in Node), a compile check of the whole hub sketch (`hub_typecheck.sh`) a
 ## Status and next steps
 
 Working on the bench: screens, hub, CAN from rusEFI, brightness, buttons, simulator, logging, OLED panel and pages, GPS,
-accelerometer, ADS1115, the web app. Everything still open is in [docs/TODO.md](docs/TODO.md).
+accelerometer, the web app. Everything still open is in [docs/TODO.md](docs/TODO.md).
 
 The old WROOM + Nextion firmware was removed in build 149 and early bring-up sketches in build 114; both are in git history.

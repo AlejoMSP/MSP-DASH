@@ -228,3 +228,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 44) | 2026-11-15 | (this commit) | MCP23017 16-input expanders replace the PCF8574 (board 1 at 0x27, board 2 at 0x26): lamp inputs MCP23017 #1/#2 PA0-PB7, I2C card names them, pin doc updated |
 | 204 | 2026-11-15 | (this commit) | Web UI step 4: gauge editor with a clickable layout picture, folding groups, pinned preview, copy cell/page to another screen; screens allow cross-origin requests; hub 45 Dashboard Logging tile shows the center screen's status |
 | (hub 46) | 2026-11-15 | (this commit) | Fix: analog reads from two tasks no longer collide ("adc oneshot read fail", a reading of 0 for a moment): one ADC lock |
+| (hub 47) | 2026-11-15 | (this commit) | ADS1115 support removed (not used); the I2C bus scan and card stay |

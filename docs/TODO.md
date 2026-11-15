@@ -5,9 +5,7 @@ Open work, newest ideas at the bottom of each group. Tick items off (or delete t
 
 ## Software
 
-- [ ] **ADS1115 inputs as custom sensor sources** (configurable sensors stage 2). On `/custom`, pick "ADS1115 A0-A3"
-      as a slot's source, with a divider multiplier (see "Voltage dividers" below: 1.667 for 0-5 V sensors, 5.70 for
-      12 V signals), then scale/offset or a calibration table into the reading. Live volts already show on Setup > I2C bus.
+- [ ] Configurable sensors stage 2: hub inputs as custom sensor sources (with a divider multiplier, see "Voltage dividers").
 - [ ] Configurable sensors stage 3: DBC presets. Stage 4: move the fixed hub sensors onto slots.
 - [ ] Web UI: one save model everywhere (unsaved-changes bar with Save / Undo) and pop-up messages.
 - [ ] Screens: put every screen GPIO in one header and a pin table, checked by a test (as done for the hub).
@@ -25,7 +23,7 @@ Open work, newest ideas at the bottom of each group. Tick items off (or delete t
 - [ ] Re-pick gauges and lamps whose template changed (pressures now psi, MAP now boost psi); recheck log channels.
 - [ ] SD card check on the center screen (Logging page shows the file name, or "No SD card").
 
-## Voltage dividers (for any 3.3 V input: ADS1115 or ESP32 analog)
+## Voltage dividers (for any 3.3 V input)
 
 ```
  Signal --[ R1 top ]--+-- input

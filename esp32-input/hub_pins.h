@@ -37,7 +37,7 @@
 #define RF_MOSI 13         // L20
 #define RF_MISO 39         // L9   input-only pin
 
-// ---- I2C bus: OLED (0x3C), MPU6050 (0x68), ADS1115 (0x48), MCP23017 expanders (0x27, 0x26) ----
+// ---- I2C bus: OLED (0x3C), MPU6050 (0x68), MCP23017 expanders (0x27, 0x26) ----
 #define I2C_SDA 5          // R15
 #define I2C_SCL 15         // R21
 

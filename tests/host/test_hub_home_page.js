@@ -10,7 +10,7 @@ const screens = [{ name: "Right", online: true, ip: "192.168.55.233", build: 185
                  { name: "Center", online: true, ip: "192.168.55.231", build: 185, mac: "80:45:6B:33:96:CC", age: 100 },
                  { name: "Left", online: false, ip: "192.168.55.232", build: 184, mac: "80:45:6B:33:94:40", age: 90000 }];
 const ctx = { document: { getElementById: el }, setInterval: () => 0, console,
-  fetch: async u => ({ json: async () => u === "/state" ? state : u === "/screens.json" ? screens : u === "/speed.json" ? { ecuok: true, ecumph: 0, gpsok: true, fix: false, sats: 3 } : u === "/i2c.json" ? { found: [0x27, 0x3C, 0x48, 0x68, 0x55], ads: 0x48, adsv: [0.0123, 1.65, 3.3, 0] } : u === "/imu.json" ? { found: true, fwd: -1, left: 3, zeroed: false, zeroing: false, lat: 0.82, lon: -0.31, vert: 0.02, yaw: 24.5, raw: [0, 0, 1, 0] } : null, text: async () => "" }) };
+  fetch: async u => ({ json: async () => u === "/state" ? state : u === "/screens.json" ? screens : u === "/speed.json" ? { ecuok: true, ecumph: 0, gpsok: true, fix: false, sats: 3 } : u === "/i2c.json" ? { found: [0x27, 0x3C, 0x68, 0x55] } : u === "/imu.json" ? { found: true, fwd: -1, left: 3, zeroed: false, zeroing: false, lat: 0.82, lon: -0.31, vert: 0.02, yaw: 24.5, raw: [0, 0, 1, 0] } : null, text: async () => "" }) };
 vm.createContext(ctx); vm.runInContext(hubScript('SETUP_HTML'), ctx);
 (async () => {
   await settle();
@@ -22,8 +22,7 @@ vm.createContext(ctx); vm.runInContext(hubScript('SETUP_HTML'), ctx);
     check(/Lateral<\/b>0.82 G/.test(m) && /Accel \/ brake<\/b>-0.31 G/.test(m) && /Yaw rate<\/b>24.5 deg\/s/.test(m) && /not yet/.test(m), "accelerometer card: G values, yaw, zero not taken yet");
     check(el("ifwd").value === "-1" && el("ileft").value === "3" && /\+Z<\/option>/.test(el("ifwd").innerHTML), "mounting boxes show the saved axes (-X front, +Z left)"); }
   { const b = el("i2c").innerHTML;
-    check(/0x27<\/b>MCP23017/.test(b) && /0x3C<\/b>OLED/.test(b) && /0x48<\/b>ADS1115/.test(b) && /0x68<\/b>MPU6050/.test(b) && /0x55<\/b>unknown device/.test(b), "I2C card: each address found, named");
-    check(/ADS1115 A1<\/b>1.650 V/.test(b) && /ADS1115 A2<\/b>3.300 V/.test(b), "ADS1115 inputs in volts"); }
+    check(/0x27<\/b>MCP23017/.test(b) && /0x3C<\/b>OLED/.test(b) && /0x68<\/b>MPU6050/.test(b) && /0x55<\/b>unknown device/.test(b) && !/ADS/.test(b), "I2C card: each address found, named"); }
   for (const p of ["HOME_HTML", "SETUP_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML", "OLED_HTML", "SCREEN_HTML", "CAN_HTML", "FIRMWARE_HTML"]) {
     const h = hubPage(p);
     check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /href="\/screen"/.test(h) && /href="\/firmware"/.test(h) && /href="\/setup"/.test(h) && /\.nav\{/.test(h) && !/<script>[^<]*querySelectorAll\('\.nav a'\)/.test(h), p + " has the side menu (and it adds no <script>)");

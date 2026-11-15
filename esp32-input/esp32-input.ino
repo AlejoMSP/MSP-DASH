@@ -43,12 +43,11 @@
 #include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
 #include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
 #include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
-#include "ads1115.h"          // ADS1115 4-input ADC on the same wires
 #include "mcp23017.h"         // MCP23017 16-input expanders on the same wires (lamp inputs)
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 46
+#define INPUT_BUILD 47
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -560,8 +559,6 @@ static void oledTask(void *) {
   s_oledOk = oledBegin();   // starts Wire on GPIO 5 / 15
   i2cScan();
   s_imuOk = imuBegin();
-  bool adsOk = adsBegin();
-  Serial.printf("ADS1115: %s\n", adsOk ? "found" : "not found (ADDR to GND = 0x48)");
   Serial.printf("Accelerometer: %s\n", s_imuOk ? "MPU6050 found" : "not found (SDA GPIO 5, SCL GPIO 15, 3.3 V)");
   int mcpN = mcpBegin();
   Serial.printf("OLED: %s | MCP23017 expanders: %d", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)", mcpN);
@@ -572,7 +569,6 @@ static void oledTask(void *) {
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(20));   // 50 Hz: the accelerometer every pass, the panel every 10th
     if (s_imuOk) imuStep();
-    adsStep();
     if (++tick % 10) continue;
     mcpRead();
     uint8_t st[OLED_LAMPS];
@@ -950,12 +946,10 @@ static void setupWeb() {
     s_imuZeroLeft = 50;
     server.send(200, "text/plain", "Zeroing: keep the car still for a second");
   });
-  server.on("/i2c.json", HTTP_GET, []() {   // what the boot scan found, and the ADS1115 inputs
+  server.on("/i2c.json", HTTP_GET, []() {   // what the boot scan found
     String j = "{\"found\":[";
     for (int i = 0; s_i2cFound[i]; i++) { if (i) j += ","; j += String((int)s_i2cFound[i]); }
-    char b[120];
-    snprintf(b, sizeof b, "],\"ads\":%d,\"adsv\":[%.4f,%.4f,%.4f,%.4f]}", s_adsAddr, (double)s_adsV[0], (double)s_adsV[1], (double)s_adsV[2], (double)s_adsV[3]);
-    server.send(200, "application/json", j + b);
+    server.send(200, "application/json", j + "]}");
   });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];

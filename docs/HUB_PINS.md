@@ -27,19 +27,19 @@ Terminals: L = left row, R = right row of the Freenove board.
 | R11 | 21 | CAN_TX_PIN | CAN TX (SN65HVD230 CTX) | |
 | R13 | 19 | EGT_SO | MAX6675 SO | |
 | R14 | 18 | EGT_SCK | MAX6675 SCK | |
-| R15 | 5 | I2C_SDA | I2C SDA: OLED, MPU6050, ADS1115, MCP23017 | shared bus |
+| R15 | 5 | I2C_SDA | I2C SDA: OLED, MPU6050, MCP23017 | shared bus |
 | R16 | 17 | GPS_TX_PIN | GPS: hub TX to GPS RX | Serial2, 9600 |
 | R17 | 16 | GPS_RX_PIN | GPS: GPS TX to hub RX | Serial2, 9600 |
 | R18 | 4 | DHT_PIN | DHT22 (cabin temp / humidity) | |
 | R19 | 0 | LAMP_IN_C | Lamp input (spare) | the BOOT button: must not be held LOW at power-up |
 | R20 | 2 | LAMP_IN_A | Lamp input: seatbelt | to ground, pull-up |
-| R21 | 15 | I2C_SCL | I2C SCL: OLED, MPU6050, ADS1115, MCP23017 | shared bus |
+| R21 | 15 | I2C_SCL | I2C SCL: OLED, MPU6050, MCP23017 | shared bus |
 
 ## Not GPIO
 
 | Terminal | What |
 |---|---|
-| L6 | 3.3 V: CC1101, OLED, MPU6050, ADS1115, MCP23017 (never 5 V to the CC1101 or on the I2C bus) |
+| L6 | 3.3 V: CC1101, OLED, MPU6050, MCP23017 (never 5 V to the CC1101 or on the I2C bus) |
 | L24 | 5 V: GPS power |
 | R9 / R10 | GPIO 1 / 3: USB serial (uploads, serial monitor) - do not use |
 | (none) | GPIO 6-11: the flash chip - not usable |
@@ -52,7 +52,6 @@ Terminals: L = left row, R = right row of the Freenove board.
 | MPU6050 accelerometer | 0x68 (AD0 to 3.3 V: 0x69) | mount solid to the chassis; zero on the hub home page |
 | MCP23017 board 1 (SG-IO-E017) | 0x27 (DIP switch default) | 16 lamp inputs PA0-PA7, PB0-PB7; VCC 3.3 V, never 5 V; INTA/INTB not used |
 | MCP23017 board 2 | 0x26 (set the DIP switch) | 16 more |
-| ADS1115 16-bit ADC | 0x48 (ADDR to GND; VDD 0x49, SDA 0x4A, SCL 0x4B) | 4 analog inputs A0-A3, 0 to 3.3 V, spare for now |
 
 Wire the devices in parallel from one junction. Keep the bus short (about 30 cm), SDA and SCL twisted with a ground.
 Every module has its own pull-ups; past about 5 modules remove all but one set.
