@@ -254,7 +254,7 @@ void espnow_link_loop(void) {
 
   if (now - s_lastHelloMs >= HELLO_MS) {
     s_lastHelloMs = now;
-    HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER, {0} };
+    HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER, {0}, millis() / 1000 + 1 };   // + 1: 0 means "unknown"
     char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); memcpy(h.name, nm, ESPNOW_NAME_LEN);
     esp_now_send(BCAST, (const uint8_t *)&h, sizeof(h));
   }

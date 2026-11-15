@@ -224,3 +224,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 40) | 2026-11-15 | (this commit) | Web UI step 1: side menu grouped by task on every hub page (drawer on phones), shared look, /screen (screen pages inside the hub site with a Left/Center/Right picker), /firmware (all boards' builds), /can moved to hub_pages.h, all pages sent from flash |
 | (hub 41) | 2026-11-15 | (this commit) | Web UI step 2: Dashboard (status tiles, warning panel, readings, screens); the old home page becomes /setup |
 | (hub 42) | 2026-11-15 | (this commit) | Web UI step 3: Setup in task order with jump links; Firmware page updates the hub (progress bar) and every ticked screen from one .bin |
+| 202 | 2026-11-15 | (this commit) | Screens send their uptime in the hello (hub 43 shows it); Firmware page treats a dropped connection as normal and confirms the update by the screen restarting |

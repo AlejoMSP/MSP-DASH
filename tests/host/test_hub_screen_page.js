@@ -34,12 +34,15 @@ function page(search) {
   console.log("3. updating the screens from one file");
   { const els = {}; const el = id => els[id] || (els[id] = { innerHTML: "", textContent: "", checked: false, files: [], style: {}, disabled: false });
     let builds = { "192.168.55.201": 193, "192.168.55.202": 194, "192.168.55.203": 194 }, online = { "192.168.55.201": false, "192.168.55.202": true, "192.168.55.203": true };
+    let up = { "192.168.55.201": 0, "192.168.55.202": 900, "192.168.55.203": 900 };
     const posts = [];
-    const scr = () => [{ name: "Right", ip: "192.168.55.203" }, { name: "Center", ip: "192.168.55.202" }, { name: "Left", ip: "192.168.55.201" }].map(x => Object.assign({ online: online[x.ip], build: builds[x.ip] }, x));
+    const scr = () => [{ name: "Right", ip: "192.168.55.203" }, { name: "Center", ip: "192.168.55.202" }, { name: "Left", ip: "192.168.55.201" }].map(x => Object.assign({ online: online[x.ip], build: builds[x.ip], up: up[x.ip] }, x));
     const ctx = { document: { getElementById: el }, console, setInterval: () => 0, setTimeout: (f) => setImmediate(f), confirm: () => true, alert: m => { throw new Error("alert: " + m); },
       FormData: class { append(k, v, n) { this.k = k; this.n = n; } },
       fetch: async (u, o) => {
-        if (o && o.method === "POST") { posts.push([u, o.mode, o.body.k]); const ip = u.split("/")[2]; builds[ip] = 195; return {}; }
+        if (o && o.method === "POST") { posts.push([u, o.mode, o.body.k]); const ip = u.split("/")[2];
+          if (ip === "192.168.55.202") { builds[ip] = 195; return {}; }       // Center: new build, answered
+          up[ip] = 4; throw new TypeError("Failed to fetch"); }             // Right: same build, restarted before answering
         return { json: async () => u === "/screens.json" ? scr() : { ip: "192.168.55.204", build: 41 } };
       } };
     vm.createContext(ctx); vm.runInContext(hubScript('FIRMWARE_HTML'), ctx); await settle();
@@ -49,7 +52,8 @@ function page(search) {
     await vm.runInContext('updScreens()', ctx); await settle();
     check(posts.length === 2 && posts[0][0] === "http://192.168.55.202/update" && posts[1][0] === "http://192.168.55.203/update", "uploads go to the ticked screens, one after another (Center, then Right)");
     check(posts.every(p => p[1] === "no-cors" && p[2] === "firmware"), "sent as the 'firmware' form field, like the curl command");
-    check(/done, build 195/.test(el("b").innerHTML), "each shows done with its new build once it is back"); }
+    check(/done, build 195<\/span>/.test(el("b").innerHTML), "a new build: done with its build");
+    check(/done, build 194 \(same build\)/.test(el("b").innerHTML) && !/failed/.test(el("b").innerHTML), "a dropped connection is not a failure: the uptime starting again shows it restarted (same build)"); }
   console.log("4. Setup page sections");
   { const h = require('./hub_page.js').hubPage('SETUP_HTML');
     const ids = [...h.matchAll(/<div class="card" id="(\w+)"/g)].map(m => m[1]);

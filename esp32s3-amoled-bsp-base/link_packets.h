@@ -38,4 +38,6 @@ typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t c
 #define HELLO_MAGIC 0x4D534831u
 #define HELLO_MS 2000
 #define LINK_NAME_LEN 20
-typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; } HelloPacket;
+// uptime_s (build 195): seconds since the screen started; lets the hub's Firmware page see that an update restarted it.
+// Older screens send the packet without it (the hub reads what arrived; a missing uptime reads 0 = unknown).
+typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; uint32_t uptime_s; } HelloPacket;

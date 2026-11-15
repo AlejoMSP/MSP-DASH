@@ -47,7 +47,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 42
+#define INPUT_BUILD 43
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -149,7 +149,7 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
 // ---- screen status: every remote screen sends a hello every 2 s; no hello for 6 s = offline (red) ----
 #define SCREEN_MAX 6
 #define SCREEN_OFFLINE_MS 6000
-typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; bool used; } ScreenSlot;
+typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; uint32_t uptime; bool used; } ScreenSlot;
 static ScreenSlot s_screens[SCREEN_MAX];
 static portMUX_TYPE s_scrMux = portMUX_INITIALIZER_UNLOCKED;
 static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
@@ -165,6 +165,7 @@ static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, i
   ScreenSlot *c = &s_screens[slot];
   if (!c->used || memcmp(c->mac, info->src_addr, 6)) { memset(c, 0, sizeof *c); memcpy(c->mac, info->src_addr, 6); }
   c->ip = h.ip; c->build = h.build; memcpy(c->name, h.name, LINK_NAME_LEN); c->name[LINK_NAME_LEN] = 0;
+  c->uptime = h.uptime_s;   // 0 = an older screen that does not send it
   c->lastMs = millis(); c->hellos++; c->used = true;
   portEXIT_CRITICAL(&s_scrMux);
 }
@@ -956,10 +957,11 @@ static void setupWeb() {
       nm[k] = 0;
       uint32_t age = now - snap[i].lastMs;
       char b[200];
-      snprintf(b, sizeof b, "%s{\"name\":\"%s\",\"ip\":\"%u.%u.%u.%u\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"build\":%u,\"age\":%u,\"online\":%s,\"hellos\":%u}",
+      snprintf(b, sizeof b, "%s{\"name\":\"%s\",\"ip\":\"%u.%u.%u.%u\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"build\":%u,\"age\":%u,\"online\":%s,\"hellos\":%u,\"up\":%u}",
                first ? "" : ",", nm, (unsigned)(snap[i].ip & 255), (unsigned)(snap[i].ip >> 8 & 255), (unsigned)(snap[i].ip >> 16 & 255), (unsigned)(snap[i].ip >> 24),
                snap[i].mac[0], snap[i].mac[1], snap[i].mac[2], snap[i].mac[3], snap[i].mac[4], snap[i].mac[5],
-               (unsigned)snap[i].build, (unsigned)age, age < SCREEN_OFFLINE_MS ? "true" : "false", (unsigned)snap[i].hellos);
+               (unsigned)snap[i].build, (unsigned)age, age < SCREEN_OFFLINE_MS ? "true" : "false", (unsigned)snap[i].hellos,
+               (unsigned)(snap[i].uptime ? snap[i].uptime + age / 1000 : 0));
       j += b; first = false;
     }
     j += "]";

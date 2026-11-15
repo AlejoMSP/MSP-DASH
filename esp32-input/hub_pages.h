@@ -528,12 +528,18 @@ async function updScreens(){
  busy=true;$("sgo").disabled=true;
  for(const s of targets){
   stat[s.ip]="uploading...";render();
-  const before=s.build;const fd=new FormData();fd.append("firmware",f,f.name);
-  try{await fetch("http://"+s.ip+"/update",{method:"POST",mode:"no-cors",body:fd});stat[s.ip]="sent, restarting...";}catch(e){stat[s.ip]="<span class=\"chip bad\">upload failed</span>";render();continue;}
-  render();
-  let back=false;
-  for(let k=0;k<45&&!back;k++){await sleep(2000);await load();const n=scr.find(x=>x.ip===s.ip);if(n&&n.online&&k>2){back=true;stat[s.ip]=n.build!==before?'<span class="chip ok">done, build '+n.build+'</span>':'<span class="chip warn">back, still build '+n.build+'</span>';}}
-  if(!back)stat[s.ip]='<span class="chip bad">not back yet</span>';render();
+  const before=s.build,upBefore=s.up||0,t0=Date.now();const fd=new FormData();fd.append("firmware",f,f.name);
+  // The screen restarts as soon as it has the file, often before it answers, so a dropped connection is normal here.
+  // Success is seen afterwards: its uptime starts again from 0 (screens from build 195 send it), or for older screens
+  // it goes quiet and comes back.
+  try{await fetch("http://"+s.ip+"/update",{method:"POST",mode:"no-cors",body:fd});}catch(e){}
+  stat[s.ip]="sent, waiting for the restart...";render();
+  let back=false,wentQuiet=false;
+  for(let k=0;k<45&&!back;k++){await sleep(2000);await load();const n=scr.find(x=>x.ip===s.ip);if(!n)continue;
+   if(!n.online)wentQuiet=true;
+   const restarted=(upBefore&&n.up&&n.up<upBefore+(Date.now()-t0)/1000-5)||(wentQuiet&&n.online)||n.build!==before;
+   if(n.online&&restarted){back=true;stat[s.ip]='<span class="chip ok">done, build '+n.build+(n.build===before?' (same build)':'')+'</span>';}}
+  if(!back)stat[s.ip]='<span class="chip warn">no restart seen: try the curl command</span>';render();
  }
  busy=false;$("sgo").disabled=false;}
 function updHub(){
