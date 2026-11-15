@@ -39,7 +39,7 @@ const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"O
 20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const $=id=>document.getElementById(id),j=async u=>(await fetch(u)).json(),order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
 const tile=(k,v,cls,href)=>'<a class="tile '+cls+'" href="'+href+'"><b>'+k+'</b><span>'+v+'</span></a>';
-// The center screen's logging status (screens from build 203 allow this cross-origin read). Asked every 5 s.
+// The center screen's logging status (screens from build 204 allow this cross-origin read). Asked every 5 s.
 let logText="on Center",logCls="",logAt=0;
 async function logStatus(scr){
  if(Date.now()-logAt<5000)return;logAt=Date.now();
