@@ -10,7 +10,8 @@
 //         10k knob: outer legs to 3.3 V and GND, middle leg to POT_PIN (ADC1 only: ADC2 doesn't work with the radio on).
 // Copy wifi_config.h.example to wifi_config.h and fill in the network, the same one the screens use.
 
-#include "hub_pins.h"         // every GPIO the hub uses (docs/HUB_PINS.md lists the same)
+#include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
+#include "hub_inputs.h"       // configurable inputs: buttons, switches, analog sensors (Inputs page)
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -47,7 +48,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 47
+#define INPUT_BUILD 48
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -77,6 +78,7 @@ static volatile uint32_t s_seenMs[SIG_COUNT];
 #define SRC_HUB_SIM  0xFFFF0004u   // the bench simulator
 #define SRC_HUB_GPS  0xFFFF0006u   // GPS
 #define SRC_HUB_IMU  0xFFFF0007u   // MPU6050 accelerometer
+#define SRC_HUB_INPUT 0xFFFF0008u  // a configurable input (Inputs page)
 static volatile uint32_t s_srcId[SIG_COUNT];
 // Called by the CAN decoder (can_parsing.h, can_flags.h) from the CAN task: the source is the frame being decoded.
 // The simulator calls it too (from loop()); its values are tagged as coming from the simulator.
@@ -92,6 +94,18 @@ extern "C" bool gauge_config_signal_has_data(SignalId sig) {
 // ---- custom sensor slots (custom_slots.h): set up on /custom, saved in NVS, names sent to the screens ----
 volatile float g_imu_val[4];   // SIG_GLAT .. SIG_YAW (imu_math.h)
 volatile bool g_imu_has[4];
+// ---- the pin map (hub_pins.h): defaults, or the moves saved on the Inputs page (NVS "pins"), applied at start-up ----
+uint8_t g_pins[PR_COUNT];
+static bool s_pinsMoved = false;
+static void pinsLoad() {
+  pin_map_defaults(g_pins);
+  uint8_t m[PR_COUNT];
+  Preferences p; p.begin("pins", true);
+  bool got = p.getBytes("map", m, sizeof m) == sizeof m;
+  p.end();
+  if (got && pin_map_valid(m)) memcpy(g_pins, m, sizeof m);   // a saved map that does not check out: defaults
+  for (int r = 0; r < PR_COUNT; r++) if (g_pins[r] != HUB_PIN_ROLES[r].def) s_pinsMoved = true;
+}
 volatile float g_custom_val[CUSTOM_SLOTS];
 volatile bool g_custom_has[CUSTOM_SLOTS];
 static CustomSlotConfig s_slots[CUSTOM_SLOTS];
@@ -114,7 +128,7 @@ static void slotsSave() { Preferences p; p.begin("slots", false); p.putBytes("cf
 void hub_custom_can_frame(uint32_t id, const uint8_t *d, uint8_t len) {
   for (int i = 0; i < CUSTOM_SLOTS; i++) {
     const CustomSlotConfig &c = s_slots[i];
-    if (c.src != CUSTOM_SRC_CAN || c.can.id != id || !c.info.name[0]) continue;
+    if (c.src != CUSTOM_SRC_CAN || c.can.id != id || !c.info.name[0]) continue;   // (input-fed slots are skipped here)
     float v;
     if (!custom_can_decode(&c.can, d, len, &v)) continue;
     g_custom_val[i] = v; g_custom_has[i] = true;
@@ -488,6 +502,7 @@ static void oledLoad() {
   p.end();
   for (int i = 0; i < OLED_LAMPS; i++) {
     OledLamp &l = s_oled.lamp[i];
+    if (l.op == OLED_INPUT) l.input = (uint8_t)oled_input_upgrade(l.input);   // older codes 1-3 (GPIO 2 / 12 / 0)
     if (l.icon > OLED_ICON_COUNT || l.op > OLED_INPUT || (l.op == OLED_INPUT && !oled_input_valid(l.input))) l.icon = 0;
   }
 }
@@ -506,7 +521,7 @@ static void pagesSave() { s_pages.version = OLED_PAGES_VERSION; Preferences p; p
 static void oledNextPage() { s_oledPage = (s_oledPage + 1) % (s_pages.count ? s_pages.count : 1); s_oledPageMs = millis(); }
 static void oledSave() { s_oled.version = OLED_CFG_VERSION; Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
 static uint8_t s_inPulled = 0;   // hub input pins already set to INPUT_PULLUP
-static int inputPin(int in) { return in == OLED_IN_GPIO2 ? LAMP_IN_A : in == OLED_IN_GPIO12 ? LAMP_IN_B : in == OLED_IN_GPIO0 ? LAMP_IN_C : -1; }
+static int inputPin(int in) { return in >= OLED_IN_GPIO_BASE && in < OLED_IN_GPIO_BASE + 40 ? in - OLED_IN_GPIO_BASE : -1; }
 // Reads an input (true = LOW). Hub pins get their pull-up the first time; expander pins are pulled up by the chip.
 static bool inputLow(int in) {
   int pin = inputPin(in);
@@ -569,8 +584,8 @@ static void oledTask(void *) {
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(20));   // 50 Hz: the accelerometer every pass, the panel every 10th
     if (s_imuOk) imuStep();
+    mcpRead();   // expander pins every pass: buttons on them need it
     if (++tick % 10) continue;
-    mcpRead();
     uint8_t st[OLED_LAMPS];
     bool anyLit = false;
     for (int i = 0; i < OLED_LAMPS; i++) {
@@ -608,6 +623,70 @@ static void oledTask(void *) {
       int pct = s_briPct < 0 ? 100 : s_briPct, contrast = 8 + pct * 247 / 100;   // follows the screens' brightness (night = dimmer)
       if (abs(contrast - lastContrast) > 4) { oledContrast((uint8_t)contrast); lastContrast = contrast; }
       oledShow(s_oledBuf);
+    }
+  }
+}
+
+// ---- configurable inputs (hub_inputs.h, Inputs page) ----
+static HubInput s_inputs[HUB_INPUTS];
+static InputBtn s_inBtn[HUB_INPUTS];
+static volatile float s_inValue[HUB_INPUTS];     // last reading (sensors) or 1 / 0 (switches, buttons), for the page
+static volatile bool s_inActive[HUB_INPUTS];
+static void inputsLoad() {
+  Preferences p; p.begin("inputs", true);
+  uint8_t ver = p.getUChar("ver", 0);
+  if (ver != HUB_INPUTS_VERSION || p.getBytes("cfg", s_inputs, sizeof s_inputs) != sizeof s_inputs) for (int i = 0; i < HUB_INPUTS; i++) input_defaults(&s_inputs[i]);
+  p.end();
+  for (int i = 0; i < HUB_INPUTS; i++) { s_inputs[i].name[15] = 0; if (s_inputs[i].type > IN_ANALOG || s_inputs[i].slot >= CUSTOM_SLOTS) s_inputs[i].type = IN_NONE; }
+}
+static void inputsSave() { Preferences p; p.begin("inputs", false); p.putUChar("ver", HUB_INPUTS_VERSION); p.putBytes("cfg", s_inputs, sizeof s_inputs); p.end(); }
+static void inputPinSetup(const HubInput &in) {
+  if (in.type == IN_NONE || input_is_mcp(in.pin)) return;
+  if (in.type == IN_ANALOG) return;   // the ADC sets the pin up itself
+  pinMode(in.pin, (gpio_caps(in.pin) & CAP_PULLUP) ? INPUT_PULLUP : INPUT);
+}
+// LOW on the input's pin? (MCP23017 pins: from the expander's last read.)
+static bool inputPinLow(int pin) {
+  if (input_is_mcp(pin)) { int n = pin - INPUT_MCP_BASE, e = n / 16, b = n % 16; return s_mcpAddr[e] && !((s_mcpBits[e] >> b) & 1); }
+  return digitalRead(pin) == LOW;
+}
+// Who uses a hub GPIO or an expander pin? "" = free. skipInput: an input to leave out (the one being edited).
+static String pinUser(int pin, int skipInput) {
+  if (!input_is_mcp(pin)) { int r = pin_map_role_at(g_pins, pin); if (r >= 0) return HUB_PIN_ROLES[r].name; }
+  for (int i = 0; i < HUB_INPUTS; i++) if (i != skipInput && s_inputs[i].type != IN_NONE && s_inputs[i].pin == pin)
+    return String("Input ") + (i + 1) + (s_inputs[i].name[0] ? String(" (") + s_inputs[i].name + ")" : String(""));
+  for (int i = 0; i < OLED_LAMPS; i++) {
+    const OledLamp &l = s_oled.lamp[i];
+    if (!l.icon || l.op != OLED_INPUT) continue;
+    int lp = l.input >= OLED_IN_GPIO_BASE ? l.input - OLED_IN_GPIO_BASE : INPUT_MCP_BASE + (l.input - OLED_IN_MCP0);
+    if (lp == pin) return String("OLED lamp ") + (i + 1);
+  }
+  return "";
+}
+// Every 20 ms: read each input, run button actions, fill the switch / sensor slots.
+static void inputsStep() {
+  uint32_t now = millis();
+  for (int i = 0; i < HUB_INPUTS; i++) {
+    const HubInput &in = s_inputs[i];
+    if (in.type == IN_NONE) continue;
+    if (in.type == IN_ANALOG) {
+      float v = input_convert(&in, adcMilliVolts(in.pin) / 1000.0f);
+      if (!isfinite(v)) { s_inActive[i] = false; continue; }
+      float sm = s_inValue[i] + (v - s_inValue[i]) * 0.2f;
+      s_inValue[i] = sm; s_inActive[i] = true;
+      if (!simOwns()) { g_custom_val[in.slot] = sm; g_custom_has[in.slot] = true; markLocal((SignalId)(SIG_C1 + in.slot), SRC_HUB_INPUT); }
+      continue;
+    }
+    bool act = input_active(&in, inputPinLow(in.pin));
+    s_inActive[i] = act; s_inValue[i] = act ? 1.0f : 0.0f;
+    if (in.type == IN_SWITCH) {
+      if (!simOwns()) { g_custom_val[in.slot] = act ? 1.0f : 0.0f; g_custom_has[in.slot] = true; markLocal((SignalId)(SIG_C1 + in.slot), SRC_HUB_INPUT); }
+    } else {
+      int e = input_btn_step(&s_inBtn[i], now, act);
+      BtnBinding b = { 0, 0 };
+      if (e == IBTN_PRESS) { b.action = in.act_press; b.param = in.prm_press; }
+      if (e == IBTN_HOLD) { b.action = in.act_hold; b.param = in.prm_hold; }
+      if (b.action != BA_NONE && b.action < BA_COUNT) runAction(&b);
     }
   }
 }
@@ -709,6 +788,7 @@ static void setupWeb() {
   server.on("/custom/set", HTTP_GET, []() {
     int i = server.arg("i").toInt();
     if (i < 0 || i >= CUSTOM_SLOTS) { server.send(400, "text/plain", "No such slot"); return; }
+    if (s_slots[i].src == CUSTOM_SRC_INPUT) { server.send(400, "text/plain", "This slot is filled by a hub input: change it on the Inputs page"); return; }
     CustomSlotConfig c; memset(&c, 0, sizeof c);
     String name = server.arg("name"); name.trim();
     if (!name.length()) { server.send(400, "text/plain", "Give the sensor a name"); return; }
@@ -732,6 +812,7 @@ static void setupWeb() {
   server.on("/custom/clear", HTTP_GET, []() {
     int i = server.arg("i").toInt();
     if (i < 0 || i >= CUSTOM_SLOTS) { server.send(400, "text/plain", "No such slot"); return; }
+    if (s_slots[i].src == CUSTOM_SRC_INPUT) { server.send(400, "text/plain", "This slot is filled by a hub input: remove it on the Inputs page"); return; }
     memset(&s_slots[i], 0, sizeof s_slots[i]); g_custom_has[i] = false; s_seenMs[SIG_C1 + i] = 0;
     slotsSave();
     server.send(200, "text/plain", "Cleared");
@@ -951,6 +1032,108 @@ static void setupWeb() {
     for (int i = 0; s_i2cFound[i]; i++) { if (i) j += ","; j += String((int)s_i2cFound[i]); }
     server.send(200, "application/json", j + "]}");
   });
+  // ---- Inputs page: every pin and what uses it; move a fixed function; set up inputs ----
+  server.on("/inputs", HTTP_GET, []() { server.send_P(200, "text/html", INPUTS_HTML, strlen_P(INPUTS_HTML)); });
+  server.on("/inputs.json", HTTP_GET, []() {
+    String j = "{\"roles\":[";
+    for (int r = 0; r < PR_COUNT; r++) {
+      if (r) j += ",";
+      j += "{\"key\":\""; j += HUB_PIN_ROLES[r].key; j += "\",\"name\":\""; j += HUB_PIN_ROLES[r].name;
+      j += "\",\"gpio\":"; j += String((int)g_pins[r]); j += ",\"def\":"; j += String((int)HUB_PIN_ROLES[r].def); j += ",\"need\":"; j += String((int)HUB_PIN_ROLES[r].need); j += "}";
+    }
+    j += "],\"gpios\":[";
+    const int list[] = GPIO_LIST; bool first = true;
+    for (int g : list) {
+      if (!first) j += ","; first = false;
+      j += "{\"g\":"; j += String(g); j += ",\"caps\":"; j += String((int)gpio_caps(g)); j += ",\"note\":\""; j += gpio_note(g);
+      j += "\",\"user\":\""; j += pinUser(g, -1); j += "\",\"low\":"; j += (pin_map_role_at(g_pins, g) < 0 && digitalRead(g) == LOW) ? "true" : "false"; j += "}";
+    }
+    j += "],\"mcp\":["; j += String((int)s_mcpAddr[0]); j += ","; j += String((int)s_mcpAddr[1]); j += "],\"mcpbits\":["; j += String((int)s_mcpBits[0]); j += ","; j += String((int)s_mcpBits[1]);
+    j += "],\"mcpusers\":[";
+    for (int n = 0; n < 32; n++) { if (n) j += ","; j += "\""; j += pinUser(INPUT_MCP_BASE + n, -1); j += "\""; }
+    j += "],\"inputs\":[";
+    for (int i = 0; i < HUB_INPUTS; i++) {
+      const HubInput &in = s_inputs[i]; char b[420];
+      snprintf(b, sizeof b, "%s{\"type\":%u,\"pin\":%u,\"contact\":%u,\"slot\":%u,\"ap\":%u,\"pp\":%u,\"ah\":%u,\"ph\":%u,\"preset\":%u,"
+               "\"mult\":%g,\"v1\":%g,\"val1\":%g,\"v2\":%g,\"val2\":%g,\"pullup\":%g,\"name\":\"%s\",\"active\":%s,\"value\":%.3f}",
+               i ? "," : "", in.type, in.pin, in.contact, in.slot, in.act_press, in.prm_press, in.act_hold, in.prm_hold, in.preset,
+               (double)in.mult, (double)in.v1, (double)in.val1, (double)in.v2, (double)in.val2, (double)in.pullup, in.name,
+               s_inActive[i] ? "true" : "false", (double)s_inValue[i]);
+      j += b;
+    }
+    j += "],\"slots\":[";
+    for (int k = 0; k < CUSTOM_SLOTS; k++) { if (k) j += ","; j += "{\"name\":\""; j += s_slots[k].info.name; j += "\",\"src\":"; j += String((int)s_slots[k].src); j += "}"; }
+    j += "],\"presets\":[";
+    for (int k = 0; k < PRE_COUNT; k++) { if (k) j += ","; j += "{\"name\":\""; j += INPUT_PRESETS[k].name; j += "\",\"unit\":\""; j += INPUT_PRESETS[k].unit; j += "\"}"; }
+    j += "],\"actions\":[";
+    for (int a = 0; a < BA_COUNT; a++) { if (a) j += ","; j += "\""; j += BA_NAMES[a]; j += "\""; }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/inputs/set", HTTP_GET, []() {
+    int i = server.arg("i").toInt(), type = server.arg("type").toInt(), pin = server.arg("pin").toInt(), slot = server.arg("slot").toInt();
+    if (i < 0 || i >= HUB_INPUTS || type < IN_BUTTON || type > IN_ANALOG) { server.send(400, "text/plain", "Bad input"); return; }
+    if (!input_pin_fits(type, pin)) { server.send(400, "text/plain", type == IN_ANALOG ? "An analog sensor needs an analog GPIO: 32, 33, 34, 35, 36 or 39" : "That pin cannot be an input"); return; }
+    String user = pinUser(pin, i);
+    if (user.length()) { server.send(400, "text/plain", "That pin is already used by " + user); return; }
+    if (type != IN_BUTTON) {
+      if (slot < 0 || slot >= CUSTOM_SLOTS) { server.send(400, "text/plain", "Pick a sensor slot"); return; }
+      bool mine = s_inputs[i].type != IN_NONE && s_inputs[i].type != IN_BUTTON && s_inputs[i].slot == slot;
+      if (!mine && s_slots[slot].info.name[0]) { server.send(400, "text/plain", String("Sensor slot ") + (slot + 1) + " is in use (" + s_slots[slot].info.name + ")"); return; }
+    }
+    String nm = server.arg("name"); nm.trim();
+    if (!nm.length()) { server.send(400, "text/plain", "Give the input a name"); return; }
+    HubInput in; input_defaults(&in);
+    in.type = type; in.pin = pin; in.contact = server.arg("contact") == "1" ? CONTACT_NC : CONTACT_NO; in.slot = type == IN_BUTTON ? 0 : slot;
+    in.act_press = server.arg("ap").toInt(); in.prm_press = server.arg("pp").toInt(); in.act_hold = server.arg("ah").toInt(); in.prm_hold = server.arg("ph").toInt();
+    if (in.act_press >= BA_COUNT) in.act_press = 0; if (in.act_hold >= BA_COUNT) in.act_hold = 0;
+    int pre = server.arg("preset").toInt(); in.preset = pre >= 0 && pre < PRE_COUNT ? pre : 0;
+    if (server.hasArg("mult")) in.mult = server.arg("mult").toFloat();
+    if (server.hasArg("v1")) { in.v1 = server.arg("v1").toFloat(); in.val1 = server.arg("val1").toFloat(); in.v2 = server.arg("v2").toFloat(); in.val2 = server.arg("val2").toFloat(); }
+    if (server.hasArg("pullup")) in.pullup = server.arg("pullup").toFloat();
+    if (type == IN_ANALOG && in.preset == PRE_CUSTOM && (in.v1 == in.v2 || !(in.mult > 0))) { server.send(400, "text/plain", "Custom sensor: the two voltages must differ and the multiplier must be above 0"); return; }
+    int w = 0; for (unsigned c = 0; c < nm.length() && w < 15; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') in.name[w++] = ch; } in.name[w] = 0;
+    // the old slot (if it moved) goes back to free; the new one is named after the input
+    const HubInput &old = s_inputs[i];
+    if (old.type == IN_SWITCH || old.type == IN_ANALOG) if (type == IN_BUTTON || old.slot != in.slot) { memset(&s_slots[old.slot], 0, sizeof s_slots[old.slot]); g_custom_has[old.slot] = false; }
+    if (type != IN_BUTTON) {
+      CustomSlotConfig &c = s_slots[in.slot]; memset(&c, 0, sizeof c);
+      custom_copy_text(c.info.name, CUSTOM_NAME_LEN, in.name);
+      if (type == IN_SWITCH) { c.info.decimals = 0; c.info.min = 0; c.info.max = 1; }
+      else { const InputPreset &p = INPUT_PRESETS[in.preset];
+        custom_copy_text(c.info.unit, CUSTOM_UNIT_LEN, server.hasArg("unit") && in.preset == PRE_CUSTOM ? server.arg("unit").c_str() : p.unit);
+        c.info.decimals = p.dec; c.info.min = in.preset == PRE_CUSTOM ? fminf(in.val1, in.val2) : p.min; c.info.max = in.preset == PRE_CUSTOM ? fmaxf(in.val1, in.val2) : p.max; }
+      c.src = CUSTOM_SRC_INPUT; g_custom_has[in.slot] = false;
+    }
+    s_inputs[i] = in; memset(&s_inBtn[i], 0, sizeof s_inBtn[i]); s_inValue[i] = 0;
+    inputPinSetup(in); inputsSave(); slotsSave();
+    server.send(200, "text/plain", String("Input ") + (i + 1) + " saved");
+  });
+  server.on("/inputs/clear", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= HUB_INPUTS) { server.send(400, "text/plain", "Bad input"); return; }
+    const HubInput &old = s_inputs[i];
+    if (old.type == IN_SWITCH || old.type == IN_ANALOG) { memset(&s_slots[old.slot], 0, sizeof s_slots[old.slot]); g_custom_has[old.slot] = false; slotsSave(); }
+    input_defaults(&s_inputs[i]); inputsSave();
+    server.send(200, "text/plain", String("Input ") + (i + 1) + " removed");
+  });
+  server.on("/pins/set", HTTP_GET, []() {   // move a fixed function to another GPIO: saved, applied after a restart
+    String key = server.arg("role"); int g = server.arg("gpio").toInt(), r = -1;
+    for (int k = 0; k < PR_COUNT; k++) if (key == HUB_PIN_ROLES[k].key) r = k;
+    if (r < 0) { server.send(400, "text/plain", "Unknown function"); return; }
+    if (!pin_role_fits(r, g)) { server.send(400, "text/plain", String("GPIO ") + g + " cannot do that (" + HUB_PIN_ROLES[r].name + ")"); return; }
+    String user = pinUser(g, -1);
+    if (user.length() && pin_map_role_at(g_pins, g) != r) { server.send(400, "text/plain", "GPIO " + String(g) + " is already used by " + user); return; }
+    uint8_t m[PR_COUNT]; memcpy(m, g_pins, sizeof m); m[r] = g;
+    if (!pin_map_valid(m)) { server.send(400, "text/plain", "That map does not check out"); return; }
+    Preferences p; p.begin("pins", false); p.putBytes("map", m, sizeof m); p.end();
+    server.send(200, "text/plain", String(HUB_PIN_ROLES[r].name) + " moves to GPIO " + g + ". Move the wire, then the hub restarts with it.");
+    delay(300); ESP.restart();
+  });
+  server.on("/pins/defaults", HTTP_GET, []() {
+    Preferences p; p.begin("pins", false); p.clear(); p.end();
+    server.send(200, "text/plain", "Every function back on its default GPIO. Restarting.");
+    delay(300); ESP.restart();
+  });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -1042,6 +1225,7 @@ static void dataTask(void *) {
 
 void setup() {
   Serial.begin(115200);
+  pinsLoad();   // first: every pin below comes from the map
   pinMode(BTN_NEXT, INPUT_PULLUP);
   pinMode(BTN_PREV, INPUT_PULLUP);
   s_adcLock = xSemaphoreCreateMutex();   // before any task reads the ADC
@@ -1083,6 +1267,8 @@ void setup() {
   bindLoad();    // button actions (/buttons)
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
+  inputsLoad();  // configurable inputs
+  for (int i = 0; i < HUB_INPUTS; i++) inputPinSetup(s_inputs[i]);
   imuLoad();     // accelerometer mounting and zero
   pagesLoad();   // OLED pages
   // CAN: the hub is now the only CAN reader; the screens are all remotes
@@ -1106,6 +1292,7 @@ void setup() {
 
 void loop() {
   handleButtons();
+  { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); } }
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   sim_loop();

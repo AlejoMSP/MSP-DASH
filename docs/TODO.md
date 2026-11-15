@@ -5,7 +5,6 @@ Open work, newest ideas at the bottom of each group. Tick items off (or delete t
 
 ## Software
 
-- [ ] Configurable sensors stage 2: hub inputs as custom sensor sources (with a divider multiplier, see "Voltage dividers").
 - [ ] Configurable sensors stage 3: DBC presets. Stage 4: move the fixed hub sensors onto slots.
 - [ ] Web UI: one save model everywhere (unsaved-changes bar with Save / Undo) and pop-up messages.
 - [ ] Screens: put every screen GPIO in one header and a pin table, checked by a test (as done for the hub).

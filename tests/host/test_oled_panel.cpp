@@ -1,6 +1,7 @@
 // The hub's OLED warning panel (esp32-input/oled_panel.h): warning / danger states, inputs, the grid, the idle screen,
 // the defaults. Build: g++ -std=c++17 -I../../esp32-input test_oled_panel.cpp  (run from tests/host; writes /tmp/oled_*.pbm)
 #include "oled_panel.h"
+uint8_t g_pins[PR_COUNT];
 #include <stdio.h>
 #include <fstream>
 #include <string>
@@ -26,7 +27,7 @@ int main() {
   CHECK(oled_lamp_state(&in, 0, false, true) == LAMP_WARN && oled_lamp_state(&in, 0, false, false) == LAMP_OFF, "lit-when-LOW input, no ECU needed");
   CHECK(oled_lamp_state(&inH, 0, false, false) == LAMP_DANGER && oled_lamp_state(&inH, 0, false, true) == LAMP_OFF, "lit-when-HIGH input marked danger");
   CHECK(oled_input_valid(OLED_IN_GPIO2) && oled_input_valid(OLED_IN_GPIO0) && oled_input_valid(OLED_IN_MCP0) && oled_input_valid(OLED_IN_MCP1 + 15), "GPIO 2/12/0 and both MCP23017 boards' 16 pins are inputs");
-  CHECK(!oled_input_valid(0) && !oled_input_valid(4) && !oled_input_valid(15) && !oled_input_valid(OLED_IN_MCP1 + 16), "anything else is not");
+  CHECK(!oled_input_valid(0) && !oled_input_valid(4) && !oled_input_valid(15) && !oled_input_valid(OLED_IN_MCP1 + 16) && !oled_input_valid(OLED_IN_GPIO_BASE + 6) && oled_input_valid(OLED_IN_GPIO_BASE + 33) && oled_input_upgrade(1) == OLED_IN_GPIO2, "anything else is not");
   printf("3. drawing\n");
   uint8_t st[8] = { LAMP_WARN, LAMP_DANGER, 0, 0, 0, 0, 0, 0 };
   CHECK(oled_render(buf, &c, st, true, "12:30", "ALL OK") == 2, "two lit");

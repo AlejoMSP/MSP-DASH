@@ -10,6 +10,7 @@ class Preferences {
   static std::map<std::string, std::string> &store() { static std::map<std::string, std::string> m; return m; }
   std::string ns;
 public:
+  bool clear() { for (auto it = store().begin(); it != store().end();) { if (it->first.rfind(ns + "/", 0) == 0) it = store().erase(it); else ++it; } return true; }
   bool begin(const char *n, bool = false) { ns = n; return true; }
   void end() {}
   std::string getString(const char *k, const char *def = "") { auto it = store().find(ns + "/" + k); return it == store().end() ? std::string(def) : it->second; }

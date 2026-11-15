@@ -229,3 +229,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 204 | 2026-11-15 | (this commit) | Web UI step 4: gauge editor with a clickable layout picture, folding groups, pinned preview, copy cell/page to another screen; screens allow cross-origin requests; hub 45 Dashboard Logging tile shows the center screen's status |
 | (hub 46) | 2026-11-15 | (this commit) | Fix: analog reads from two tasks no longer collide ("adc oneshot read fail", a reading of 0 for a moment): one ADC lock |
 | (hub 47) | 2026-11-15 | (this commit) | ADS1115 support removed (not used); the I2C bus scan and card stay |
+| (hub 48) | 2026-11-15 | (this commit) | Inputs and pins page: every pin and what uses it, move any function to another GPIO (restart), up to 16 inputs on free GPIOs / MCP23017 pins as buttons (NO/NC, press + hold actions), switches or analog sensors (presets or custom) into custom slots; OLED lamps can use any GPIO |

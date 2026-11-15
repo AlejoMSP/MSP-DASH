@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "oled_icons.h"
+#include "hub_pins.h"
 
 #define OLED_W 128
 #define OLED_H 64
@@ -13,15 +14,19 @@
 
 enum { OLED_ON = 0, OLED_ABOVE = 1, OLED_BELOW = 2, OLED_INPUT = 3 };   // when a lamp is lit (INPUT: a wire to the hub)
 enum { LAMP_OFF = 0, LAMP_WARN = 1, LAMP_DANGER = 2 };                     // lamp state
-// Inputs a lamp can watch (OledLamp.input): hub pins, or the 16 pins of up to two MCP23017 expanders on the OLED bus.
-//   1 = GPIO 2 (R20), 2 = GPIO 12 (L18: must not be held HIGH at power-up), 3 = GPIO 0 (R19, the BOOT button: must not
-//   be held LOW at power-up), 16..31 = MCP23017 board 1 PA0..PA7, PB0..PB7, 32..47 = board 2. All read with pull-ups.
-#define OLED_IN_GPIO2 1
-#define OLED_IN_GPIO12 2
-#define OLED_IN_GPIO0 3
+// Inputs a lamp can watch (OledLamp.input): any hub GPIO with an input (code OLED_IN_GPIO_BASE + GPIO), or the 16 pins of
+// up to two MCP23017 expanders on the I2C bus (16..31 board 1 PA0..PB7, 32..47 board 2). All read with pull-ups.
+// Codes 1-3 are the older GPIO 2 / 12 / 0, read as their GPIO codes.
+#define OLED_IN_GPIO_BASE 64
+#define OLED_IN_GPIO2 (OLED_IN_GPIO_BASE + 2)
+#define OLED_IN_GPIO12 (OLED_IN_GPIO_BASE + 12)
+#define OLED_IN_GPIO0 (OLED_IN_GPIO_BASE + 0)
 #define OLED_IN_MCP0 16   // board 1: 16..31
 #define OLED_IN_MCP1 32   // board 2: 32..47
-static inline bool oled_input_valid(int in) { return (in >= 1 && in <= 3) || (in >= OLED_IN_MCP0 && in < OLED_IN_MCP1 + 16); }
+static inline int oled_input_upgrade(int in) { return in == 1 ? OLED_IN_GPIO2 : in == 2 ? OLED_IN_GPIO12 : in == 3 ? OLED_IN_GPIO0 : in; }
+static inline bool oled_input_valid(int in) {
+  return (in >= OLED_IN_MCP0 && in < OLED_IN_MCP1 + 16) || (in >= OLED_IN_GPIO_BASE && in < OLED_IN_GPIO_BASE + 40 && (gpio_caps(in - OLED_IN_GPIO_BASE) & CAP_IN));
+}
 enum { OLED_FIXED = 0, OLED_COMPACT = 1 };                                   // layout: each lamp in its own spot / lit ones packed
 
 typedef struct __attribute__((packed)) {

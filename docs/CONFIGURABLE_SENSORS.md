@@ -52,3 +52,11 @@ Rules the page enforces:
 2. Hub GPIO sensors page + used GPIOs pop-up + wiring help.
 3. CAN sensors page with presets.
 4. Remove the hard-coded hub sensors once the slots match them.
+
+
+## Stage 2: hub inputs (hub build 48)
+
+On the hub's **Inputs and pins** page, a switch or an analog sensor on any free GPIO (analog: 32-36, 39) or MCP23017
+pin fills a custom slot: presets for common pressure senders (0.5-4.5 V), 12 V / 5 V dividers and NTC temperature
+sensors, or a custom two-point line with a divider multiplier. Buttons on any input run the same actions as the page
+buttons (press and 1 s hold). A slot filled by an input cannot be changed on /custom.

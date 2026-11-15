@@ -1,6 +1,7 @@
 // OLED pages (esp32-input/oled_pages.h): each page type draws, the lamp takeover, the defaults.
 // Build: g++ -std=c++17 -I../../esp32-input test_oled_pages.cpp   (writes /tmp/opage_*.pbm previews)
 #include "oled_pages.h"
+uint8_t g_pins[PR_COUNT];
 #include <string>
 static int pass = 0, fail = 0;
 #define CHECK(c, m) do { if (c) pass++; else { fail++; printf("  FAIL: %s (line %d)\n", m, __LINE__); } } while (0)

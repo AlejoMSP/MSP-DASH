@@ -1,39 +1,43 @@
 # Hub pins (ESP32 DevKitC on the Freenove terminal board)
 
-**Every GPIO the hub uses.** The code defines them all in `esp32-input/hub_pins.h`; this table must match it.
-`tests/host/test_hub_pins.js` checks that the two agree, that no pin is used twice, and that no hub file uses a pin
-number outside `hub_pins.h`. When a pin is added, moved or freed: change `hub_pins.h` and this table together.
+**Every GPIO the hub uses.** The code lists every role with its default GPIO in `esp32-input/hub_pins.h`; the table
+below must match it. `tests/host/test_hub_pins.js` checks that the two agree, that no default GPIO is used twice, and
+that no hub file uses a pin number outside `hub_pins.h`. When a role is added or its default changes: change both.
 
 Terminals: L = left row, R = right row of the Freenove board.
 
-## GPIO map
+## GPIO map (defaults)
 
-| Terminal | GPIO | Define (hub_pins.h) | Purpose | Notes |
+Every function ("role") has a default GPIO, listed here with the Freenove terminal it is wired to. A role can be moved to
+another GPIO on the hub's **Inputs and pins** page (saved, applied when the hub restarts); the page then shows the GPIO in
+use. Every other GPIO is free for the configurable inputs (buttons, switches, analog sensors) and the OLED lamps.
+
+| Terminal (default) | Default GPIO | Role | Function | Notes |
 |---|---|---|---|---|
-| L8 | 36 | FUEL_PIN | Fuel level sender | analog, input-only |
-| L9 | 39 | RF_MISO | CC1101 MISO | input-only |
-| L10 | 34 | POT_PIN | Brightness knob | analog, input-only |
-| L11 | 35 | LIGHTS_PIN | Lights-on wire | analog, 47k / 10k divider, input-only |
-| L12 | 32 | DIMMER_PIN | Dash dimmer | analog, 47k / 10k divider |
-| L13 | 33 | RF_GDO0 | CC1101 GDO0 (data) | |
-| L14 | 25 | BTN_NEXT | Right (next) button | to ground, pull-up |
-| L15 | 26 | BTN_PREV | Left (previous) button | to ground, pull-up |
-| L16 | 27 | RF_CS | CC1101 CSN | |
-| L17 | 14 | RF_SCK | CC1101 SCK | |
-| L18 | 12 | LAMP_IN_B | Lamp input (spare) | must not be held HIGH at power-up |
-| L20 | 13 | RF_MOSI | CC1101 MOSI | |
-| R7 | 23 | EGT_CS | MAX6675 CS (EGT) | |
-| R8 | 22 | CAN_RX_PIN | CAN RX (SN65HVD230 CRX) | |
-| R11 | 21 | CAN_TX_PIN | CAN TX (SN65HVD230 CTX) | |
-| R13 | 19 | EGT_SO | MAX6675 SO | |
-| R14 | 18 | EGT_SCK | MAX6675 SCK | |
-| R15 | 5 | I2C_SDA | I2C SDA: OLED, MPU6050, MCP23017 | shared bus |
-| R16 | 17 | GPS_TX_PIN | GPS: hub TX to GPS RX | Serial2, 9600 |
-| R17 | 16 | GPS_RX_PIN | GPS: GPS TX to hub RX | Serial2, 9600 |
-| R18 | 4 | DHT_PIN | DHT22 (cabin temp / humidity) | |
-| R19 | 0 | LAMP_IN_C | Lamp input (spare) | the BOOT button: must not be held LOW at power-up |
-| R20 | 2 | LAMP_IN_A | Lamp input: seatbelt | to ground, pull-up |
-| R21 | 15 | I2C_SCL | I2C SCL: OLED, MPU6050, MCP23017 | shared bus |
+| L8 | 36 | fuel | Fuel level sender | analog, input-only |
+| L9 | 39 | rf_miso | CC1101 MISO | input-only |
+| L10 | 34 | pot | Brightness knob | analog, input-only |
+| L11 | 35 | lights | Lights-on wire (divider) | analog, 47k / 10k divider, input-only |
+| L12 | 32 | dimmer | Dash dimmer (divider) | analog, 47k / 10k divider |
+| L13 | 33 | rf_gdo0 | CC1101 GDO0 (data) |  |
+| L14 | 25 | btn_next | Right (next) button | to ground, pull-up |
+| L15 | 26 | btn_prev | Left (previous) button | to ground, pull-up |
+| L16 | 27 | rf_cs | CC1101 CSN |  |
+| L17 | 14 | rf_sck | CC1101 SCK |  |
+| L20 | 13 | rf_mosi | CC1101 MOSI |  |
+| R7 | 23 | egt_cs | EGT MAX6675 CS |  |
+| R8 | 22 | can_rx | CAN RX (SN65HVD230 CRX) |  |
+| R11 | 21 | can_tx | CAN TX (SN65HVD230 CTX) |  |
+| R13 | 19 | egt_so | EGT MAX6675 SO |  |
+| R14 | 18 | egt_sck | EGT MAX6675 SCK |  |
+| R15 | 5 | i2c_sda | I2C SDA (OLED, MPU6050, MCP23017) | shared bus |
+| R16 | 17 | gps_tx | GPS: hub TX to GPS RX | Serial2, 9600 |
+| R17 | 16 | gps_rx | GPS: GPS TX to hub RX | Serial2, 9600 |
+| R18 | 4 | dht | DHT22 cabin temp/humidity |  |
+| R21 | 15 | i2c_scl | I2C SCL (OLED, MPU6050, MCP23017) | shared bus |
+
+Free GPIOs with the defaults: 0 (R19, the BOOT button: not LOW at power-up), 2 (R20), 12 (L18, not HIGH at power-up).
+Analog-capable GPIOs (ADC1): 32-36 and 39 (all taken by default; move a role to free one).
 
 ## Not GPIO
 
@@ -58,7 +62,7 @@ Every module has its own pull-ups; past about 5 modules remove all but one set.
 
 ## Free
 
-No GPIO is fully free. GPIO 0 and 12 are lamp inputs with power-up limits. More inputs: MCP23017 expanders (16 each, up to 2).
+GPIO 0, 2 and 12 (power-up limits above), plus 16 inputs on each MCP23017 expander.
 
 ## Elsewhere
 

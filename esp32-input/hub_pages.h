@@ -9,7 +9,7 @@
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
 #define HUB_NAV_STYLE "*{box-sizing:border-box}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:8px;left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:48px!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
-#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:900px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
@@ -402,13 +402,13 @@ select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;
 <p>Layout <select id="layout" onchange="opts()"><option value="0">Each lamp in its own spot</option><option value="1">Lit lamps packed together</option></select>
  <button onclick="defaults()">Back to the defaults</button></p>
 <p class="note">The OLED shows one colour, so the two levels look different instead: WARNING = the icon (it flashes if Blink is ticked); DANGER = a white box with the icon cut out, flashing. Spots go left to right, top row first.</p>
-<p class="note">Inputs: GPIO 2 (R20), GPIO 12 (L18, must not be held HIGH at power-up), GPIO 0 (R19, the BOOT button, must not be held LOW at power-up), and up to two MCP23017 expanders (16 inputs each: board 1 at its default 0x27, board 2 set to 0x26) on the OLED's two wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V). Every input has a pull-up: wire a switch to ground and pick "lit when LOW".</p></div>
+<p class="note">Input wires: any free hub GPIO or MCP23017 pin (the Inputs and pins page shows what is free). Inputs have pull-ups: wire a switch to ground and pick "lit when LOW" (GPIO 34-39 need an outside 10 k pull-up).</p></div>
 <script>
 )HTML" OLED_ICONS_JS R"HTML(
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const $=id=>document.getElementById(id);let cfg=null;
 const OPS=["Is on","Above","Below","Input wire"],STATE=["off","WARNING","DANGER"];
-const INPUTS=[[1,"GPIO 2 (R20)"],[2,"GPIO 12 (L18)"],[3,"GPIO 0 (R19, BOOT)"]];
+const INPUTS=[0,2,4,5,12,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33,34,35,36,39].map(g=>[64+g,"GPIO "+g]);   // see the Inputs page for what is free
 for(let e=0;e<2;e++)for(let b=0;b<16;b++)INPUTS.push([16+e*16+b,"MCP23017 #"+(e+1)+" "+(b<8?"PA":"PB")+(b%8)]);
 const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
 function svg(i){const ic=ICONS[i];return ic&&ic[1]?'<svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align:middle;fill:#4dd0e1"><path d="'+ic[1]+'"/></svg>':"";}
@@ -417,7 +417,7 @@ function rowHtml(l,i){
  let h='<div class="lamp" id="lamp'+i+'"><div class="l1"><span class="n">'+(i+1)+'</span>'+svg(l.icon)+
   ' <select id="ic'+i+'">'+ICONS.map((c,k)=>opt(k,k?c[0]:"(unused)",k===l.icon)).join("")+'</select>'+
   ' <select id="op'+i+'" onchange="chOp('+i+',+this.value)">'+OPS.map((o,k)=>opt(k,o,k===l.op)).join("")+'</select>';
- if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&!(cfg.mcp||[])[x[0]>=32?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
+ if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&x[0]<48&&!(cfg.mcp||[])[x[0]>=32?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
    ' <select id="lo'+i+'">'+opt(1,"lit when LOW",l.input_low)+opt(0,"lit when HIGH",!l.input_low)+'</select>';}
  else h+=' <select id="sg'+i+'">'+Object.keys(NAME).map(k=>opt(k,NAME[k],+k===l.sig)).join("")+'</select>';
  h+=' <span class="st '+st+'">'+st+(l.op===3?" | input "+(l.in_low?"LOW":"HIGH"):"")+'</span></div><div class="l2"><span class="n"></span>';
@@ -427,10 +427,10 @@ function rowHtml(l,i){
  h+=' <label><input type="checkbox" id="bl'+i+'"'+(l.blink?" checked":"")+'> Blink the warning</label> <button onclick="save('+i+')">Save</button></div></div>';
  return h;}
 function render(){$("rows").innerHTML=cfg.lamps.map(rowHtml).join("");$("layout").value=String(cfg.layout);}
-function chOp(i,op){const l=cfg.lamps[i];l.op=op;if(op===3&&!l.input){l.input=1;l.input_low=1;}const d=document.createElement("div");$("lamp"+i).outerHTML=rowHtml(l,i);}
+function chOp(i,op){const l=cfg.lamps[i];l.op=op;if(op===3&&!l.input){l.input=66;l.input_low=1;}const d=document.createElement("div");$("lamp"+i).outerHTML=rowHtml(l,i);}
 function val(id,def){const e=$(id);return e?e.value:def;}
 async function save(i){const l=cfg.lamps[i],op=+$("op"+i).value;
- const q=new URLSearchParams({i:i,icon:$("ic"+i).value,op:op,sig:op===3?0:val("sg"+i,l.sig),input:op===3?val("in"+i,1):0,input_low:op===3?val("lo"+i,1):1,
+ const q=new URLSearchParams({i:i,icon:$("ic"+i).value,op:op,sig:op===3?0:val("sg"+i,l.sig),input:op===3?val("in"+i,66):0,input_low:op===3?val("lo"+i,1):1,
   level:val("lv"+i,l.level)||0,danger:val("dg"+i,l.danger)||0,has_danger:$("hd"+i).checked?1:0,blink:$("bl"+i).checked?1:0});
  const r=await fetch("/oled/set?"+q);$("msg").textContent=r.ok?"Spot "+(i+1)+" saved":await r.text();if(r.ok)load();}
 async function opts(){$("msg").textContent=await (await fetch("/oled/opts?layout="+$("layout").value)).text();}
@@ -563,4 +563,85 @@ function updHub(){
  x.onerror=()=>{stat.hub='<span class="chip bad">upload failed</span>';render();$("hgo").disabled=false;};
  x.open("POST","/update");x.send(fd);}
 load();setInterval(()=>{if(!busy)load();},3000);
+</script></body></html>)HTML";
+// /inputs: every GPIO (and MCP23017 pin) with what uses it; move a fixed function; set up configurable inputs
+// (buttons, switches, analog sensors) on any free pin.
+static const char INPUTS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Inputs</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:980px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}
+.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}table{width:100%;border-collapse:collapse}
+td,th{padding:5px 6px;border-bottom:1px solid #222;text-align:left;vertical-align:middle;font-size:14px}th{color:#4dd0e1;font-weight:normal}
+select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;max-width:100%}button{padding:6px 11px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
+button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px;background:#1d2b2e;color:#9adbe6;border-radius:4px;padding:1px 5px;margin-right:3px}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 12px;margin:8px 0}.form label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:#aaa}
+#msg{color:#4dd0e1;min-height:1.3em}.on{color:#7bd88f;font-weight:bold}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Inputs and pins</h2>
+<div id="msg"></div>
+<div class="card"><h3>Inputs</h3><div id="inputs"></div><p><button onclick="edit(-1)">Add an input</button></p>
+<div id="editor"></div>
+<p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. NO (normally open): active when the contact closes to ground. NC (normally closed): active when it opens. Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
+<div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
+<p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
+<p class="note">Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
+<script>
+const $=id=>document.getElementById(id);let D=null,editing=null;
+const TYPES=["","Button","Switch","Analog sensor"],CAPS={1:"in",2:"out",4:"analog",8:"pull-up"};
+const PARAM_ACTIONS={4:"page",7:"scheme",8:"race page"};
+const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
+const pinName=p=>p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+((p-100)%8):"GPIO "+p;
+function caps(c){return Object.keys(CAPS).filter(k=>c&k).map(k=>'<span class="cap">'+CAPS[k]+'</span>').join("");}
+function msg(t){$("msg").textContent=t;}
+async function load(){try{D=await (await fetch("/inputs.json")).json();render();}catch(e){msg("Could not reach the hub");}}
+function render(){
+ const rows=D.gpios.map(g=>{const role=D.roles.find(r=>r.gpio===g.g);
+  let mv="";if(role){const fits=D.gpios.filter(x=>(x.caps&role.need)===role.need&&(!x.user||x.g===g.g));
+   mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
+  return '<tr><td>GPIO '+g.g+'</td><td>'+caps(g.caps)+(g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</td><td'+(g.user?'':' class="free"')+'>'+(g.user?esc(g.user):"free")+'</td><td>'+mv+'</td></tr>';});
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td></td></tr>');}
+ $("pins").innerHTML=rows.join("");
+ const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
+ $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
+  const now=x.type===3?(x.active?x.value.toFixed(2)+" "+esc((D.presets[x.preset]||{}).unit||""):"--"):(x.active?'<span class="on">ACTIVE</span>':"off");
+  const what=x.type===1?"Button ("+(x.contact?"NC":"NO")+")":x.type===2?"Switch ("+(x.contact?"NC":"NO")+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
+  return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
+ if(editing!==null)drawEditor();}
+function freePins(type,i){const cur=D.inputs[i]||{};const out=[];
+ D.gpios.forEach(g=>{const ok=type===3?(g.caps&4):(g.caps&1);if(ok&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
+ if(type!==3)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
+ return out;}
+function edit(i){if(i<0){i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}}
+ const x=D.inputs[i];editing={i:i,type:x.type||1,pin:x.pin,contact:x.contact,slot:x.slot,ap:x.ap,pp:x.pp,ah:x.ah,ph:x.ph,preset:x.preset,mult:x.mult||1,v1:x.v1,val1:x.val1,v2:x.v2||3.3,val2:x.val2||100,pullup:x.pullup||2490,name:x.name||"",unit:""};drawEditor();}
+function freeSlots(e){return D.slots.map((s,k)=>[s,k]).filter(([s,k])=>!s.name||(D.inputs[e.i].type>1&&D.inputs[e.i].slot===k)).map(a=>a[1]);}
+function drawEditor(){const e=editing,pins=freePins(e.type,e.i);if(!pins.includes(e.pin))e.pin=pins[0];
+ let h='<div class="card" style="background:#0b1a1d"><h3>Input '+(e.i+1)+'</h3><div class="form">'+
+  '<label>Name<input id="e_name" maxlength="15" value="'+esc(e.name)+'"></label>'+
+  '<label>Type<select onchange="editing.type=+this.value;keep();drawEditor()">'+[1,2,3].map(t=>opt(t,TYPES[t],t===e.type)).join("")+'</select></label>'+
+  '<label>Pin<select id="e_pin">'+pins.map(p=>opt(p,pinName(p),p===e.pin)).join("")+'</select></label>';
+ if(e.type!==3)h+='<label>Contact<select id="e_contact">'+opt(0,"NO: active when closed",!e.contact)+opt(1,"NC: active when open",!!e.contact)+'</select></label>';
+ if(e.type===1){const act=(id,v)=>'<select id="'+id+'">'+D.actions.map((n,k)=>opt(k,n,k===v)).join("")+'</select>';
+  h+='<label>On a press'+act("e_ap",e.ap)+'</label><label>Its number (page / scheme)<input id="e_pp" type="number" min="0" max="255" value="'+e.pp+'"></label>'+
+     '<label>On a 1 s hold'+act("e_ah",e.ah)+'</label><label>Its number<input id="e_ph" type="number" min="0" max="255" value="'+e.ph+'"></label>';}
+ else{const sl=freeSlots(e);if(!sl.includes(e.slot))e.slot=sl[0];
+  h+='<label>Custom sensor slot<select id="e_slot">'+sl.map(k=>opt(k,"Sensor "+(k+1)+(D.slots[k].name?" ("+esc(D.slots[k].name)+")":" (free)"),k===e.slot)).join("")+'</select></label>';}
+ if(e.type===3){h+='<label>Sensor<select onchange="keep();editing.preset=+this.value;drawEditor()">'+D.presets.map((p,k)=>opt(k,esc(p.name),k===e.preset)).join("")+'</select></label>';
+  if(e.preset===0)h+='<label>Divider multiplier<input id="e_mult" type="number" step="any" value="'+e.mult+'"></label><label>Unit<input id="e_unit" maxlength="7" value="'+esc(e.unit)+'"></label>'+
+   '<label>Sensor volts, point 1<input id="e_v1" type="number" step="any" value="'+e.v1+'"></label><label>Reads<input id="e_val1" type="number" step="any" value="'+e.val1+'"></label>'+
+   '<label>Sensor volts, point 2<input id="e_v2" type="number" step="any" value="'+e.v2+'"></label><label>Reads<input id="e_val2" type="number" step="any" value="'+e.val2+'"></label>';
+  if(e.preset===6||e.preset===7)h+='<label>Pull-up resistor (ohms, to 3.3 V)<input id="e_pullup" type="number" step="1" value="'+e.pullup+'"></label>';}
+ h+='</div><button onclick="saveIn()">Save input '+(e.i+1)+'</button> <button class="sec" onclick="editing=null;drawEditor()">Cancel</button>';
+ if(e.type===3)h+='<p class="note">Presets assume the divider in their name (docs/TODO.md, Voltage dividers). Temperature presets: the sensor from the pin to ground, a pull-up resistor from the pin to 3.3 V.</p>';
+ $("editor").innerHTML=editing?h+'</div>':"";}
+function val(id,d){const x=$(id);return x&&x.value!==undefined&&x.value!==""?x.value:d;}
+function keep(){const e=editing;if(!e)return;e.name=val("e_name",e.name);e.pin=+val("e_pin",e.pin);e.contact=+val("e_contact",e.contact);}
+async function saveIn(){const e=editing;keep();
+ const q={i:e.i,type:e.type,pin:e.pin,contact:e.contact,name:e.name,slot:val("e_slot",e.slot),ap:val("e_ap",e.ap),pp:val("e_pp",e.pp),ah:val("e_ah",e.ah),ph:val("e_ph",e.ph),preset:e.preset};
+ if(e.type===3&&e.preset===0){Object.assign(q,{mult:val("e_mult",1),v1:val("e_v1",0),val1:val("e_val1",0),v2:val("e_v2",3.3),val2:val("e_val2",100),unit:val("e_unit","")});}
+ if(e.type===3&&(e.preset===6||e.preset===7))q.pullup=val("e_pullup",2490);
+ const r=await fetch("/inputs/set?"+new URLSearchParams(q));msg(await r.text());if(r.ok){editing=null;$("editor").innerHTML="";load();}}
+async function clearIn(i){if(!confirm("Remove input "+(i+1)+"?"))return;const r=await fetch("/inputs/clear?i="+i);msg(await r.text());load();}
+async function movePin(key,g){const role=D.roles.find(r=>r.key===key);if(!confirm("Move "+role.name+" from GPIO "+role.gpio+" to GPIO "+g+"? The hub restarts."))return;
+ const r=await fetch("/pins/set?role="+key+"&gpio="+g);msg(await r.text());if(r.ok)setTimeout(load,6000);}
+async function pinsDefaults(){if(!confirm("Put every function back on its default GPIO? The hub restarts."))return;msg(await (await fetch("/pins/defaults")).text());setTimeout(load,6000);}
+load();setInterval(()=>{if(editing===null)load();},2000);
 </script></body></html>)HTML";

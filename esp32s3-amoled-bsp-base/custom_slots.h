@@ -23,7 +23,7 @@ typedef struct __attribute__((packed)) {
 } CustomSlotInfo;
 
 // Where a slot's value comes from: a field in a CAN frame. value = raw * scale + offset.
-enum { CUSTOM_SRC_NONE = 0, CUSTOM_SRC_CAN = 1 };
+enum { CUSTOM_SRC_NONE = 0, CUSTOM_SRC_CAN = 1, CUSTOM_SRC_INPUT = 2 };   // INPUT: filled by a hub input (Inputs page)
 typedef struct __attribute__((packed)) {
   uint32_t id;          // CAN ID (11-bit)
   uint8_t start;        // first byte, 0..7
