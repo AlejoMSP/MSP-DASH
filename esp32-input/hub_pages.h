@@ -579,7 +579,7 @@ button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px
 <div id="msg"></div>
 <div class="card"><h3>Inputs</h3><div id="inputs"></div><p><button onclick="edit(-1)">Add an input</button></p>
 <div id="editor"></div>
-<p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. NO (normally open): active when the contact closes to ground. NC (normally closed): active when it opens. Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
+<p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. Active when LOW: a switch to ground (closed = active), or a 12 V signal through a PC817 optocoupler board. Active when HIGH: a switch that opens when active, or a 12 V signal through a 47k / 10k divider with a clamp. Never 12 V straight to a pin (3.3 V at most). Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
 <div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
 <p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
 <p class="note">Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
@@ -603,7 +603,7 @@ function render(){
  const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
   const now=x.type===3?(x.active?x.value.toFixed(2)+" "+esc((D.presets[x.preset]||{}).unit||""):"--"):(x.active?'<span class="on">ACTIVE</span>':"off");
-  const what=x.type===1?"Button ("+(x.contact?"NC":"NO")+")":x.type===2?"Switch ("+(x.contact?"NC":"NO")+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
+  const lvl=x.contact?"active HIGH":"active LOW";const what=x.type===1?"Button ("+lvl+")":x.type===2?"Switch ("+lvl+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
   return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
  if(editing!==null)drawEditor();}
 function freePins(type,i){const cur=D.inputs[i]||{};const out=[];
@@ -618,7 +618,7 @@ function drawEditor(){const e=editing,pins=freePins(e.type,e.i);if(!pins.include
   '<label>Name<input id="e_name" maxlength="15" value="'+esc(e.name)+'"></label>'+
   '<label>Type<select onchange="editing.type=+this.value;keep();drawEditor()">'+[1,2,3].map(t=>opt(t,TYPES[t],t===e.type)).join("")+'</select></label>'+
   '<label>Pin<select id="e_pin">'+pins.map(p=>opt(p,pinName(p),p===e.pin)).join("")+'</select></label>';
- if(e.type!==3)h+='<label>Contact<select id="e_contact">'+opt(0,"NO: active when closed",!e.contact)+opt(1,"NC: active when open",!!e.contact)+'</select></label>';
+ if(e.type!==3)h+='<label>Active when<select id="e_contact">'+opt(0,"Active when LOW (switch to ground, optocoupler)",!e.contact)+opt(1,"Active when HIGH (12 V through a divider)",!!e.contact)+'</select></label>';
  if(e.type===1){const act=(id,v)=>'<select id="'+id+'">'+D.actions.map((n,k)=>opt(k,n,k===v)).join("")+'</select>';
   h+='<label>On a press'+act("e_ap",e.ap)+'</label><label>Its number (page / scheme)<input id="e_pp" type="number" min="0" max="255" value="'+e.pp+'"></label>'+
      '<label>On a 1 s hold'+act("e_ah",e.ah)+'</label><label>Its number<input id="e_ph" type="number" min="0" max="255" value="'+e.ph+'"></label>';}

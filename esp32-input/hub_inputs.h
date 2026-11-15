@@ -15,7 +15,10 @@
 static inline bool input_is_mcp(int pin) { return pin >= INPUT_MCP_BASE && pin < INPUT_MCP_BASE + 32; }
 
 enum { IN_NONE = 0, IN_BUTTON = 1, IN_SWITCH = 2, IN_ANALOG = 3 };
-enum { CONTACT_NO = 0, CONTACT_NC = 1 };   // normally open (closes to ground when active) / normally closed
+// When an input counts as active (the page says "Active when LOW / HIGH"):
+//   CONTACT_NO: LOW  - a switch to ground that closes when active, or a 12 V signal through a PC817 optocoupler board
+//   CONTACT_NC: HIGH - a switch that opens when active, or a 12 V signal through a 47k / 10k divider (with a clamp)
+enum { CONTACT_NO = 0, CONTACT_NC = 1 };
 
 // Analog presets: what the sensor is, how its voltage at the pin (after the divider) becomes a reading.
 enum { PRE_CUSTOM = 0, PRE_PRESS_100, PRE_PRESS_150, PRE_PRESS_200, PRE_VOLT_12, PRE_VOLT_5, PRE_NTC_BOSCH, PRE_NTC_GM, PRE_COUNT };

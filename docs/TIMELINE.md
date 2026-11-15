@@ -230,3 +230,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 46) | 2026-11-15 | (this commit) | Fix: analog reads from two tasks no longer collide ("adc oneshot read fail", a reading of 0 for a moment): one ADC lock |
 | (hub 47) | 2026-11-15 | (this commit) | ADS1115 support removed (not used); the I2C bus scan and card stay |
 | (hub 48) | 2026-11-15 | (this commit) | Inputs and pins page: every pin and what uses it, move any function to another GPIO (restart), up to 16 inputs on free GPIOs / MCP23017 pins as buttons (NO/NC, press + hold actions), switches or analog sensors (presets or custom) into custom slots; OLED lamps can use any GPIO |
+| (hub 49) | 2026-11-15 | (this commit) | Inputs page: NO/NC renamed to Active when LOW (switch to ground, optocoupler) / Active when HIGH (12 V through a divider), with the 12 V wiring note |
