@@ -106,14 +106,13 @@ script (in Node), a compile check of the whole hub sketch (`hub_typecheck.sh`) a
 | [HUB_SPEED_SENSORS.md](docs/HUB_SPEED_SENSORS.md) | Hall speed sensor and GPS |
 | [CONFIGURABLE_SENSORS.md](docs/CONFIGURABLE_SENSORS.md) | Custom CAN sensor slots |
 | [HUB_433MHZ.md](docs/HUB_433MHZ.md) | CC1101 receiver and the TPMS decode work |
+| [TODO.md](docs/TODO.md) | Tasks to be done, and the voltage divider values for 3.3 V inputs |
 | [TIMELINE.md](docs/TIMELINE.md) | Build-by-build history |
 | [esp32s3-amoled-board.md](docs/esp32s3-amoled-board.md) | Screen bring-up history and hardware findings |
 
 ## Status and next steps
 
-Working on the bench: screens, hub, CAN from rusEFI, brightness, buttons, simulator, logging, OLED panel and pages, GPS.
-Still to do: wire the hall speed sensor to rusEFI and calibrate, GPS fix outdoors, calibrate the real fuel sender,
-decode the TPMS sensors (U912 kit, captures needed), mount and zero the accelerometer in the car, custom sensors from
-hub GPIOs and DBC presets.
+Working on the bench: screens, hub, CAN from rusEFI, brightness, buttons, simulator, logging, OLED panel and pages, GPS,
+accelerometer, ADS1115, the web app. Everything still open is in [docs/TODO.md](docs/TODO.md).
 
 The old WROOM + Nextion firmware was removed in build 149 and early bring-up sketches in build 114; both are in git history.
