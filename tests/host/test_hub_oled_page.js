@@ -10,7 +10,7 @@ const lamps = [lamp({ icon: 1, sig: 14, op: 0, state: 1 }), lamp({ icon: 4, sig:
                lamp({ icon: 56, op: 3, input: 1, input_low: 1, state: 1, in_low: true }), lamp({}), lamp({}), lamp({}), lamp({}), lamp({})];
 const gets = [];
 const ctx = { document: { getElementById: el, createElement: () => ({}) }, URLSearchParams, setInterval: () => 0, console, Uint8Array, Uint8ClampedArray,
-  fetch: async u => { gets.push(u); return { ok: true, json: async () => u === "/oled/pages.json" ? pagesJ : ({ found: true, pcf: [true, false], layout: 0, lamps }), text: async () => "Saved", arrayBuffer: async () => new ArrayBuffer(1024) }; } };
+  fetch: async u => { gets.push(u); return { ok: true, json: async () => u === "/oled/pages.json" ? pagesJ : ({ found: true, mcp: [0x27, 0], layout: 0, lamps }), text: async () => "Saved", arrayBuffer: async () => new ArrayBuffer(1024) }; } };
 const pagesJ = { count: 3, cycle: 0, takeover: true, chosen: 1, shown: 1, pages: [
   { type: 0, count: 0, sig: [0, 0, 0, 0], dec: [0, 0, 0, 0], label: ["", "", "", ""] },
   { type: 1, count: 1, sig: [3, 0, 0, 0], dec: [1, 0, 0, 0], label: ["BOOST PSI", "", "", ""] },
@@ -24,20 +24,20 @@ vm.createContext(ctx); vm.runInContext(hubScript('OLED_HTML'), ctx);
   check(/Warning above <input id="lv1" type="number" step="any" value="220">/.test(h) && /id="hd1" checked> Danger above<\/label> <input id="dg1" type="number" step="any" value="235">/.test(h), "coolant: warning 220, danger 235");
   check(/Lit means DANGER/.test(h), "flag / input lamps: a 'lit means danger' box instead of levels");
   check(/<option value="1" selected>GPIO 2 \(R20\)<\/option>/.test(h) && /<option value="1" selected>lit when LOW<\/option>/.test(h) && /input LOW/.test(h), "seatbelt: input GPIO 2, lit when LOW, reading LOW now");
-  check(/Expander 0x20 P7<\/option>/.test(h) && /Expander 0x21 P0 \(not found\)<\/option>/.test(h), "expander pins listed; a missing expander is marked");
+  check(/MCP23017 #1 PA7<\/option>/.test(h) && /MCP23017 #1 PB7<\/option>/.test(h) && /MCP23017 #2 PA0 \(not found\)<\/option>/.test(h) && !/PCF/.test(h), "MCP23017 board 1: PA0-PB7; a missing board 2 is marked");
   check(/GPIO 12 \(L18\)/.test(h) && /GPIO 0 \(R19, BOOT\)/.test(h), "the other hub pins with their terminals");
   Object.assign(el("ic1"), { value: "4" }); Object.assign(el("op1"), { value: "1" }); Object.assign(el("sg1"), { value: "2" });
   Object.assign(el("lv1"), { value: "215" }); Object.assign(el("dg1"), { value: "240" }); Object.assign(el("hd1"), { checked: true }); Object.assign(el("bl1"), { checked: false });
   await vm.runInContext('save(1)', ctx); await settle();
   let q = new URLSearchParams(gets.filter(u => u.startsWith("/oled/set?")).pop().split("?")[1]);
   check(q.get("op") === "1" && q.get("sig") === "2" && q.get("level") === "215" && q.get("danger") === "240" && q.get("has_danger") === "1" && q.get("input") === "0", "saving coolant: levels 215 / 240, danger on, no input");
-  Object.assign(el("ic2"), { value: "56" }); Object.assign(el("op2"), { value: "3" }); Object.assign(el("in2"), { value: "19" }); Object.assign(el("lo2"), { value: "0" }); Object.assign(el("hd2"), { checked: false }); Object.assign(el("bl2"), { checked: true });
+  Object.assign(el("ic2"), { value: "56" }); Object.assign(el("op2"), { value: "3" }); Object.assign(el("in2"), { value: "27" }); Object.assign(el("lo2"), { value: "0" }); Object.assign(el("hd2"), { checked: false }); Object.assign(el("bl2"), { checked: true });
   await vm.runInContext('save(2)', ctx); await settle();
   q = new URLSearchParams(gets.filter(u => u.startsWith("/oled/set?")).pop().split("?")[1]);
-  check(q.get("op") === "3" && q.get("input") === "19" && q.get("input_low") === "0" && q.get("blink") === "1", "saving an input lamp: expander 0x20 P3, lit when HIGH, blink");
+  check(q.get("op") === "3" && q.get("input") === "27" && q.get("input_low") === "0" && q.get("blink") === "1", "saving an input lamp: MCP23017 #1 PB3, lit when HIGH, blink");
   vm.runInContext('chOp(3, 3)', ctx);
   check(/GPIO 2 \(R20\)/.test(el("lamp3")._outer || "") && vm.runInContext('cfg.lamps[3].input', ctx) === 1, "switching a spot to Input wire shows the input boxes (GPIO 2 first)");
-  check(/0x20 found, 0x21 -/.test(el("st").textContent) && /2 DANGER/.test(el("st").textContent), "status line: expanders and what is lit");
+  check(/expanders: #1 at 0x27/.test(el("st").textContent) && /2 DANGER/.test(el("st").textContent), "status line: the expander found and what is lit");
   { const p = el("pages").innerHTML;
     check((p.match(/class="lamp"/g) || []).length === 3, "pages listed");
     check(/<option value="1" selected>Big number<\/option>/.test(p) && /id="pl1_0" maxlength="9" style="width:100px" value="BOOST PSI"/.test(p), "big number page: its signal label");

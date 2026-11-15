@@ -22,11 +22,11 @@ int main() {
   OledLamp flag = L(1, OLED_ON, 0, 0, false), flagD = L(30, OLED_ON, 0, 0, true);
   CHECK(oled_lamp_state(&flag, 1, true, false) == LAMP_WARN && oled_lamp_state(&flagD, 1, true, false) == LAMP_DANGER && oled_lamp_state(&flag, 0, true, false) == LAMP_OFF, "flags: lit = warning, or danger when chosen");
   printf("2. inputs\n");
-  OledLamp in = L(56, OLED_INPUT, 0, 0, false, OLED_IN_PCF0 + 3, true), inH = L(54, OLED_INPUT, 0, 0, true, OLED_IN_GPIO12, false);
+  OledLamp in = L(56, OLED_INPUT, 0, 0, false, OLED_IN_MCP0 + 11, true), inH = L(54, OLED_INPUT, 0, 0, true, OLED_IN_GPIO12, false);
   CHECK(oled_lamp_state(&in, 0, false, true) == LAMP_WARN && oled_lamp_state(&in, 0, false, false) == LAMP_OFF, "lit-when-LOW input, no ECU needed");
   CHECK(oled_lamp_state(&inH, 0, false, false) == LAMP_DANGER && oled_lamp_state(&inH, 0, false, true) == LAMP_OFF, "lit-when-HIGH input marked danger");
-  CHECK(oled_input_valid(OLED_IN_GPIO2) && oled_input_valid(OLED_IN_GPIO0) && oled_input_valid(OLED_IN_PCF0) && oled_input_valid(OLED_IN_PCF1 + 7), "GPIO 2/12/0 and both expanders' P0-P7 are inputs");
-  CHECK(!oled_input_valid(0) && !oled_input_valid(4) && !oled_input_valid(15) && !oled_input_valid(OLED_IN_PCF1 + 8), "anything else is not");
+  CHECK(oled_input_valid(OLED_IN_GPIO2) && oled_input_valid(OLED_IN_GPIO0) && oled_input_valid(OLED_IN_MCP0) && oled_input_valid(OLED_IN_MCP1 + 15), "GPIO 2/12/0 and both MCP23017 boards' 16 pins are inputs");
+  CHECK(!oled_input_valid(0) && !oled_input_valid(4) && !oled_input_valid(15) && !oled_input_valid(OLED_IN_MCP1 + 16), "anything else is not");
   printf("3. drawing\n");
   uint8_t st[8] = { LAMP_WARN, LAMP_DANGER, 0, 0, 0, 0, 0, 0 };
   CHECK(oled_render(buf, &c, st, true, "12:30", "ALL OK") == 2, "two lit");

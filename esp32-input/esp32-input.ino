@@ -44,10 +44,11 @@
 #include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
 #include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
 #include "ads1115.h"          // ADS1115 4-input ADC on the same wires
+#include "mcp23017.h"         // MCP23017 16-input expanders on the same wires (lamp inputs)
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 43
+#define INPUT_BUILD 44
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -462,13 +463,11 @@ static void handleButtons() {
 }
 
 // ---- OLED warning panel (oled_panel.h): 0.96" SSD1306 on GPIO 5 (SDA, R15) / 15 (SCL, R21). Lamp inputs: GPIO 2 (R20),
-// GPIO 12 (L18), GPIO 0 (R19, BOOT), and up to two PCF8574 I2C expanders (0x20, 0x21) on the same two wires ----
+// GPIO 12 (L18), GPIO 0 (R19, BOOT), and up to two MCP23017 expanders (16 inputs each) on the same two wires ----
 static OledConfig s_oled;
 static uint8_t s_oledBuf[1024];            // what the display shows (also sent to the /oled page as a live picture)
 static volatile uint8_t s_oledState[OLED_LAMPS];
 static bool s_oledOk = false;
-static bool s_pcfOk[2] = { false, false };
-static volatile uint8_t s_pcfBits[2] = { 0xFF, 0xFF };
 static void oledLoad() {
   Preferences p; p.begin("oled", true);
   if (p.getBytes("cfg", &s_oled, sizeof s_oled) != sizeof s_oled || s_oled.version != OLED_CFG_VERSION) oled_defaults(&s_oled);
@@ -502,7 +501,7 @@ static bool inputLow(int in) {
     if (!(s_inPulled & bit)) { pinMode(pin, INPUT_PULLUP); s_inPulled |= bit; delay(1); }
     return digitalRead(pin) == LOW;
   }
-  if (in >= OLED_IN_PCF0 && in < OLED_IN_PCF1 + 8) { int e = in >= OLED_IN_PCF1, b = (in - OLED_IN_PCF0) % 8; return s_pcfOk[e] && !((s_pcfBits[e] >> b) & 1); }
+  if (in >= OLED_IN_MCP0 && in < OLED_IN_MCP1 + 16) { int e = (in - OLED_IN_MCP0) / 16, b = (in - OLED_IN_MCP0) % 16; return s_mcpAddr[e] && !((s_mcpBits[e] >> b) & 1); }
   return false;
 }
 // ---- accelerometer (MPU6050) on the same wires: 50 Hz, car axes from the mounting setup on the home page ----
@@ -549,11 +548,10 @@ static void oledTask(void *) {
   bool adsOk = adsBegin();
   Serial.printf("ADS1115: %s\n", adsOk ? "found" : "not found (ADDR to GND = 0x48)");
   Serial.printf("Accelerometer: %s\n", s_imuOk ? "MPU6050 found" : "not found (SDA GPIO 5, SCL GPIO 15, 3.3 V)");
-  for (int e = 0; e < 2; e++) {   // PCF8574 expanders: writing 0xFF makes every pin an input with its weak pull-up
-    Wire.beginTransmission(0x20 + e); Wire.write(0xFF); s_pcfOk[e] = Wire.endTransmission() == 0;
-  }
-  Serial.printf("OLED: %s | expanders: 0x20 %s, 0x21 %s\n", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)",
-                s_pcfOk[0] ? "found" : "-", s_pcfOk[1] ? "found" : "-");
+  int mcpN = mcpBegin();
+  Serial.printf("OLED: %s | MCP23017 expanders: %d", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)", mcpN);
+  for (int e = 0; e < mcpN; e++) Serial.printf(" (0x%02X)", s_mcpAddr[e]);
+  Serial.println();
   int lastContrast = -1;
   uint32_t tick = 0;
   for (;;) {
@@ -561,7 +559,7 @@ static void oledTask(void *) {
     if (s_imuOk) imuStep();
     adsStep();
     if (++tick % 10) continue;
-    for (int e = 0; e < 2; e++) if (s_pcfOk[e] && Wire.requestFrom((uint8_t)(0x20 + e), (uint8_t)1) == 1) s_pcfBits[e] = Wire.read();
+    mcpRead();
     uint8_t st[OLED_LAMPS];
     bool anyLit = false;
     for (int i = 0; i < OLED_LAMPS; i++) {
@@ -833,7 +831,7 @@ static void setupWeb() {
   server.on("/oled.bin", HTTP_GET, []() { server.send_P(200, "application/octet-stream", (const char *)s_oledBuf, sizeof s_oledBuf); });
   server.on("/oled.json", HTTP_GET, []() {
     String j = "{\"found\":"; j += s_oledOk ? "true" : "false";
-    j += ",\"pcf\":["; j += s_pcfOk[0] ? "true" : "false"; j += ","; j += s_pcfOk[1] ? "true" : "false"; j += "]";
+    j += ",\"mcp\":["; j += String((int)s_mcpAddr[0]); j += ","; j += String((int)s_mcpAddr[1]); j += "]";   // addresses, 0 = none
     j += ",\"layout\":"; j += String((int)s_oled.layout); j += ",\"lamps\":[";
     for (int i = 0; i < OLED_LAMPS; i++) {
       const OledLamp &l = s_oled.lamp[i];

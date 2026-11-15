@@ -138,7 +138,7 @@ $("imu").innerHTML=kv("Lateral",m.lat.toFixed(2)+" G")+kv("Accel / brake",m.lon.
 if(!imu.done){$("ifwd").value=String(m.fwd);$("ileft").value=String(m.left);imu.done=1;}}catch(e){}}
 async function imuSet(){$("imsg").textContent=await (await fetch("/imu/set?fwd="+$("ifwd").value+"&left="+$("ileft").value)).text();}
 async function imuZero(){$("imsg").textContent=await (await fetch("/imu/zero")).text();}
-const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x20:"PCF8574 #1",0x21:"PCF8574 #2",0x48:"ADS1115",0x49:"ADS1115",0x4A:"ADS1115",0x4B:"ADS1115"};
+const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x20:"MCP23017",0x21:"MCP23017",0x22:"MCP23017",0x23:"MCP23017",0x24:"MCP23017",0x25:"MCP23017",0x26:"MCP23017",0x27:"MCP23017",0x48:"ADS1115",0x49:"ADS1115",0x4A:"ADS1115",0x4B:"ADS1115"};
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 if(b.ads)h+=b.adsv.map((v,i)=>kv("ADS1115 A"+i,v.toFixed(3)+" V")).join("");
@@ -393,14 +393,14 @@ select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;
 <p>Layout <select id="layout" onchange="opts()"><option value="0">Each lamp in its own spot</option><option value="1">Lit lamps packed together</option></select>
  <button onclick="defaults()">Back to the defaults</button></p>
 <p class="note">The OLED shows one colour, so the two levels look different instead: WARNING = the icon (it flashes if Blink is ticked); DANGER = a white box with the icon cut out, flashing. Spots go left to right, top row first.</p>
-<p class="note">Inputs: GPIO 2 (R20), GPIO 12 (L18, must not be held HIGH at power-up), GPIO 0 (R19, the BOOT button, must not be held LOW at power-up), and up to two PCF8574 expanders (8 inputs each, address 0x20 and 0x21) on the OLED's two wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V). Every input has a pull-up: wire a switch to ground and pick "lit when LOW".</p></div>
+<p class="note">Inputs: GPIO 2 (R20), GPIO 12 (L18, must not be held HIGH at power-up), GPIO 0 (R19, the BOOT button, must not be held LOW at power-up), and up to two MCP23017 expanders (16 inputs each: board 1 at its default 0x27, board 2 set to 0x26) on the OLED's two wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V). Every input has a pull-up: wire a switch to ground and pick "lit when LOW".</p></div>
 <script>
 )HTML" OLED_ICONS_JS R"HTML(
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const $=id=>document.getElementById(id);let cfg=null;
 const OPS=["Is on","Above","Below","Input wire"],STATE=["off","WARNING","DANGER"];
 const INPUTS=[[1,"GPIO 2 (R20)"],[2,"GPIO 12 (L18)"],[3,"GPIO 0 (R19, BOOT)"]];
-for(let e=0;e<2;e++)for(let b=0;b<8;b++)INPUTS.push([16+e*8+b,"Expander 0x2"+e+" P"+b]);
+for(let e=0;e<2;e++)for(let b=0;b<16;b++)INPUTS.push([16+e*16+b,"MCP23017 #"+(e+1)+" "+(b<8?"PA":"PB")+(b%8)]);
 const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
 function svg(i){const ic=ICONS[i];return ic&&ic[1]?'<svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align:middle;fill:#4dd0e1"><path d="'+ic[1]+'"/></svg>':"";}
 function rowHtml(l,i){
@@ -408,7 +408,7 @@ function rowHtml(l,i){
  let h='<div class="lamp" id="lamp'+i+'"><div class="l1"><span class="n">'+(i+1)+'</span>'+svg(l.icon)+
   ' <select id="ic'+i+'">'+ICONS.map((c,k)=>opt(k,k?c[0]:"(unused)",k===l.icon)).join("")+'</select>'+
   ' <select id="op'+i+'" onchange="chOp('+i+',+this.value)">'+OPS.map((o,k)=>opt(k,o,k===l.op)).join("")+'</select>';
- if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&!cfg.pcf[x[0]>=24?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
+ if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&!(cfg.mcp||[])[x[0]>=32?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
    ' <select id="lo'+i+'">'+opt(1,"lit when LOW",l.input_low)+opt(0,"lit when HIGH",!l.input_low)+'</select>';}
  else h+=' <select id="sg'+i+'">'+Object.keys(NAME).map(k=>opt(k,NAME[k],+k===l.sig)).join("")+'</select>';
  h+=' <span class="st '+st+'">'+st+(l.op===3?" | input "+(l.in_low?"LOW":"HIGH"):"")+'</span></div><div class="l2"><span class="n"></span>';
@@ -430,7 +430,7 @@ async function load(){try{cfg=await (await fetch("/oled.json")).json();render();
 async function live(){try{const b=new Uint8Array(await (await fetch("/oled.bin")).arrayBuffer());const cx=$("cv").getContext("2d"),img=cx.createImageData(128,64);
  for(let y=0;y<64;y++)for(let x=0;x<128;x++){const on=b[(y>>3)*128+x]>>(y&7)&1,p=(y*128+x)*4;img.data[p]=img.data[p+1]=img.data[p+2]=on?255:0;img.data[p+3]=255;}
  cx.putImageData(img,0,0);const j=await (await fetch("/oled.json")).json();
- $("st").textContent=(j.found?"Display found":"Display NOT found: check VCC 3.3 V, GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21)")+" | expanders: 0x20 "+(j.pcf[0]?"found":"-")+", 0x21 "+(j.pcf[1]?"found":"-")+
+ $("st").textContent=(j.found?"Display found":"Display NOT found: check VCC 3.3 V, GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21)")+" | expanders: "+((j.mcp||[]).filter(a=>a).map((a,e)=>"#"+(e+1)+" at 0x"+a.toString(16).toUpperCase()).join(", ")||"none")+
   " | lit: "+(j.lamps.map((l,i)=>l.state?(i+1)+(l.state===2?" DANGER":" warning"):0).filter(x=>x).join(", ")||"none");}catch(e){}}
 const PTYPES=["Warning lamps","Big number","Values (1-4)","G-meter","Clock"];let pg=null;
 function pageHtml(p,i){

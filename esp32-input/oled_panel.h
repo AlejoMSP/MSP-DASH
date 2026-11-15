@@ -13,15 +13,15 @@
 
 enum { OLED_ON = 0, OLED_ABOVE = 1, OLED_BELOW = 2, OLED_INPUT = 3 };   // when a lamp is lit (INPUT: a wire to the hub)
 enum { LAMP_OFF = 0, LAMP_WARN = 1, LAMP_DANGER = 2 };                     // lamp state
-// Inputs a lamp can watch (OledLamp.input): hub pins, or the pins of up to two PCF8574 I2C expanders on the OLED bus.
+// Inputs a lamp can watch (OledLamp.input): hub pins, or the 16 pins of up to two MCP23017 expanders on the OLED bus.
 //   1 = GPIO 2 (R20), 2 = GPIO 12 (L18: must not be held HIGH at power-up), 3 = GPIO 0 (R19, the BOOT button: must not
-//   be held LOW at power-up), 16..23 = expander 0x20 P0..P7, 24..31 = expander 0x21 P0..P7. All read with pull-ups.
+//   be held LOW at power-up), 16..31 = MCP23017 board 1 PA0..PA7, PB0..PB7, 32..47 = board 2. All read with pull-ups.
 #define OLED_IN_GPIO2 1
 #define OLED_IN_GPIO12 2
 #define OLED_IN_GPIO0 3
-#define OLED_IN_PCF0 16
-#define OLED_IN_PCF1 24
-static inline bool oled_input_valid(int in) { return (in >= 1 && in <= 3) || (in >= OLED_IN_PCF0 && in < OLED_IN_PCF1 + 8); }
+#define OLED_IN_MCP0 16   // board 1: 16..31
+#define OLED_IN_MCP1 32   // board 2: 32..47
+static inline bool oled_input_valid(int in) { return (in >= 1 && in <= 3) || (in >= OLED_IN_MCP0 && in < OLED_IN_MCP1 + 16); }
 enum { OLED_FIXED = 0, OLED_COMPACT = 1 };                                   // layout: each lamp in its own spot / lit ones packed
 
 typedef struct __attribute__((packed)) {
