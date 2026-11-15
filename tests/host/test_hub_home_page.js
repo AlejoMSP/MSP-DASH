@@ -1,5 +1,5 @@
-// The hub's home page (hub_pages.h HOME_HTML) with a fake hub: screens with their links, the status grid, and the
-// navigation bar on every hub page.
+// The hub's Setup page (hub_pages.h SETUP_HTML, the old home page) with a fake hub: hub status, sensors, brightness,
+// accelerometer, I2C bus; and the side menu on every hub page.
 const vm = require('vm'), { hubPage, hubScript } = require('./hub_page.js');
 let pass = 0, fail = 0; const check = (c, m) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
 const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
@@ -11,14 +11,9 @@ const screens = [{ name: "Right", online: true, ip: "192.168.55.233", build: 185
                  { name: "Left", online: false, ip: "192.168.55.232", build: 184, mac: "80:45:6B:33:94:40", age: 90000 }];
 const ctx = { document: { getElementById: el }, setInterval: () => 0, console,
   fetch: async u => ({ json: async () => u === "/state" ? state : u === "/screens.json" ? screens : u === "/speed.json" ? { ecuok: true, ecumph: 0, gpsok: true, fix: false, sats: 3 } : u === "/i2c.json" ? { found: [0x3C, 0x48, 0x68, 0x55], ads: 0x48, adsv: [0.0123, 1.65, 3.3, 0] } : u === "/imu.json" ? { found: true, fwd: -1, left: 3, zeroed: false, zeroing: false, lat: 0.82, lon: -0.31, vert: 0.02, yaw: 24.5, raw: [0, 0, 1, 0] } : null, text: async () => "" }) };
-vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
+vm.createContext(ctx); vm.runInContext(hubScript('SETUP_HTML'), ctx);
 (async () => {
   await settle();
-  const s = el("scr").innerHTML;
-  check(s.indexOf("Left") < s.indexOf("Center") && s.indexOf("Center") < s.indexOf("Right"), "screens listed Left, Center, Right");
-  for (const [n, p] of [["Center", "gauges"], ["Center", "log-channels"], ["Left", "settings"], ["Right", "sd"], ["Right", ""]])
-    check(s.includes('href="/screen?s=' + n + '&p=' + p + '"'), "link to " + n + " " + (p || "live") + " through the hub's Screens page");
-  check(/OFFLINE, last heard 2 min ago/.test(s), "an offline screen says when it was last heard");
   const st = el("stat").innerHTML;
   check(/ECU<\/b>rusEFI/.test(st) && /Signals live<\/b>25/.test(st) && /build 30/.test(st), "status grid: ECU, signals, hub build");
   check(/77 F/.test(el("sens").innerHTML) && /38 %/.test(el("sens").innerHTML), "hub sensors: ambient and fuel");
@@ -29,9 +24,9 @@ vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
   { const b = el("i2c").innerHTML;
     check(/0x3C<\/b>OLED/.test(b) && /0x48<\/b>ADS1115/.test(b) && /0x68<\/b>MPU6050/.test(b) && /0x55<\/b>unknown device/.test(b), "I2C card: each address found, named");
     check(/ADS1115 A1<\/b>1.650 V/.test(b) && /ADS1115 A2<\/b>3.300 V/.test(b), "ADS1115 inputs in volts"); }
-  for (const p of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML", "OLED_HTML", "SCREEN_HTML", "CAN_HTML", "FIRMWARE_HTML"]) {
+  for (const p of ["HOME_HTML", "SETUP_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML", "OLED_HTML", "SCREEN_HTML", "CAN_HTML", "FIRMWARE_HTML"]) {
     const h = hubPage(p);
-    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /href="\/screen"/.test(h) && /href="\/firmware"/.test(h) && /\.nav\{/.test(h) && !/<script>[^<]*querySelectorAll\('\.nav a'\)/.test(h), p + " has the side menu (and it adds no <script>)");
+    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /href="\/screen"/.test(h) && /href="\/firmware"/.test(h) && /href="\/setup"/.test(h) && /\.nav\{/.test(h) && !/<script>[^<]*querySelectorAll\('\.nav a'\)/.test(h), p + " has the side menu (and it adds no <script>)");
   }
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

@@ -222,3 +222,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 38) | 2026-11-15 | (this commit) | All hub GPIOs in esp32-input/hub_pins.h; docs/HUB_PINS.md rewritten as one table; test_hub_pins.js keeps them in step (no behaviour change) |
 | (hub 39) | 2026-11-15 | (this commit) | ADS1115 4-input ADC detected on the I2C bus (0x48-0x4B), I2C bus scan at boot, I2C card on the hub home page with every device found and A0-A3 volts |
 | (hub 40) | 2026-11-15 | (this commit) | Web UI step 1: side menu grouped by task on every hub page (drawer on phones), shared look, /screen (screen pages inside the hub site with a Left/Center/Right picker), /firmware (all boards' builds), /can moved to hub_pages.h, all pages sent from flash |
+| (hub 41) | 2026-11-15 | (this commit) | Web UI step 2: Dashboard (status tiles, warning panel, readings, screens); the old home page becomes /setup |

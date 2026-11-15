@@ -47,7 +47,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 40
+#define INPUT_BUILD 41
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -625,6 +625,7 @@ static void setupWeb() {
   });
   server.on("/can", HTTP_GET, []() { server.send_P(200, "text/html", CAN_HTML, strlen_P(CAN_HTML)); });
   server.on("/screen", HTTP_GET, []() { server.send_P(200, "text/html", SCREEN_HTML, strlen_P(SCREEN_HTML)); });
+  server.on("/setup", HTTP_GET, []() { server.send_P(200, "text/html", SETUP_HTML, strlen_P(SETUP_HTML)); });
   server.on("/firmware", HTTP_GET, []() { server.send_P(200, "text/html", FIRMWARE_HTML, strlen_P(FIRMWARE_HTML)); });
   // ---- sensors: every signal that has ever had data, its value, age and where it comes from ----
   server.on("/sensors.json", HTTP_GET, []() {

@@ -9,9 +9,66 @@
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
 #define HUB_NAV_STYLE "*{box-sizing:border-box}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:8px;left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:48px!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
-#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
-static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Hub</title>
+static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:900px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
+h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0 0 12px}
+.tile{background:#111;border-radius:8px;padding:10px 12px;border-left:5px solid #444;text-decoration:none;color:#ddd;display:block}
+.tile b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:4px}.tile span{font-size:18px}
+.tile.ok{border-color:#2e7d32}.tile.warn{border-color:#ffb300}.tile.bad{border-color:#e53935}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:700px){.two{grid-template-columns:1fr}}
+canvas{image-rendering:pixelated;width:100%;max-width:384px;border:1px solid #333;border-radius:4px;background:#000}
+.read{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}.read div{background:#000;border-radius:6px;padding:8px}
+.read b{display:block;color:#888;font-weight:normal;font-size:12px}.read span{font-size:22px}
+.scr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 0;border-top:1px solid #222}.scr:first-child{border-top:0}.scr .who{flex:1 1 180px}
+.scr a{background:#1d2b2e;color:#4dd0e1;text-decoration:none;padding:5px 10px;border-radius:5px;font-size:13px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}.dot.on{background:#2e7d32}.dot.off{background:#e53935}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Dashboard</h2>
+<div class="tiles" id="tiles"></div>
+<div class="two">
+<div class="card"><h3>Warning panel</h3><canvas id="cv" width="128" height="64"></canvas><div class="note" id="lit"></div></div>
+<div class="card"><h3>Readings</h3><div class="read" id="read"></div></div>
+</div>
+<div class="card"><h3>Screens</h3><div id="scr">Waiting for screens...</div></div>
+<script>
+const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
+11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
+20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
+const $=id=>document.getElementById(id),j=async u=>(await fetch(u)).json(),order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
+const tile=(k,v,cls,href)=>'<a class="tile '+cls+'" href="'+href+'"><b>'+k+'</b><span>'+v+'</span></a>';
+const KEY=[[1,"RPM",0],[3,"Boost psi",1],[2,"Coolant F",0],[5,"Oil psi",0],[6,"Oil F",0],[10,"Battery V",1],[25,"Speed mph",0],[45,"Lateral G",2]];
+async function tick(){
+ let st={},can={},spd={},sim={},scr=[],ol={lamps:[]},tm={},sens=[];
+ try{[st,can,spd,sim,scr,ol,tm,sens]=await Promise.all(["/state","/can.json","/speed.json","/sim.json","/screens.json","/oled.json","/time.json","/sensors.json"].map(u=>j(u).catch(()=>({}))));}catch(e){}
+ const on=(scr||[]).filter(s=>s.online).length,tot=(scr||[]).length;
+ const w=(ol.lamps||[]).filter(l=>l.state===1).length,d=(ol.lamps||[]).filter(l=>l.state===2).length;
+ const canOk=can.state===1&&can.total>0,ecu=st.ecu||"--";
+ $("tiles").innerHTML=
+  tile("ECU / CAN",(ecu==="none"||!canOk?"no data":ecu),canOk&&ecu!=="none"?"ok":"bad","/can")+
+  tile("GPS",!spd.gpsok?"not connected":spd.fix?"fix, "+spd.sats+" sats":"no fix ("+(spd.sats||0)+")",!spd.gpsok?"bad":spd.fix?"ok":"warn","/setup")+
+  tile("Screens",on+" of "+tot+" online",tot&&on===tot?"ok":on?"warn":"bad","/screen")+
+  tile("Warnings",d?d+" danger"+(w?", "+w+" warning":""):w?w+" warning":"none",d?"bad":w?"warn":"ok","/oled")+
+  tile("Simulator",sim.active?"ON, "+sim.seconds_left+" s left":"off",sim.active?"warn":"ok","/simulator")+
+  tile("Clock",tm.known?tm.local.slice(11,16):"no GPS time",tm.known?"ok":"warn","/setup")+
+  tile("Brightness",(st.bri!=null?st.bri:"--")+" %",st.bri>0?"ok":"warn","/setup")+
+  tile("Logging","on Center","","/screen?s=Center&p=log-channels");
+ $("lit").textContent=(ol.lamps||[]).map((l,i)=>l.state?"spot "+(i+1)+" "+(l.state===2?"DANGER":"warning")+(l.op===3?" (input)":" ("+(NAME[l.sig]||"signal "+l.sig)+")"):"").filter(x=>x).join(" | ")||"Nothing lit";
+ const by={};(sens||[]).forEach(x=>by[x.sig]=x);
+ $("read").innerHTML=KEY.map(k=>{const x=by[k[0]],fresh=x&&x.age<3000;return '<div><b>'+k[1]+'</b><span>'+(fresh?x.v.toFixed(k[2]):"--")+'</span></div>';}).join("");
+ (scr||[]).sort((a,b)=>order(a.name)-order(b.name));
+ $("scr").innerHTML=tot?scr.map(s=>{const q="/screen?s="+encodeURIComponent(s.name||s.ip)+"&p=";return '<div class="scr"><span class="who"><span class="dot '+(s.online?"on":"off")+'"></span><b>'+(s.name||"(no name)")+'</b> <span class="note">'+s.ip+' | build '+s.build+'</span></span>'+
+  '<a href="'+q+'">Live</a><a href="'+q+'gauges">Gauges</a><a href="'+q+'settings">Settings</a></div>';}).join(""):"No screens heard yet.";
+}
+async function pic(){try{const b=new Uint8Array(await (await fetch("/oled.bin")).arrayBuffer());const cx=$("cv").getContext("2d"),img=cx.createImageData(128,64);
+ for(let y=0;y<64;y++)for(let x=0;x<128;x++){const v=b[(y>>3)*128+x]>>(y&7)&1,p=(y*128+x)*4;img.data[p]=img.data[p+1]=img.data[p+2]=v?255:0;img.data[p+3]=255;}cx.putImageData(img,0,0);}catch(e){}}
+tick();pic();setInterval(tick,1000);setInterval(pic,700);
+</script></body></html>)HTML";
+
+// /setup: brightness, clock, accelerometer, I2C devices, hub sensors and the speed check, hub details.
+static const char SETUP_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Setup</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
 h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
 label{display:block;margin:10px 0 4px}input,select{width:100%;padding:6px;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px}
@@ -22,10 +79,9 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.kv{background:#000;border-radius:6px;padding:8px}
 .kv b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:2px}details summary{cursor:pointer;color:#4dd0e1}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
-<h2>Dashboard</h2>
-<div class="card"><h3>Screens</h3><div id="scr">Waiting for screens...</div></div>
-<div class="card"><h3>Status</h3><div class="grid" id="stat"></div></div>
-<div class="card"><h3>Sensors on the hub</h3><div class="grid" id="sens"></div>
+<h2>Setup</h2>
+<div class="card"><h3>Hub</h3><div class="grid" id="stat"></div></div>
+<div class="card"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
 <div class="card"><h3>I2C bus</h3><div class="grid" id="i2c"></div>
 <p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it. ADS1115 inputs read 0 to 3.3 V; an input with nothing connected drifts.</p></div>
@@ -40,7 +96,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <label>Time zone<select id="tzstd"><option value="-300">Eastern</option><option value="-360">Central</option><option value="-420">Mountain</option><option value="-480">Pacific</option><option value="-540">Alaska</option><option value="-600">Hawaii</option><option value="0">UTC</option></select></label>
 <label><input type="checkbox" id="tzdst" style="width:auto"> US daylight saving time</label>
 <button type="button" onclick="saveTz()">Save</button> <span id="tzmsg" class="note"></span></details></div>
-<div class="card"><details><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
+<div class="card"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
 <div class="row"><label>Night, dimmer lowest (%)<input type="number" id="nmin" min="5" max="100"></label>
@@ -61,13 +117,6 @@ $("brisum").textContent="| "+st.bri+" % now | lights "+st.lightsV.toFixed(1)+" V
 if(!poll.done){ids.forEach(i=>$(i).value=st.cfg[i]);poll.done=1;}}catch(e){}}
 async function save(){const q=ids.map(i=>i+"="+encodeURIComponent($(i).value)).join("&");$("msg").textContent=await (await fetch("/save?"+q)).text();}
 function ago(ms){return ms<60000?Math.round(ms/1000)+" s ago":Math.round(ms/60000)+" min ago";}
-async function scr(){try{const l=await (await fetch("/screens.json")).json();
-const order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
-l.sort((a,b)=>order(a.name)-order(b.name)||(a.ip<b.ip?-1:1));
-$("scr").innerHTML=l.length?l.map(s=>{const u="http://"+s.ip;return '<div class="scr"><span class="who"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
-(s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+s.ip+' | build '+s.build+' | '+s.mac+'</span></span>'+
-(()=>{const q="/screen?s="+encodeURIComponent(s.name||s.ip)+"&p=";return '<a class="btn" href="'+q+'">Live</a><a class="btn" href="'+q+'gauges">Gauges</a><a class="btn" href="'+q+'log-channels">Logging</a><a class="btn" href="'+q+'sd">SD card</a><a class="btn" href="'+q+'settings">Settings</a></div>';})();}).join(''):
-'No screens heard yet. Screens set to main do not say hello.';}catch(e){}}
 async function spd(){try{const g=await (await fetch("/speed.json")).json();
 const gps=!g.gpsok?"not connected":!g.fix?"no fix ("+g.sats+" sats)":g.gpsmph.toFixed(1)+" mph, "+g.sats+" sats";
 const ecu=g.ecuok?g.ecumph.toFixed(1)+" mph":"no data";
@@ -91,7 +140,7 @@ async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 if(b.ads)h+=b.adsv.map((v,i)=>kv("ADS1115 A"+i,v.toFixed(3)+" V")).join("");
 $("i2c").innerHTML=h;}catch(e){}}
-poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);scr();setInterval(scr,1000);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
+poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>

@@ -79,6 +79,8 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_pins.js`: hub_pins.h vs docs/HUB_PINS.md (same pins and terminals), no GPIO or terminal twice, no raw pin numbers in hub files.
 - `hub_typecheck.sh`: compile check of the whole hub sketch against stubs (stubs_hub/ + stubs/), with the shared headers copied in as the flash command does.
 - `test_oled_panel.cpp`: the OLED warning panel: lit rules, grid, blink, idle clock, defaults vs icons.txt. Build: `g++ -std=c++17 -I../../esp32-input test_oled_panel.cpp`
+- `test_hub_dashboard.js`: the Dashboard: tiles and colours, lit lamps, readings, screens, a failing request.
+- `test_hub_home_page.js`: the Setup page (the old home page) and the side menu on every page.
 - `test_hub_screen_page.js`: the hub /screen page (screen picker, tabs, frame, address) and /firmware (every board's build).
 - `test_hub_oled_page.js`: the hub /oled page.
 - `test_oled_pages.cpp`: OLED pages drawn (big number, values, G-meter, clock), lamp takeover, defaults. Build: `g++ -std=c++17 -I../../esp32-input test_oled_pages.cpp`
