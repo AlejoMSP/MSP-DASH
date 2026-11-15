@@ -10,6 +10,7 @@
 //         10k knob: outer legs to 3.3 V and GND, middle leg to POT_PIN (ADC1 only: ADC2 doesn't work with the radio on).
 // Copy wifi_config.h.example to wifi_config.h and fill in the network, the same one the screens use.
 
+#include "hub_pins.h"         // every GPIO the hub uses (docs/HUB_PINS.md lists the same)
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -45,18 +46,11 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 37
+#define INPUT_BUILD 38
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
-#define BTN_NEXT 25
-#define BTN_PREV 26
-#define POT_PIN  34
-#define LIGHTS_PIN 35   // car's lights-on wire (12 V when the lights are on), through a 47k / 10k divider
-#define DIMMER_PIN 32   // dash dimmer output, through a 47k / 10k divider (+ 10 uF if it's PWM)
 #define DIVIDER (57.0f / 10.0f)
-#define CAN_TX_PIN GPIO_NUM_21   // SN65HVD230: CTX / D
-#define CAN_RX_PIN GPIO_NUM_22   // SN65HVD230: CRX / R   // (47k + 10k) / 10k: 14.4 V in -> 2.53 V at the pin
 
 // ---- network: this board's fixed address ----
 static const IPAddress MY_IP(192, 168, 55, 204), MY_GW(192, 168, 55, 1), MY_MASK(255, 255, 255, 0);
@@ -247,9 +241,6 @@ static int finalPct() {
 // Wiring: SCK GPIO18, SO GPIO19, CS GPIO23, VCC 3V3. The chip needs ~220 ms per reading, so read every 250 ms.
 // Each good reading goes on the CAN bus as ID 0x7F0 (CAN_ID_EGT_PLACEHOLDER in can_parsing.h) for rusEFI:
 //   bytes 0-1 = EGT deg C, unsigned little endian; byte 2 = 1 if the thermocouple is open (not connected).
-#define EGT_SCK 18
-#define EGT_SO  19
-#define EGT_CS  23
 #define EGT_PERIOD_MS 250
 #define EGT_HOLD_MS 1000   // send EGT only if the ECU was heard in the last second (an unanswered frame pushes the hub to bus-off)
 static volatile float s_egtC = 0; static volatile bool s_egtOpen = true; static volatile uint32_t s_egtSent = 0; static volatile bool s_egtHeld = true;
@@ -285,8 +276,6 @@ static void egtTask(void *) {
 }
 
 // ---- GPS: GT-U7 (NEO-6M compatible) on Serial2: module TX -> GPIO 16, module RX <- GPIO 17, VCC 5 V ----
-#define GPS_RX_PIN 16
-#define GPS_TX_PIN 17
 static GpsParser s_gps;
 static volatile uint32_t s_gpsUtcMs = 0;   // millis() when s_gps.utc was last set
 // Time zone for the screens' log names and timestamps (saved): standard offset in minutes, US daylight saving on/off.
@@ -334,7 +323,6 @@ static void canTxTask(void *) {
 }
 
 // ---- DHT22 ambient temp + humidity on GPIO4 (3-pin module, pull-up built in), read every 2.5 s ----
-#define DHT_PIN 4
 #define DHT_PERIOD_MS 2500
 static volatile float s_dhtC = 0, s_dhtH = 0; static volatile bool s_dhtOk = false; static volatile uint32_t s_dhtFail = 0;
 static portMUX_TYPE s_dhtMux = portMUX_INITIALIZER_UNLOCKED;
@@ -378,7 +366,6 @@ static void dhtTask(void *) {
 }
 
 // ---- Fuel level: pot (mock sender) on GPIO36, 0-3.3 V = 0-100 %, smoothed, read every 100 ms ----
-#define FUEL_PIN 36
 static volatile float s_fuelPct = 0;   // the pot's own reading, shown on the home page even while the simulator runs
 static void fuelTask(void *) {
   float avg = analogRead(FUEL_PIN);
@@ -504,7 +491,7 @@ static void pagesSave() { s_pages.version = OLED_PAGES_VERSION; Preferences p; p
 static void oledNextPage() { s_oledPage = (s_oledPage + 1) % (s_pages.count ? s_pages.count : 1); s_oledPageMs = millis(); }
 static void oledSave() { s_oled.version = OLED_CFG_VERSION; Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
 static uint8_t s_inPulled = 0;   // hub input pins already set to INPUT_PULLUP
-static int inputPin(int in) { return in == OLED_IN_GPIO2 ? 2 : in == OLED_IN_GPIO12 ? 12 : in == OLED_IN_GPIO0 ? 0 : -1; }
+static int inputPin(int in) { return in == OLED_IN_GPIO2 ? LAMP_IN_A : in == OLED_IN_GPIO12 ? LAMP_IN_B : in == OLED_IN_GPIO0 ? LAMP_IN_C : -1; }
 // Reads an input (true = LOW). Hub pins get their pull-up the first time; expander pins are pulled up by the chip.
 static bool inputLow(int in) {
   int pin = inputPin(in);

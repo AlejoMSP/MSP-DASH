@@ -3,9 +3,8 @@
 #pragma once
 #include <Arduino.h>
 #include <Wire.h>
+#include "hub_pins.h"
 
-#define OLED_SDA 5
-#define OLED_SCL 15
 static uint8_t s_oledAddr = 0;   // 0 = not found
 
 static bool oledCmds(const uint8_t *c, int n) {
@@ -15,7 +14,7 @@ static bool oledCmds(const uint8_t *c, int n) {
 }
 // Finds the display and switches it on. False if nothing answers at 0x3C or 0x3D.
 static bool oledBegin() {
-  Wire.begin(OLED_SDA, OLED_SCL, 400000);
+  Wire.begin(I2C_SDA, I2C_SCL, 400000);
   for (uint8_t a : { (uint8_t)0x3C, (uint8_t)0x3D }) { Wire.beginTransmission(a); if (Wire.endTransmission() == 0) { s_oledAddr = a; break; } }
   if (!s_oledAddr) return false;
   static const uint8_t init[] = { 0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8,

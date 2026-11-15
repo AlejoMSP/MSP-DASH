@@ -219,3 +219,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 35) | 2026-11-14 | (this commit) | OLED panel: WARNING and DANGER levels per lamp (danger = inverted flashing box), lamp inputs on GPIO 2/12/0 and two PCF8574 expanders (16 more inputs), lit when LOW or HIGH; /oled page reworked. Saved OLED settings reset to the new defaults once. |
 | 193 | 2026-11-14 | (this commit) | Accelerometer: MPU6050 on the hub's I2C bus (hub 36), mounting axes + zero on the hub home page; new signals Lateral G, Accel/Brake G, Vertical G, Yaw Rate (45-48) for gauges, lamps and logging |
 | 194 | 2026-11-15 | (this commit) | OLED pages (hub 37): warning lamps, big number, values, G-meter, clock; OLED next page button action, timer, lamp takeover; set up on /oled |
+| (hub 38) | 2026-11-15 | (this commit) | All hub GPIOs in esp32-input/hub_pins.h; docs/HUB_PINS.md rewritten as one table; test_hub_pins.js keeps them in step (no behaviour change) |

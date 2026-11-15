@@ -11,16 +11,12 @@
 // every millisecond; while it is above the threshold the edges are collected into a "burst". Each burst is turned
 // into bits and Manchester bytes (rf_decode.h) and kept for the /rf page.
 #pragma once
+#include "hub_pins.h"
 #include <Arduino.h>
 #include <SPI.h>
 #include <Preferences.h>
 #include "rf_decode.h"
 
-#define RF_SCK 14
-#define RF_MOSI 13
-#define RF_MISO 39
-#define RF_CS 27
-#define RF_GDO0 33
 
 #define RF_BURSTS 10              // the last 10 bursts are kept
 #define RF_MIN_PULSES 24          // shorter bursts are noise

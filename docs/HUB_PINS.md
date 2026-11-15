@@ -1,75 +1,66 @@
-# Hub pin map (ESP32 DevKitC on the Freenove breakout)
+# Hub pins (ESP32 DevKitC on the Freenove terminal board)
 
-L = left terminal row, R = right row. L1-L5 / R1-R5 are the breakout's own extra terminals (not ESP32 pins).
-Terminal numbers past those were worked out from the pins in use (L14 = GPIO 25, R18 = GPIO 4, ...), which match
-the standard 38-pin DevKitC order. Ground goes to the breadboard ground bar.
+**Every GPIO the hub uses.** The code defines them all in `esp32-input/hub_pins.h`; this table must match it.
+`tests/host/test_hub_pins.js` checks that the two agree, that no pin is used twice, and that no hub file uses a pin
+number outside `hub_pins.h`. When a pin is added, moved or freed: change `hub_pins.h` and this table together.
 
-## Left row
-| Terminal | GPIO | Used for | Notes |
-|---|---|---|---|
-| L6 | 3V3 | 3.3 V supply: CC1101, sensors, pull-ups | |
-| L7 | EN | reset | do not use |
-| L8 | 36 (VP) | fuel level (pot wiper / sender divider) | input only, ADC1 |
-| L9 | 39 (VN) | CC1101 MISO (module pin 7) | input only; false pulses while ADC/WiFi busy, so no timing signals |
-| L10 | 34 | brightness knob (bench pot) | input only, ADC1 |
-| L11 | 35 | lights-on wire (47k/10k divider) | input only, ADC1 |
-| L12 | 32 | dash dimmer (47k/10k divider) | ADC1 |
-| L13 | 33 | CC1101 GDO0 data (module pin 3) | |
-| L14 | 25 | next page button | |
-| L15 | 26 | previous page button | |
-| L16 | 27 | CC1101 CSN (module pin 4) | |
-| L17 | 14 | CC1101 SCK (module pin 5) | |
-| L18 | 12 | FREE | strapping: must be low at boot (flash voltage); avoid |
-| L19 | GND | ground | |
-| L20 | 13 | CC1101 MOSI (module pin 6) | |
-| L21-L23 | 9, 10, 11 | flash chip | never use |
-| L24 | 5V | 5 V: GT-U7 GPS VCC | check the label says 5V |
+Terminals: L = left row, R = right row of the Freenove board.
 
-## Right row
-| Terminal | GPIO | Used for | Notes |
-|---|---|---|---|
-| R6 | GND | ground | |
-| R15 | 5 | OLED SDA (0.96" SSD1306, I2C) |
-| R21 | 15 | OLED SCL |
-| R20 | 2 | Seatbelt switch input (pull-up; lit when LOW by default) |
-| R7 | 23 | MAX6675 CS (EGT) | |
-| R8 | 22 | CAN RX (SN65HVD230 CRX) | |
-| R9 | 1 (TX0) | USB serial | do not use |
-| R10 | 3 (RX0) | USB serial | do not use |
-| R11 | 21 | CAN TX (SN65HVD230 CTX) | |
-| R12 | GND | ground | |
-| R13 | 19 | MAX6675 SO (EGT) | |
-| R14 | 18 | MAX6675 SCK (EGT) | |
-| R15 | 5 | FREE | strapping (high at boot); fine for most uses |
-| R16 | 17 | GPS: to the GT-U7's RX | |
-| R17 | 16 | GPS: from the GT-U7's TX | |
-| R18 | 4 | DHT22 data (ambient temp / humidity) | |
-| R19 | 0 | BOOT button | avoid |
-| R20 | 2 | FREE | strapping (low/floating for flashing); onboard LED on some boards |
-| R21 | 15 | FREE | strapping (boot log); fine for most uses |
-| R22-R24 | 8, 7, 6 | flash chip | never use |
+## GPIO map
 
-## Free pins
-GPIO 5 (R15), 15 (R21) and 2 (R20) are free and usable with care (strapping pins: nothing should pull them the
-wrong way at power-up). GPIO 12 (L18) is free but best left alone: high at boot selects the wrong flash voltage.
-No free ADC1 inputs remain (32-39 are all used); ADC2 pins do not work while WiFi is on.
+| Terminal | GPIO | Define (hub_pins.h) | Purpose | Notes |
+|---|---|---|---|---|
+| L8 | 36 | FUEL_PIN | Fuel level sender | analog, input-only |
+| L9 | 39 | RF_MISO | CC1101 MISO | input-only |
+| L10 | 34 | POT_PIN | Brightness knob | analog, input-only |
+| L11 | 35 | LIGHTS_PIN | Lights-on wire | analog, 47k / 10k divider, input-only |
+| L12 | 32 | DIMMER_PIN | Dash dimmer | analog, 47k / 10k divider |
+| L13 | 33 | RF_GDO0 | CC1101 GDO0 (data) | |
+| L14 | 25 | BTN_NEXT | Right (next) button | to ground, pull-up |
+| L15 | 26 | BTN_PREV | Left (previous) button | to ground, pull-up |
+| L16 | 27 | RF_CS | CC1101 CSN | |
+| L17 | 14 | RF_SCK | CC1101 SCK | |
+| L18 | 12 | LAMP_IN_B | Lamp input (spare) | must not be held HIGH at power-up |
+| L20 | 13 | RF_MOSI | CC1101 MOSI | |
+| R7 | 23 | EGT_CS | MAX6675 CS (EGT) | |
+| R8 | 22 | CAN_RX_PIN | CAN RX (SN65HVD230 CRX) | |
+| R11 | 21 | CAN_TX_PIN | CAN TX (SN65HVD230 CTX) | |
+| R13 | 19 | EGT_SO | MAX6675 SO | |
+| R14 | 18 | EGT_SCK | MAX6675 SCK | |
+| R15 | 5 | I2C_SDA | I2C SDA: OLED, MPU6050, PCF8574 | shared bus |
+| R16 | 17 | GPS_TX_PIN | GPS: hub TX to GPS RX | Serial2, 9600 |
+| R17 | 16 | GPS_RX_PIN | GPS: GPS TX to hub RX | Serial2, 9600 |
+| R18 | 4 | DHT_PIN | DHT22 (cabin temp / humidity) | |
+| R19 | 0 | LAMP_IN_C | Lamp input (spare) | the BOOT button: must not be held LOW at power-up |
+| R20 | 2 | LAMP_IN_A | Lamp input: seatbelt | to ground, pull-up |
+| R21 | 15 | I2C_SCL | I2C SCL: OLED, MPU6050, PCF8574 | shared bus |
 
-Not on the hub: hall speed sensor (wired to rusEFI).
+## Not GPIO
 
-## Lamp inputs for the OLED panel (hub build 35)
+| Terminal | What |
+|---|---|
+| L6 | 3.3 V: CC1101, OLED, MPU6050, expanders (never 5 V to the CC1101) |
+| L24 | 5 V: GPS power |
+| R9 / R10 | GPIO 1 / 3: USB serial (uploads, serial monitor) - do not use |
+| (none) | GPIO 6-11: the flash chip - not usable |
 
-| Input | Terminal | Note |
+## I2C bus (R15 SDA, R21 SCL)
+
+| Device | Address | Notes |
 |---|---|---|
-| GPIO 2 | R20 | default: seatbelt switch |
-| GPIO 12 | L18 | must not be held HIGH at power-up (flash voltage strap) |
-| GPIO 0 | R19 | the BOOT button: must not be held LOW at power-up |
-| PCF8574 0x20 P0-P7 | on the OLED wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V, GND) | 8 more inputs; address pins A0-A2 all to GND |
-| PCF8574 0x21 P0-P7 | same wires | 8 more; A0 to 3.3 V, A1-A2 to GND |
+| SSD1306 OLED 0.96" | 0x3C (0x3D on some) | warning panel and pages |
+| MPU6050 accelerometer | 0x68 (AD0 to 3.3 V: 0x69) | mount solid to the chassis; zero on the hub home page |
+| PCF8574 expander #1 | 0x20 (A0-A2 to GND) | 8 lamp inputs P0-P7 |
+| PCF8574 expander #2 | 0x21 (A0 to 3.3 V) | 8 more |
 
-All inputs are pulled up: wire each switch to ground and pick "lit when LOW".
+Wire the devices in parallel from one junction. Keep the bus short (about 30 cm), SDA and SCL twisted with a ground.
+Every module has its own pull-ups; past about 5 modules remove all but one set.
 
-## Accelerometer (hub build 36)
+## Free
 
-MPU6050 module on the same two wires as the OLED: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). AD0 open =
-address 0x68 (AD0 to 3.3 V = 0x69). INT not used. Mount it solid to the chassis (not the dash plastic), any way round:
-tell the hub home page which printed arrow points to the front and which to the left, then Zero it parked on level ground.
+No GPIO is fully free. GPIO 0 and 12 are lamp inputs with power-up limits. More inputs: PCF8574 expanders.
+
+## Elsewhere
+
+The hall speed sensor (NJK-5002C) goes to rusEFI, not the hub: [HUB_SPEED_SENSORS.md](HUB_SPEED_SENSORS.md).
+CC1101 wiring by module pin: [HUB_433MHZ.md](HUB_433MHZ.md).

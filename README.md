@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 194**, **hub 37**.
+Current builds: **screens 194**, **hub 38**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
@@ -19,8 +19,8 @@ Current builds: **screens 194**, **hub 37**.
 
 Hub peripherals: SN65HVD230 CAN transceiver, MAX6675 (EGT), DHT22 (cabin temp/humidity), fuel level sender, GT-U7 GPS,
 CC1101 433 MHz receiver (TPMS, in progress), 0.96" SSD1306 OLED, MPU6050 accelerometer, optional PCF8574 input
-expanders, two page buttons, dash dimmer and lights-on inputs. Full pin map with terminal numbers:
-[docs/HUB_PINS.md](docs/HUB_PINS.md).
+expanders, two page buttons, dash dimmer and lights-on inputs. Every GPIO with its terminal:
+[docs/HUB_PINS.md](docs/HUB_PINS.md) (kept in step with `esp32-input/hub_pins.h` by a test).
 
 ## What it does
 

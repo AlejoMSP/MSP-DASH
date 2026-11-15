@@ -76,6 +76,7 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_custom_page.js`: the hub's /custom page: list, editor, live preview (its decoder matches the firmware's), Save, refusals, "Make a sensor".
 - `test_icons.c`: every gauge icon is really drawn at 14/20/28/36/48 px. Build: `gcc -DLV_CONF_INCLUDE_SIMPLE -I<lv_conf dir> -I<lvgl> -I<sketch> test_icons.c <sketch>/font_icons_*.c <lvgl>/src/font/lv_font.c <lvgl>/src/font/lv_font_fmt_txt.c <lvgl>/src/misc/lv_utils.c <lvgl>/src/misc/lv_mem.c <lvgl>/src/misc/lv_log.c <lvgl>/src/misc/lv_tlsf.c <lvgl>/src/misc/lv_gc.c`
 - `test_gps_time.cpp`: GPS dates, US daylight saving (Eastern, Pacific), log-name text, RMC time fields, the hub keeping the time. Build: `g++ -std=c++17 -I../../esp32s3-amoled-bsp-base -I../../esp32-input test_gps_time.cpp`
+- `test_hub_pins.js`: hub_pins.h vs docs/HUB_PINS.md (same pins and terminals), no GPIO or terminal twice, no raw pin numbers in hub files.
 - `hub_typecheck.sh`: compile check of the whole hub sketch against stubs (stubs_hub/ + stubs/), with the shared headers copied in as the flash command does.
 - `test_oled_panel.cpp`: the OLED warning panel: lit rules, grid, blink, idle clock, defaults vs icons.txt. Build: `g++ -std=c++17 -I../../esp32-input test_oled_panel.cpp`
 - `test_hub_oled_page.js`: the hub /oled page.
