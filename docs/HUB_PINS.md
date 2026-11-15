@@ -55,3 +55,15 @@ wrong way at power-up). GPIO 12 (L18) is free but best left alone: high at boot 
 No free ADC1 inputs remain (32-39 are all used); ADC2 pins do not work while WiFi is on.
 
 Not on the hub: hall speed sensor (wired to rusEFI).
+
+## Lamp inputs for the OLED panel (hub build 35)
+
+| Input | Terminal | Note |
+|---|---|---|
+| GPIO 2 | R20 | default: seatbelt switch |
+| GPIO 12 | L18 | must not be held HIGH at power-up (flash voltage strap) |
+| GPIO 0 | R19 | the BOOT button: must not be held LOW at power-up |
+| PCF8574 0x20 P0-P7 | on the OLED wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V, GND) | 8 more inputs; address pins A0-A2 all to GND |
+| PCF8574 0x21 P0-P7 | same wires | 8 more; A0 to 3.3 V, A1-A2 to GND |
+
+All inputs are pulled up: wire each switch to ground and pick "lit when LOW".

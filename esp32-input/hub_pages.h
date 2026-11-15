@@ -298,40 +298,57 @@ load();
 </script></body></html>)HTML";
 // /oled: the warning-light panel on the 0.96" OLED - a live copy of the display and the 8 lamps.
 static const char OLED_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH OLED</title>
-<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 .card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}canvas{image-rendering:pixelated;width:100%;max-width:512px;border:1px solid #333;border-radius:4px;background:#000}
-table{width:100%;border-collapse:collapse}td,th{padding:5px;border-bottom:1px solid #222;text-align:left;vertical-align:middle}th{color:#4dd0e1;font-weight:normal}
 select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;max-width:100%}button{padding:7px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
-.lit{color:#ff6b6b;font-weight:bold}#msg{color:#4dd0e1;min-height:1.2em}
+.lamp{border-top:1px solid #222;padding:10px 0}.lamp:first-child{border-top:0}.l1,.l2{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0}
+.n{width:26px;color:#888}.st{font-size:12px;padding:2px 6px;border-radius:4px}.WARNING{background:#5a4300;color:#ffd54f}.DANGER{background:#5a0000;color:#ff6b6b}.off{color:#666}
+#msg{color:#4dd0e1;min-height:1.2em}input[type=number]{width:80px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>OLED warning panel</h2>
 <div class="card"><canvas id="cv" width="128" height="64"></canvas><div class="note" id="st"></div></div>
-<div class="card"><table><thead><tr><th>#</th><th>Icon</th><th>Lit by</th><th>When</th><th>Level</th><th>Blink</th><th></th></tr></thead><tbody id="rows"></tbody></table>
-<div id="msg"></div>
+<div class="card"><div id="rows"></div><div id="msg"></div>
 <p>Layout <select id="layout" onchange="opts()"><option value="0">Each lamp in its own spot</option><option value="1">Lit lamps packed together</option></select>
- &nbsp; Seatbelt lamp lit when GPIO 2 (R20) is <select id="belt" onchange="opts()"><option value="1">LOW (switch to ground when unbuckled)</option><option value="0">HIGH</option></select></p>
-<p><button onclick="defaults()">Back to the defaults</button></p>
-<p class="note">Wiring: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). Spots go left to right, top row first. With nothing lit the panel shows the GPS clock and ALL OK (or NO ECU DATA). Brightness follows the screens.</p></div>
+ <button onclick="defaults()">Back to the defaults</button></p>
+<p class="note">The OLED shows one colour, so the two levels look different instead: WARNING = the icon (it flashes if Blink is ticked); DANGER = a white box with the icon cut out, flashing. Spots go left to right, top row first.</p>
+<p class="note">Inputs: GPIO 2 (R20), GPIO 12 (L18, must not be held HIGH at power-up), GPIO 0 (R19, the BOOT button, must not be held LOW at power-up), and up to two PCF8574 expanders (8 inputs each, address 0x20 and 0x21) on the OLED's two wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V). Every input has a pull-up: wire a switch to ground and pick "lit when LOW".</p></div>
 <script>
 )HTML" OLED_ICONS_JS R"HTML(
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites"};
 const $=id=>document.getElementById(id);let cfg=null;
-const OPS=["Is on","Above","Below","Seatbelt input"];
-function svg(i){const ic=ICONS[i];return ic&&ic[1]?'<svg viewBox="0 0 24 24" width="22" height="22" style="vertical-align:middle;fill:#4dd0e1"><path d="'+ic[1]+'"/></svg>':"";}
-function row(l,i){const sigOpts=Object.keys(NAME).map(k=>'<option value="'+k+'"'+(+k===l.sig?" selected":"")+'>'+NAME[k]+'</option>').join("");
- return '<tr><td class="'+(l.lit?"lit":"")+'">'+(i+1)+(l.lit?" LIT":"")+'</td><td>'+svg(l.icon)+' <select id="ic'+i+'">'+ICONS.map((c,k)=>'<option value="'+k+'"'+(k===l.icon?" selected":"")+'>'+(k?c[0]:"(unused)")+'</option>').join("")+'</select></td>'+
- '<td><select id="sg'+i+'" '+(l.op===3?"disabled":"")+'>'+sigOpts+'</select></td><td><select id="op'+i+'">'+OPS.map((o,k)=>'<option value="'+k+'"'+(k===l.op?" selected":"")+'>'+o+'</option>').join("")+'</select></td>'+
- '<td><input id="lv'+i+'" type="number" step="any" style="width:80px" value="'+l.level+'" '+(l.op===1||l.op===2?"":"disabled")+'></td><td><input id="bl'+i+'" type="checkbox" '+(l.blink?"checked":"")+'></td>'+
- '<td><button onclick="save('+i+')">Save</button></td></tr>';}
-function render(){$("rows").innerHTML=cfg.lamps.map(row).join("");$("layout").value=String(cfg.layout);$("belt").value=String(cfg.belt_lit_low);}
-async function save(i){const q=new URLSearchParams({i:i,icon:$("ic"+i).value,sig:$("sg"+i).value,op:$("op"+i).value,level:$("lv"+i).value||0,blink:$("bl"+i).checked?1:0});
- const r=await fetch("/oled/set?"+q);$("msg").textContent=r.ok?"Spot "+(i+1)+" saved":await r.text();load();}
-async function opts(){const r=await fetch("/oled/opts?layout="+$("layout").value+"&belt="+$("belt").value);$("msg").textContent=await r.text();}
+const OPS=["Is on","Above","Below","Input wire"],STATE=["off","WARNING","DANGER"];
+const INPUTS=[[1,"GPIO 2 (R20)"],[2,"GPIO 12 (L18)"],[3,"GPIO 0 (R19, BOOT)"]];
+for(let e=0;e<2;e++)for(let b=0;b<8;b++)INPUTS.push([16+e*8+b,"Expander 0x2"+e+" P"+b]);
+const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
+function svg(i){const ic=ICONS[i];return ic&&ic[1]?'<svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align:middle;fill:#4dd0e1"><path d="'+ic[1]+'"/></svg>':"";}
+function rowHtml(l,i){
+ const st=STATE[l.state]||"off",lvl=l.op===1||l.op===2;
+ let h='<div class="lamp" id="lamp'+i+'"><div class="l1"><span class="n">'+(i+1)+'</span>'+svg(l.icon)+
+  ' <select id="ic'+i+'">'+ICONS.map((c,k)=>opt(k,k?c[0]:"(unused)",k===l.icon)).join("")+'</select>'+
+  ' <select id="op'+i+'" onchange="chOp('+i+',+this.value)">'+OPS.map((o,k)=>opt(k,o,k===l.op)).join("")+'</select>';
+ if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&!cfg.pcf[x[0]>=24?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
+   ' <select id="lo'+i+'">'+opt(1,"lit when LOW",l.input_low)+opt(0,"lit when HIGH",!l.input_low)+'</select>';}
+ else h+=' <select id="sg'+i+'">'+Object.keys(NAME).map(k=>opt(k,NAME[k],+k===l.sig)).join("")+'</select>';
+ h+=' <span class="st '+st+'">'+st+(l.op===3?" | input "+(l.in_low?"LOW":"HIGH"):"")+'</span></div><div class="l2"><span class="n"></span>';
+ if(lvl){h+='Warning '+(l.op===1?"above":"below")+' <input id="lv'+i+'" type="number" step="any" value="'+l.level+'">'+
+   ' <label><input type="checkbox" id="hd'+i+'"'+(l.has_danger?" checked":"")+'> Danger '+(l.op===1?"above":"below")+'</label> <input id="dg'+i+'" type="number" step="any" value="'+l.danger+'">';}
+ else h+='<label><input type="checkbox" id="hd'+i+'"'+(l.has_danger?" checked":"")+'> Lit means DANGER (not just a warning)</label>';
+ h+=' <label><input type="checkbox" id="bl'+i+'"'+(l.blink?" checked":"")+'> Blink the warning</label> <button onclick="save('+i+')">Save</button></div></div>';
+ return h;}
+function render(){$("rows").innerHTML=cfg.lamps.map(rowHtml).join("");$("layout").value=String(cfg.layout);}
+function chOp(i,op){const l=cfg.lamps[i];l.op=op;if(op===3&&!l.input){l.input=1;l.input_low=1;}const d=document.createElement("div");$("lamp"+i).outerHTML=rowHtml(l,i);}
+function val(id,def){const e=$(id);return e?e.value:def;}
+async function save(i){const l=cfg.lamps[i],op=+$("op"+i).value;
+ const q=new URLSearchParams({i:i,icon:$("ic"+i).value,op:op,sig:op===3?0:val("sg"+i,l.sig),input:op===3?val("in"+i,1):0,input_low:op===3?val("lo"+i,1):1,
+  level:val("lv"+i,l.level)||0,danger:val("dg"+i,l.danger)||0,has_danger:$("hd"+i).checked?1:0,blink:$("bl"+i).checked?1:0});
+ const r=await fetch("/oled/set?"+q);$("msg").textContent=r.ok?"Spot "+(i+1)+" saved":await r.text();if(r.ok)load();}
+async function opts(){$("msg").textContent=await (await fetch("/oled/opts?layout="+$("layout").value)).text();}
 async function defaults(){$("msg").textContent=await (await fetch("/oled/defaults")).text();load();}
 async function load(){try{cfg=await (await fetch("/oled.json")).json();render();}catch(e){}}
 async function live(){try{const b=new Uint8Array(await (await fetch("/oled.bin")).arrayBuffer());const cx=$("cv").getContext("2d"),img=cx.createImageData(128,64);
  for(let y=0;y<64;y++)for(let x=0;x<128;x++){const on=b[(y>>3)*128+x]>>(y&7)&1,p=(y*128+x)*4;img.data[p]=img.data[p+1]=img.data[p+2]=on?255:0;img.data[p+3]=255;}
  cx.putImageData(img,0,0);const j=await (await fetch("/oled.json")).json();
- $("st").textContent=(j.found?"Display found":"Display NOT found: check VCC 3.3 V, GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21)")+" | seatbelt input: "+(j.belt_low?"LOW":"HIGH")+" | lit: "+(j.lamps.map((l,i)=>l.lit?i+1:0).filter(x=>x).join(", ")||"none");}catch(e){}}
+ $("st").textContent=(j.found?"Display found":"Display NOT found: check VCC 3.3 V, GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21)")+" | expanders: 0x20 "+(j.pcf[0]?"found":"-")+", 0x21 "+(j.pcf[1]?"found":"-")+
+  " | lit: "+(j.lamps.map((l,i)=>l.state?(i+1)+(l.state===2?" DANGER":" warning"):0).filter(x=>x).join(", ")||"none");}catch(e){}}
 load();live();setInterval(live,700);
 </script></body></html>)HTML";

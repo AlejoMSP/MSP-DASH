@@ -42,7 +42,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 34
+#define INPUT_BUILD 35
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -463,32 +463,48 @@ static void handleButtons() {
   if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
 }
 
-// ---- OLED warning panel (oled_panel.h): 0.96" SSD1306 on GPIO 5 (SDA, R15) / 15 (SCL, R21); seatbelt input GPIO 2 (R20) ----
-#define BELT_PIN 2
+// ---- OLED warning panel (oled_panel.h): 0.96" SSD1306 on GPIO 5 (SDA, R15) / 15 (SCL, R21). Lamp inputs: GPIO 2 (R20),
+// GPIO 12 (L18), GPIO 0 (R19, BOOT), and up to two PCF8574 I2C expanders (0x20, 0x21) on the same two wires ----
 static OledConfig s_oled;
 static uint8_t s_oledBuf[1024];            // what the display shows (also sent to the /oled page as a live picture)
-static volatile bool s_oledLit[OLED_LAMPS];
+static volatile uint8_t s_oledState[OLED_LAMPS];
 static bool s_oledOk = false;
+static bool s_pcfOk[2] = { false, false };
+static volatile uint8_t s_pcfBits[2] = { 0xFF, 0xFF };
 static void oledLoad() {
   Preferences p; p.begin("oled", true);
-  if (p.getBytes("cfg", &s_oled, sizeof s_oled) != sizeof s_oled) oled_defaults(&s_oled);
+  if (p.getBytes("cfg", &s_oled, sizeof s_oled) != sizeof s_oled || s_oled.version != OLED_CFG_VERSION) oled_defaults(&s_oled);
   p.end();
-  for (int i = 0; i < OLED_LAMPS; i++) if (s_oled.lamp[i].icon > OLED_ICON_COUNT || s_oled.lamp[i].op > OLED_SEATBELT) s_oled.lamp[i].icon = 0;
+  for (int i = 0; i < OLED_LAMPS; i++) {
+    OledLamp &l = s_oled.lamp[i];
+    if (l.icon > OLED_ICON_COUNT || l.op > OLED_INPUT || (l.op == OLED_INPUT && !oled_input_valid(l.input))) l.icon = 0;
+  }
 }
-static void oledSave() { Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
+static void oledSave() { s_oled.version = OLED_CFG_VERSION; Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
+static int inputPin(int in) { return in == OLED_IN_GPIO2 ? 2 : in == OLED_IN_GPIO12 ? 12 : in == OLED_IN_GPIO0 ? 0 : -1; }
+// Reads an input (true = LOW). Hub pins get their pull-up the first time; expander pins are pulled up by the chip.
+static bool inputLow(int in) {
+  int pin = inputPin(in);
+  if (pin >= 0) { static uint8_t pulled = 0; uint8_t bit = 1 << in; if (!(pulled & bit)) { pinMode(pin, INPUT_PULLUP); pulled |= bit; delay(1); } return digitalRead(pin) == LOW; }
+  if (in >= OLED_IN_PCF0 && in < OLED_IN_PCF1 + 8) { int e = in >= OLED_IN_PCF1, b = (in - OLED_IN_PCF0) % 8; return s_pcfOk[e] && !((s_pcfBits[e] >> b) & 1); }
+  return false;
+}
 static void oledTask(void *) {
-  pinMode(BELT_PIN, INPUT_PULLUP);
-  s_oledOk = oledBegin();
-  Serial.printf("OLED: %s\n", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)");
+  s_oledOk = oledBegin();   // starts Wire on GPIO 5 / 15
+  for (int e = 0; e < 2; e++) {   // PCF8574 expanders: writing 0xFF makes every pin an input with its weak pull-up
+    Wire.beginTransmission(0x20 + e); Wire.write(0xFF); s_pcfOk[e] = Wire.endTransmission() == 0;
+  }
+  Serial.printf("OLED: %s | expanders: 0x20 %s, 0x21 %s\n", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)",
+                s_pcfOk[0] ? "found" : "-", s_pcfOk[1] ? "found" : "-");
   int lastContrast = -1;
   for (;;) {
-    bool lit[OLED_LAMPS];
-    bool beltLow = digitalRead(BELT_PIN) == LOW;
+    for (int e = 0; e < 2; e++) if (s_pcfOk[e] && Wire.requestFrom((uint8_t)(0x20 + e), (uint8_t)1) == 1) s_pcfBits[e] = Wire.read();
+    uint8_t st[OLED_LAMPS];
     for (int i = 0; i < OLED_LAMPS; i++) {
       const OledLamp *l = &s_oled.lamp[i];
       SignalId sg = (SignalId)(l->sig < SIG_COUNT ? l->sig : 0);
-      lit[i] = oled_lamp_lit(l, gauge_config_signal_value(sg), gauge_config_signal_has_data(sg), beltLow, s_oled.belt_lit_low);
-      s_oledLit[i] = lit[i];
+      st[i] = (uint8_t)oled_lamp_state(l, gauge_config_signal_value(sg), gauge_config_signal_has_data(sg), l->op == OLED_INPUT && inputLow(l->input));
+      s_oledState[i] = st[i];
     }
     char idle[16] = "ALL OK", sub[20] = "";
     uint32_t u = gpsUtcNow();
@@ -499,7 +515,7 @@ static void oledTask(void *) {
       strcpy(sub, "ALL OK");
     }
     if (!s_canLastRxMs || millis() - s_canLastRxMs > 2000) strcpy(sub, "NO ECU DATA");
-    oled_render(s_oledBuf, &s_oled, lit, (millis() / 400) % 2 == 0, idle, sub);
+    oled_render(s_oledBuf, &s_oled, st, (millis() / 400) % 2 == 0, idle, sub);
     if (s_oledOk) {
       int pct = s_briPct < 0 ? 100 : s_briPct, contrast = 8 + pct * 247 / 100;   // follows the screens' brightness (night = dimmer)
       if (abs(contrast - lastContrast) > 4) { oledContrast((uint8_t)contrast); lastContrast = contrast; }
@@ -747,26 +763,28 @@ static void setupWeb() {
   server.on("/oled.bin", HTTP_GET, []() { server.send_P(200, "application/octet-stream", (const char *)s_oledBuf, sizeof s_oledBuf); });
   server.on("/oled.json", HTTP_GET, []() {
     String j = "{\"found\":"; j += s_oledOk ? "true" : "false";
-    j += ",\"layout\":"; j += String((int)s_oled.layout); j += ",\"belt_lit_low\":"; j += String((int)s_oled.belt_lit_low);
-    j += ",\"belt_low\":"; j += digitalRead(BELT_PIN) == LOW ? "true" : "false"; j += ",\"lamps\":[";
+    j += ",\"pcf\":["; j += s_pcfOk[0] ? "true" : "false"; j += ","; j += s_pcfOk[1] ? "true" : "false"; j += "]";
+    j += ",\"layout\":"; j += String((int)s_oled.layout); j += ",\"lamps\":[";
     for (int i = 0; i < OLED_LAMPS; i++) {
       const OledLamp &l = s_oled.lamp[i];
-      char b[120]; snprintf(b, sizeof b, "%s{\"icon\":%u,\"sig\":%u,\"op\":%u,\"blink\":%u,\"level\":%g,\"lit\":%s}", i ? "," : "",
-                            l.icon, l.sig, l.op, l.blink, (double)l.level, s_oledLit[i] ? "true" : "false");
+      char b[220]; snprintf(b, sizeof b, "%s{\"icon\":%u,\"sig\":%u,\"op\":%u,\"blink\":%u,\"level\":%g,\"danger\":%g,\"has_danger\":%u,\"input\":%u,\"input_low\":%u,\"state\":%u,\"in_low\":%s}",
+                            i ? "," : "", l.icon, l.sig, l.op, l.blink, (double)l.level, (double)l.danger, l.has_danger, l.input, l.input_low,
+                            s_oledState[i], (l.op == OLED_INPUT && inputLow(l.input)) ? "true" : "false");
       j += b;
     }
     server.send(200, "application/json", j + "]}");
   });
   server.on("/oled/set", HTTP_GET, []() {
-    int i = server.arg("i").toInt(), icon = server.arg("icon").toInt(), sig = server.arg("sig").toInt(), op = server.arg("op").toInt();
-    if (i < 0 || i >= OLED_LAMPS || icon < 0 || icon > OLED_ICON_COUNT || sig < 0 || sig >= SIG_COUNT || op < 0 || op > OLED_SEATBELT) { server.send(400, "text/plain", "Bad setting"); return; }
+    int i = server.arg("i").toInt(), icon = server.arg("icon").toInt(), sig = server.arg("sig").toInt(), op = server.arg("op").toInt(), in = server.arg("input").toInt();
+    if (i < 0 || i >= OLED_LAMPS || icon < 0 || icon > OLED_ICON_COUNT || sig < 0 || sig >= SIG_COUNT || op < 0 || op > OLED_INPUT) { server.send(400, "text/plain", "Bad setting"); return; }
+    if (op == OLED_INPUT && !oled_input_valid(in)) { server.send(400, "text/plain", "Pick an input"); return; }
     OledLamp &l = s_oled.lamp[i];
     l.icon = icon; l.sig = sig; l.op = op; l.blink = server.arg("blink") == "1"; l.level = server.arg("level").toFloat();
+    l.danger = server.arg("danger").toFloat(); l.has_danger = server.arg("has_danger") == "1"; l.input = op == OLED_INPUT ? in : 0; l.input_low = server.arg("input_low") != "0";
     oledSave(); server.send(200, "text/plain", "Saved");
   });
   server.on("/oled/opts", HTTP_GET, []() {
     if (server.hasArg("layout")) s_oled.layout = server.arg("layout") == "1" ? OLED_COMPACT : OLED_FIXED;
-    if (server.hasArg("belt")) s_oled.belt_lit_low = server.arg("belt") == "1";
     oledSave(); server.send(200, "text/plain", "Saved");
   });
   server.on("/oled/defaults", HTTP_GET, []() { oled_defaults(&s_oled); oledSave(); server.send(200, "text/plain", "Back to the defaults"); });
