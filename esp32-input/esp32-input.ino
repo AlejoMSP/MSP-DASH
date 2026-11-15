@@ -38,13 +38,14 @@
 #endif
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "oled_panel.h"      // warning-light panel on the SSD1306 OLED (host-tested)
+#include "oled_pages.h"      // its pages: lamps, big number, values, G-meter, clock (host-tested)
 #include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
 #include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
 #include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 36
+#define INPUT_BUILD 37
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -406,6 +407,7 @@ static void readKnob() {
 }
 
 // ---- web: status page and WiFi updates (curl -F "firmware=@...bin" http://192.168.55.204/update) ----
+static void oledNextPage();   // OLED panel: next page (defined with the panel, below)
 // ---- buttons: configurable on /buttons (button_actions.h, btn_logic.h). Left = GPIO 26 (L15), right = GPIO 25 (L14) ----
 static BtnState s_btn = {};   // all zero = released (same as btn_init)
 static BtnBinding s_bind[BTN_INPUTS][BTN_LEVELS];
@@ -450,7 +452,8 @@ static void runAction(const BtnBinding *b) {
       break;
     case BA_CLEAR_WARNING: sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
     case BA_LOG_MARK: sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
-    case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;   // every screen: its name and IP
+    case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;
+    case BA_OLED_NEXT: oledNextPage(); break;   // every screen: its name and IP
   }
 }
 static void handleButtons() {
@@ -486,6 +489,19 @@ static void oledLoad() {
     if (l.icon > OLED_ICON_COUNT || l.op > OLED_INPUT || (l.op == OLED_INPUT && !oled_input_valid(l.input))) l.icon = 0;
   }
 }
+// Pages (oled_pages.h): which one is chosen, the timer, the biggest combined G seen.
+static OledPages s_pages;
+static volatile int s_oledPage = 0, s_oledShown = 0;
+static uint32_t s_oledPageMs = 0;
+static float s_gPeak = 0;
+static void pagesLoad() {
+  Preferences p; p.begin("opages", true);
+  if (p.getBytes("cfg", &s_pages, sizeof s_pages) != sizeof s_pages || s_pages.version != OLED_PAGES_VERSION || s_pages.count < 1 || s_pages.count > OLED_MAX_PAGES) oled_pages_defaults(&s_pages);
+  p.end();
+  for (int i = 0; i < OLED_MAX_PAGES; i++) { OledPage &g = s_pages.page[i]; if (g.type >= OPG_TYPES) g.type = OPG_LAMPS; for (int k = 0; k < 4; k++) { if (g.sig[k] >= SIG_COUNT) g.sig[k] = 0; g.label[k][OLED_LABEL_LEN - 1] = 0; } }
+}
+static void pagesSave() { s_pages.version = OLED_PAGES_VERSION; Preferences p; p.begin("opages", false); p.putBytes("cfg", &s_pages, sizeof s_pages); p.end(); }
+static void oledNextPage() { s_oledPage = (s_oledPage + 1) % (s_pages.count ? s_pages.count : 1); s_oledPageMs = millis(); }
 static void oledSave() { s_oled.version = OLED_CFG_VERSION; Preferences p; p.begin("oled", false); p.putBytes("cfg", &s_oled, sizeof s_oled); p.end(); }
 static uint8_t s_inPulled = 0;   // hub input pins already set to INPUT_PULLUP
 static int inputPin(int in) { return in == OLED_IN_GPIO2 ? 2 : in == OLED_IN_GPIO12 ? 12 : in == OLED_IN_GPIO0 ? 0 : -1; }
@@ -543,12 +559,16 @@ static void oledTask(void *) {
     if (++tick % 10) continue;
     for (int e = 0; e < 2; e++) if (s_pcfOk[e] && Wire.requestFrom((uint8_t)(0x20 + e), (uint8_t)1) == 1) s_pcfBits[e] = Wire.read();
     uint8_t st[OLED_LAMPS];
+    bool anyLit = false;
     for (int i = 0; i < OLED_LAMPS; i++) {
       const OledLamp *l = &s_oled.lamp[i];
       SignalId sg = (SignalId)(l->sig < SIG_COUNT ? l->sig : 0);
       st[i] = (uint8_t)oled_lamp_state(l, gauge_config_signal_value(sg), gauge_config_signal_has_data(sg), l->op == OLED_INPUT && inputLow(l->input));
       s_oledState[i] = st[i];
+      if (st[i]) anyLit = true;
     }
+    { float m = sqrtf(g_imu_val[0] * g_imu_val[0] + g_imu_val[1] * g_imu_val[1]); if (gauge_config_signal_has_data(SIG_GLAT) && m > s_gPeak) s_gPeak = m; }
+    if (s_pages.cycle_s && millis() - s_oledPageMs > s_pages.cycle_s * 1000u) oledNextPage();   // page timer
     char idle[16] = "ALL OK", sub[20] = "";
     uint32_t u = gpsUtcNow();
     if (u) {   // the GPS clock, 12-hour
@@ -558,7 +578,19 @@ static void oledTask(void *) {
       strcpy(sub, "ALL OK");
     }
     if (!s_canLastRxMs || millis() - s_canLastRxMs > 2000) strcpy(sub, "NO ECU DATA");
-    oled_render(s_oledBuf, &s_oled, st, (millis() / 400) % 2 == 0, idle, sub);
+    int pg = oled_page_to_show(&s_pages, s_oledPage, anyLit);
+    s_oledShown = pg;
+    if (pg < 0 || s_pages.page[pg].type == OPG_LAMPS) oled_render(s_oledBuf, &s_oled, st, (millis() / 400) % 2 == 0, idle, sub);
+    else {
+      const OledPage *p = &s_pages.page[pg];
+      OledPageData d = {};
+      for (int k = 0; k < 4; k++) { SignalId sg = (SignalId)p->sig[k]; d.val[k] = gauge_config_signal_value(sg); d.has[k] = sg && gauge_config_signal_has_data(sg); }
+      d.ghas = gauge_config_signal_has_data(SIG_GLAT); d.glat = g_imu_val[0]; d.glon = g_imu_val[1]; d.gpeak = s_gPeak;
+      char date[24] = "";
+      if (u) { gt_format(u, tzOffsetNow(u), 0, date, sizeof date); date[10] = 0; }
+      d.time = u ? idle : ""; d.date = date;
+      oled_render_page(s_oledBuf, p, &d);
+    }
     if (s_oledOk) {
       int pct = s_briPct < 0 ? 100 : s_briPct, contrast = 8 + pct * 247 / 100;   // follows the screens' brightness (night = dimmer)
       if (abs(contrast - lastContrast) > 4) { oledContrast((uint8_t)contrast); lastContrast = contrast; }
@@ -829,6 +861,65 @@ static void setupWeb() {
     if (server.hasArg("layout")) s_oled.layout = server.arg("layout") == "1" ? OLED_COMPACT : OLED_FIXED;
     oledSave(); server.send(200, "text/plain", "Saved");
   });
+  // ---- OLED pages ----
+  server.on("/oled/pages.json", HTTP_GET, []() {
+    String j = "{\"count\":"; j += String((int)s_pages.count); j += ",\"cycle\":"; j += String((int)s_pages.cycle_s);
+    j += ",\"takeover\":"; j += s_pages.takeover ? "true" : "false"; j += ",\"chosen\":"; j += String((int)s_oledPage);
+    j += ",\"shown\":"; j += String((int)s_oledShown); j += ",\"pages\":[";
+    for (int i = 0; i < s_pages.count; i++) {
+      const OledPage &g = s_pages.page[i];
+      char b[220];
+      snprintf(b, sizeof b, "%s{\"type\":%u,\"count\":%u,\"sig\":[%u,%u,%u,%u],\"dec\":[%u,%u,%u,%u],\"label\":[\"%s\",\"%s\",\"%s\",\"%s\"]}", i ? "," : "",
+               g.type, g.count, g.sig[0], g.sig[1], g.sig[2], g.sig[3], g.dec[0], g.dec[1], g.dec[2], g.dec[3], g.label[0], g.label[1], g.label[2], g.label[3]);
+      j += b;
+    }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/oled/page/set", HTTP_GET, []() {
+    int i = server.arg("i").toInt(), type = server.arg("type").toInt(), n = server.arg("count").toInt();
+    if (i < 0 || i >= s_pages.count || type < 0 || type >= OPG_TYPES) { server.send(400, "text/plain", "Bad page"); return; }
+    OledPage &g = s_pages.page[i];
+    g.type = type; g.count = n < 1 ? 1 : n > 4 ? 4 : n;
+    for (int k = 0; k < 4; k++) {
+      String ks = String(k), lab = server.arg("l" + ks);
+      int sg = server.arg("s" + ks).toInt(), dc = server.arg("d" + ks).toInt();
+      g.sig[k] = sg >= 0 && sg < SIG_COUNT ? sg : 0; g.dec[k] = dc < 0 ? 0 : dc > 2 ? 2 : dc;
+      int w = 0;   // printable, no quotes or backslashes (they go into JSON), 9 characters
+      for (unsigned c = 0; c < lab.length() && w < OLED_LABEL_LEN - 1; c++) { char ch = lab[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') g.label[k][w++] = ch; }
+      g.label[k][w] = 0;
+    }
+    pagesSave(); server.send(200, "text/plain", "Saved");
+  });
+  server.on("/oled/page/add", HTTP_GET, []() {
+    if (s_pages.count >= OLED_MAX_PAGES) { server.send(400, "text/plain", "6 pages at most"); return; }
+    oled_page_set(&s_pages.page[s_pages.count], OPG_BIG, 1); oled_page_item(&s_pages.page[s_pages.count], 0, 1, 0, "RPM");
+    s_pages.count++; pagesSave(); server.send(200, "text/plain", "Page added");
+  });
+  server.on("/oled/page/del", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= s_pages.count || s_pages.count <= 1) { server.send(400, "text/plain", "Keep at least one page"); return; }
+    for (int k = i; k < s_pages.count - 1; k++) s_pages.page[k] = s_pages.page[k + 1];
+    s_pages.count--; if (s_oledPage >= s_pages.count) s_oledPage = 0;
+    pagesSave(); server.send(200, "text/plain", "Page removed");
+  });
+  server.on("/oled/page/move", HTTP_GET, []() {
+    int i = server.arg("i").toInt(), j = i + (server.arg("d").toInt() < 0 ? -1 : 1);
+    if (i < 0 || j < 0 || i >= s_pages.count || j >= s_pages.count) { server.send(400, "text/plain", "Cannot move there"); return; }
+    OledPage t = s_pages.page[i]; s_pages.page[i] = s_pages.page[j]; s_pages.page[j] = t;
+    pagesSave(); server.send(200, "text/plain", "Moved");
+  });
+  server.on("/oled/page/show", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= s_pages.count) { server.send(400, "text/plain", "Bad page"); return; }
+    s_oledPage = i; s_oledPageMs = millis(); server.send(200, "text/plain", "Showing it");
+  });
+  server.on("/oled/pageopts", HTTP_GET, []() {
+    int cy = server.arg("cycle").toInt();
+    s_pages.cycle_s = cy < 0 ? 0 : cy > 60 ? 60 : cy; s_pages.takeover = server.arg("takeover") != "0";
+    pagesSave(); server.send(200, "text/plain", "Saved");
+  });
+  server.on("/oled/pages/defaults", HTTP_GET, []() { oled_pages_defaults(&s_pages); s_oledPage = 0; pagesSave(); server.send(200, "text/plain", "Pages back to the defaults"); });
+  server.on("/oled/peak/reset", HTTP_GET, []() { s_gPeak = 0; server.send(200, "text/plain", "Peak G cleared"); });
   server.on("/oled/defaults", HTTP_GET, []() { oled_defaults(&s_oled); oledSave(); server.send(200, "text/plain", "Back to the defaults"); });
   // ---- accelerometer (/imu.json, /imu/set, /imu/zero) ----
   server.on("/imu.json", HTTP_GET, []() {
@@ -981,6 +1072,7 @@ void setup() {
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   imuLoad();     // accelerometer mounting and zero
+  pagesLoad();   // OLED pages
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;

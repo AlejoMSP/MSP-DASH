@@ -322,6 +322,12 @@ select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>OLED warning panel</h2>
 <div class="card"><canvas id="cv" width="128" height="64"></canvas><div class="note" id="st"></div></div>
+<div class="card"><h3 style="color:#4dd0e1;margin:0 0 6px">Pages</h3><div id="pages"></div><div id="pmsg" style="color:#4dd0e1;min-height:1.2em"></div>
+<p><button onclick="addPage()">Add a page</button> &nbsp; Change page every <input type="number" id="cyc" min="0" max="60" style="width:60px"> s (0 = only the button)
+ &nbsp; <label><input type="checkbox" id="tko"> A lit lamp takes over the screen</label> <button onclick="pageOpts()">Save</button></p>
+<p><button onclick="pagesDefaults()">Pages back to the defaults</button> <button onclick="peakReset()">Clear peak G</button></p>
+<p class="note">Change pages with the "OLED next page" button action (Buttons page) or the timer. With the takeover on, any lit lamp switches to the lamps page until it clears.</p></div>
+<h3 style="color:#4dd0e1">Warning lamps</h3>
 <div class="card"><div id="rows"></div><div id="msg"></div>
 <p>Layout <select id="layout" onchange="opts()"><option value="0">Each lamp in its own spot</option><option value="1">Lit lamps packed together</option></select>
  <button onclick="defaults()">Back to the defaults</button></p>
@@ -365,5 +371,25 @@ async function live(){try{const b=new Uint8Array(await (await fetch("/oled.bin")
  cx.putImageData(img,0,0);const j=await (await fetch("/oled.json")).json();
  $("st").textContent=(j.found?"Display found":"Display NOT found: check VCC 3.3 V, GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21)")+" | expanders: 0x20 "+(j.pcf[0]?"found":"-")+", 0x21 "+(j.pcf[1]?"found":"-")+
   " | lit: "+(j.lamps.map((l,i)=>l.state?(i+1)+(l.state===2?" DANGER":" warning"):0).filter(x=>x).join(", ")||"none");}catch(e){}}
-load();live();setInterval(live,700);
+const PTYPES=["Warning lamps","Big number","Values (1-4)","G-meter","Clock"];let pg=null;
+function pageHtml(p,i){
+ let h='<div class="lamp"><div class="l1"><span class="n">'+(i+1)+'</span><select id="pt'+i+'" onchange="pg.pages['+i+'].type=+this.value;renderPages()">'+PTYPES.map((t,k)=>opt(k,t,k===p.type)).join("")+'</select>';
+ if(p.type===2)h+=' <select id="pc'+i+'" onchange="pg.pages['+i+'].count=+this.value;renderPages()">'+[1,2,3,4].map(k=>opt(k,k+" value"+(k>1?"s":""),k===p.count)).join("")+'</select>';
+ h+=' <button onclick="showPage('+i+')">Show</button> <button onclick="movePage('+i+',-1)"'+(i?"":" disabled")+'>&uarr;</button> <button onclick="movePage('+i+',1)"'+(i<pg.count-1?"":" disabled")+'>&darr;</button>'+
+  ' <button onclick="delPage('+i+')">Remove</button> <button onclick="savePage('+i+')">Save</button>'+(pg.shown===i?' <span class="st WARNING">ON SCREEN</span>':'')+'</div>';
+ const n=p.type===1?1:p.type===2?p.count:0;
+ for(let k=0;k<n;k++)h+='<div class="l2"><span class="n"></span><select id="ps'+i+'_'+k+'" onchange="autoLabel('+i+','+k+')">'+Object.keys(NAME).map(s=>opt(s,NAME[s],+s===p.sig[k])).join("")+'</select>'+
+  ' label <input id="pl'+i+'_'+k+'" maxlength="9" style="width:100px" value="'+(p.label[k]||"").replace(/"/g,"")+'">'+
+  ' <select id="pd'+i+'_'+k+'">'+[0,1,2].map(d=>opt(d,d+" decimals",d===p.dec[k])).join("")+'</select></div>';
+ return h+'</div>';}
+function renderPages(){$("pages").innerHTML=pg.pages.map(pageHtml).join("");$("cyc").value=pg.cycle;$("tko").checked=pg.takeover;}
+function autoLabel(i,k){const s=+$("ps"+i+"_"+k).value;$("pl"+i+"_"+k).value=(NAME[s]||"").toUpperCase().slice(0,9);}
+async function loadPages(){try{pg=await (await fetch("/oled/pages.json")).json();renderPages();}catch(e){}}
+async function pcall(u){const r=await fetch(u);$("pmsg").textContent=await r.text();loadPages();return r.ok;}
+function savePage(i){const p=pg.pages[i],q={i:i,type:$("pt"+i).value,count:$("pc"+i)?$("pc"+i).value:p.count||1};
+ for(let k=0;k<4;k++){const s=$("ps"+i+"_"+k);q["s"+k]=s?s.value:p.sig[k];q["l"+k]=$("pl"+i+"_"+k)?$("pl"+i+"_"+k).value:p.label[k];q["d"+k]=$("pd"+i+"_"+k)?$("pd"+i+"_"+k).value:p.dec[k];}
+ return pcall("/oled/page/set?"+new URLSearchParams(q));}
+const addPage=()=>pcall("/oled/page/add"),delPage=i=>pcall("/oled/page/del?i="+i),movePage=(i,d)=>pcall("/oled/page/move?i="+i+"&d="+d),showPage=i=>pcall("/oled/page/show?i="+i);
+const pageOpts=()=>pcall("/oled/pageopts?cycle="+$("cyc").value+"&takeover="+($("tko").checked?1:0)),pagesDefaults=()=>pcall("/oled/pages/defaults"),peakReset=()=>pcall("/oled/peak/reset");
+load();loadPages();live();setInterval(live,700);
 </script></body></html>)HTML";

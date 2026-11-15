@@ -22,6 +22,7 @@ public:
   void sendContent(const char *, size_t) {}
   String arg(const char *) { return ""; }
   String arg(int) { return ""; }
+  String arg(const String &) { return ""; }
   String argName(int) { return ""; }
   int args() { return 0; }
   bool hasArg(const char *) { return false; }

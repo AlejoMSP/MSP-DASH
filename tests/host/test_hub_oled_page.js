@@ -10,7 +10,11 @@ const lamps = [lamp({ icon: 1, sig: 14, op: 0, state: 1 }), lamp({ icon: 4, sig:
                lamp({ icon: 56, op: 3, input: 1, input_low: 1, state: 1, in_low: true }), lamp({}), lamp({}), lamp({}), lamp({}), lamp({})];
 const gets = [];
 const ctx = { document: { getElementById: el, createElement: () => ({}) }, URLSearchParams, setInterval: () => 0, console, Uint8Array, Uint8ClampedArray,
-  fetch: async u => { gets.push(u); return { ok: true, json: async () => ({ found: true, pcf: [true, false], layout: 0, lamps }), text: async () => "Saved", arrayBuffer: async () => new ArrayBuffer(1024) }; } };
+  fetch: async u => { gets.push(u); return { ok: true, json: async () => u === "/oled/pages.json" ? pagesJ : ({ found: true, pcf: [true, false], layout: 0, lamps }), text: async () => "Saved", arrayBuffer: async () => new ArrayBuffer(1024) }; } };
+const pagesJ = { count: 3, cycle: 0, takeover: true, chosen: 1, shown: 1, pages: [
+  { type: 0, count: 0, sig: [0, 0, 0, 0], dec: [0, 0, 0, 0], label: ["", "", "", ""] },
+  { type: 1, count: 1, sig: [3, 0, 0, 0], dec: [1, 0, 0, 0], label: ["BOOST PSI", "", "", ""] },
+  { type: 2, count: 2, sig: [5, 2, 0, 0], dec: [0, 0, 0, 0], label: ["OIL PSI", "WATER F", "", ""] }] };
 vm.createContext(ctx); vm.runInContext(hubScript('OLED_HTML'), ctx);
 (async () => {
   await settle();
@@ -34,5 +38,21 @@ vm.createContext(ctx); vm.runInContext(hubScript('OLED_HTML'), ctx);
   vm.runInContext('chOp(3, 3)', ctx);
   check(/GPIO 2 \(R20\)/.test(el("lamp3")._outer || "") && vm.runInContext('cfg.lamps[3].input', ctx) === 1, "switching a spot to Input wire shows the input boxes (GPIO 2 first)");
   check(/0x20 found, 0x21 -/.test(el("st").textContent) && /2 DANGER/.test(el("st").textContent), "status line: expanders and what is lit");
+  { const p = el("pages").innerHTML;
+    check((p.match(/class="lamp"/g) || []).length === 3, "pages listed");
+    check(/<option value="1" selected>Big number<\/option>/.test(p) && /id="pl1_0" maxlength="9" style="width:100px" value="BOOST PSI"/.test(p), "big number page: its signal label");
+    check(/<option value="2" selected>2 values<\/option>/.test(p) && /id="pl2_1"[^>]*value="WATER F"/.test(p), "values page: two readouts with labels");
+    check(/ON SCREEN/.test(p), "the page on screen is marked");
+    Object.assign(el("pt2"), { value: "2" }); Object.assign(el("pc2"), { value: "2" });
+    Object.assign(el("ps2_0"), { value: "6" }); Object.assign(el("pl2_0"), { value: "OIL F" }); Object.assign(el("pd2_0"), { value: "0" });
+    Object.assign(el("ps2_1"), { value: "10" }); Object.assign(el("pl2_1"), { value: "VOLTS" }); Object.assign(el("pd2_1"), { value: "1" });
+    await vm.runInContext('savePage(2)', ctx); await settle();
+    const q = new URLSearchParams(gets.filter(u => u.startsWith("/oled/page/set?")).pop().split("?")[1]);
+    check(q.get("i") === "2" && q.get("type") === "2" && q.get("count") === "2" && q.get("s0") === "6" && q.get("l1") === "VOLTS" && q.get("d1") === "1", "saving a page sends type, count, signals, labels, decimals");
+    await vm.runInContext('showPage(1)', ctx); await settle();
+    check(gets.includes("/oled/page/show?i=1"), "Show puts that page on the OLED");
+    Object.assign(el("cyc"), { value: "5" }); Object.assign(el("tko"), { checked: false });
+    await vm.runInContext('pageOpts()', ctx); await settle();
+    check(gets.includes("/oled/pageopts?cycle=5&takeover=0"), "timer and takeover saved"); }
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

@@ -4,12 +4,12 @@
 #include <stdint.h>
 enum BtnActionId {
   BA_NONE = 0, BA_NEXT_PAGE, BA_PREV_PAGE, BA_NEXT_GAUGE, BA_GOTO_PAGE, BA_DIM, BA_BRIGHT, BA_COLOR,
-  BA_RACE, BA_CLEAR_WARNING, BA_LOG_MARK, BA_SHOW_IP, BA_COUNT   // new actions go before BA_COUNT, never in between
+  BA_RACE, BA_CLEAR_WARNING, BA_LOG_MARK, BA_SHOW_IP, BA_OLED_NEXT, BA_COUNT   // new actions go before BA_COUNT, never in between
 };
 // Names for the pop-up and the page (index = BtnActionId).
 static const char *const BA_NAMES[BA_COUNT] = {
   "Nothing", "Next page", "Previous page", "Next gauge (choose screen)", "Go to page", "Dim all", "Brighten all",
-  "Color scheme", "Race mode", "Clear warning", "Log marker", "Show IP addresses"
+  "Color scheme", "Race mode", "Clear warning", "Log marker", "Show IP addresses", "OLED next page"
 };
 #define BTN_INPUTS 3     // 0 = left button, 1 = right button, 2 = both
 #define BTN_LEVELS 6     // 0 = short press, then held 1, 2, 3, 5, 10 s

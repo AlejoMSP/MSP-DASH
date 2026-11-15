@@ -79,6 +79,7 @@ for each page, and that a failed save shows the board's own explanation.
 - `hub_typecheck.sh`: compile check of the whole hub sketch against stubs (stubs_hub/ + stubs/), with the shared headers copied in as the flash command does.
 - `test_oled_panel.cpp`: the OLED warning panel: lit rules, grid, blink, idle clock, defaults vs icons.txt. Build: `g++ -std=c++17 -I../../esp32-input test_oled_panel.cpp`
 - `test_hub_oled_page.js`: the hub /oled page.
+- `test_oled_pages.cpp`: OLED pages drawn (big number, values, G-meter, clock), lamp takeover, defaults. Build: `g++ -std=c++17 -I../../esp32-input test_oled_pages.cpp`
 - `test_imu_math.cpp`: accelerometer mounting axes, signs, zero, smoothing. Build: `g++ -std=c++17 -I../../esp32-input test_imu_math.cpp`
 - `test_btn_logic.cpp`: hub button events (press, holds of 1-10 s, both, bounce), which binding runs, the defaults and the screen order. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_btn_logic.cpp`
 - `hub_page.js`: helper that rebuilds a hub page from its raw-string pieces and the HUB_NAV macros.
