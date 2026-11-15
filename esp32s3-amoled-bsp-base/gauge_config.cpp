@@ -563,6 +563,10 @@ const char *gauge_config_signal_name(SignalId sig) {
     case SIG_VSS: return "Speed";
     case SIG_GPS_SPD: return "GPS Speed";
     case SIG_GPS_SATS: return "GPS Satellites";
+    case SIG_GLAT: return "Lateral G";
+    case SIG_GLONG: return "Accel/Brake G";
+    case SIG_GVERT: return "Vertical G";
+    case SIG_YAW: return "Yaw Rate";
     case SIG_REVLIM: return "Rev Limiter Active";
     case SIG_MAINRELAY: return "Main Relay";
     case SIG_FUELPUMP: return "Fuel Pump";
@@ -603,6 +607,7 @@ float gauge_config_signal_value(SignalId sig) {
     case SIG_VSS: return g_vss_mph;
     case SIG_GPS_SPD: return g_gps_mph;
     case SIG_GPS_SATS: return g_gps_sats;
+    case SIG_GLAT: case SIG_GLONG: case SIG_GVERT: case SIG_YAW: return g_imu_val[sig - SIG_GLAT];
     default:
       if (gauge_signal_is_flag(sig)) return ((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f;
       return 0;
@@ -632,6 +637,7 @@ bool gauge_config_signal_has_data(SignalId sig) {
     case SIG_VSS: seen = g_vss_has_data; break;
     case SIG_GPS_SPD: seen = g_gps_has_data; break;
     case SIG_GPS_SATS: seen = g_sats_has_data; break;
+    case SIG_GLAT: case SIG_GLONG: case SIG_GVERT: case SIG_YAW: seen = g_imu_has[sig - SIG_GLAT]; break;
     default:
       seen = gauge_signal_is_flag(sig) && ((g_flag_seen >> (sig - SIG_FIRST_FLAG)) & 1u);
       break;

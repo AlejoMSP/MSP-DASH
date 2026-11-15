@@ -49,6 +49,8 @@ extern volatile float g_fuel_pct;
 extern volatile float g_vss_mph;
 extern volatile float g_gps_mph;
 extern volatile float g_gps_sats;
+extern volatile float g_imu_val[4];   // SIG_GLAT .. SIG_YAW, from the hub
+extern volatile bool g_imu_has[4];
 
 // Set true the first time a real CAN frame updates each signal - until
 // then, that cell's needle sweeps back and forth within its range

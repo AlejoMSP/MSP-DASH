@@ -173,6 +173,7 @@ static void applyPacket(const LinkPacket *p) {
   PUT(SIG_VSS, g_vss_mph, g_vss_has_data)
   PUT(SIG_GPS_SPD, g_gps_mph, g_gps_has_data)
   PUT(SIG_GPS_SATS, g_gps_sats, g_sats_has_data)
+  for (int k = 0; k < 4; k++) PUT(SIG_GLAT + k, g_imu_val[k], g_imu_has[k])
   #undef PUT
   uint16_t bits = 0, seen = 0;
   for (int i = 0; i < SIG_FLAG_COUNT && SIG_FIRST_FLAG + i < n; i++) {

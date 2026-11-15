@@ -48,6 +48,11 @@ typedef enum {
   SIG_C9, SIG_C10, SIG_C11, SIG_C12, SIG_C13, SIG_C14, SIG_C15, SIG_C16,
   SIG_CLOCK,       // local time from the hub's GPS (screen_clock.h): value = minutes since midnight. A number gauge
                    // shows it as a clock; its "decimals" picks the style: 0 = 2:32 PM, 1 = 14:32, 2 = 14:32:05
+  // ---- accelerometer / gyro (MPU6050 on the hub's I2C bus), car axes after the mounting setup on the hub ----
+  SIG_GLAT,        // lateral G: + = turning left (the car accelerating to its left), - = turning right
+  SIG_GLONG,       // longitudinal G: + = accelerating, - = braking
+  SIG_GVERT,       // vertical G, 0 at rest (gravity removed by the zeroing)
+  SIG_YAW,         // yaw rate, degrees per second, + = turning left
   SIG_COUNT
 } SignalId;
 

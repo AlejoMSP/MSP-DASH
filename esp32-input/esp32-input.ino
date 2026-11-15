@@ -39,10 +39,12 @@
 #include "rf_cc1101.h"      // CC1101 433 MHz listen mode (tire sensors), the /rf page
 #include "oled_panel.h"      // warning-light panel on the SSD1306 OLED (host-tested)
 #include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
+#include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
+#include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 35
+#define INPUT_BUILD 36
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -78,6 +80,7 @@ static volatile uint32_t s_seenMs[SIG_COUNT];
 #define SRC_HUB_FUEL 0xFFFF0003u   // fuel pot / sender
 #define SRC_HUB_SIM  0xFFFF0004u   // the bench simulator
 #define SRC_HUB_GPS  0xFFFF0006u   // GPS
+#define SRC_HUB_IMU  0xFFFF0007u   // MPU6050 accelerometer
 static volatile uint32_t s_srcId[SIG_COUNT];
 // Called by the CAN decoder (can_parsing.h, can_flags.h) from the CAN task: the source is the frame being decoded.
 // The simulator calls it too (from loop()); its values are tagged as coming from the simulator.
@@ -91,6 +94,8 @@ extern "C" bool gauge_config_signal_has_data(SignalId sig) {
   return sig > 0 && sig < SIG_COUNT && s_seenMs[sig] && millis() - s_seenMs[sig] < STALE_MS;
 }
 // ---- custom sensor slots (custom_slots.h): set up on /custom, saved in NVS, names sent to the screens ----
+volatile float g_imu_val[4];   // SIG_GLAT .. SIG_YAW (imu_math.h)
+volatile bool g_imu_has[4];
 volatile float g_custom_val[CUSTOM_SLOTS];
 volatile bool g_custom_has[CUSTOM_SLOTS];
 static CustomSlotConfig s_slots[CUSTOM_SLOTS];
@@ -140,6 +145,7 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
     case SIG_AMBT: return g_ambt_f;  case SIG_HUM: return g_hum_pct;
     case SIG_FUEL: return g_fuel_pct;  case SIG_VSS: return g_vss_mph;
     case SIG_GPS_SPD: return g_gps_mph; case SIG_GPS_SATS: return g_gps_sats;
+    case SIG_GLAT: case SIG_GLONG: case SIG_GVERT: case SIG_YAW: return g_imu_val[sig - SIG_GLAT];
     default: return gauge_signal_is_flag(sig) ? (((g_flag_bits >> (sig - SIG_FIRST_FLAG)) & 1u) ? 1.0f : 0.0f) : 0.0f;
   }
 }
@@ -494,15 +500,47 @@ static bool inputLow(int in) {
   if (in >= OLED_IN_PCF0 && in < OLED_IN_PCF1 + 8) { int e = in >= OLED_IN_PCF1, b = (in - OLED_IN_PCF0) % 8; return s_pcfOk[e] && !((s_pcfBits[e] >> b) & 1); }
   return false;
 }
+// ---- accelerometer (MPU6050) on the same wires: 50 Hz, car axes from the mounting setup on the home page ----
+static ImuConfig s_imuCfg;
+static bool s_imuOk = false;
+static volatile float s_imuRaw[4];        // car frame before the zero (shown on the page, used for zeroing)
+static volatile int s_imuZeroLeft = 0;    // samples still to average for a zero (0 = not zeroing)
+static float s_imuSum[4];
+static void imuLoad() {
+  Preferences p; p.begin("imu", true);
+  if (p.getBytes("cfg", &s_imuCfg, sizeof s_imuCfg) != sizeof s_imuCfg || s_imuCfg.version != IMU_CFG_VERSION || !imu_axes_valid(s_imuCfg.fwd, s_imuCfg.left)) imu_defaults(&s_imuCfg);
+  p.end();
+}
+static void imuSave() { s_imuCfg.version = IMU_CFG_VERSION; Preferences p; p.begin("imu", false); p.putBytes("cfg", &s_imuCfg, sizeof s_imuCfg); p.end(); }
+static void imuStep() {
+  float acc[3], gyro[3], raw[4], out[4];
+  if (!imuRead(acc, gyro)) return;
+  imu_car_frame(&s_imuCfg, acc, gyro, raw);
+  for (int i = 0; i < 4; i++) s_imuRaw[i] = raw[i];
+  if (s_imuZeroLeft > 0) {   // zeroing: average one second of readings with the car still
+    for (int i = 0; i < 4; i++) s_imuSum[i] += raw[i];
+    if (--s_imuZeroLeft == 0) { for (int i = 0; i < 4; i++) s_imuCfg.zero[i] = s_imuSum[i] / 50.0f; s_imuCfg.zeroed = 1; imuSave(); }
+  }
+  imu_apply(&s_imuCfg, raw, out);
+  if (simOwns()) return;   // the simulator feeds these while it runs
+  for (int i = 0; i < 4; i++) { g_imu_val[i] = imu_smooth(g_imu_val[i], out[i], 0.17f); markLocal((SignalId)(SIG_GLAT + i), SRC_HUB_IMU); }
+}
+
 static void oledTask(void *) {
   s_oledOk = oledBegin();   // starts Wire on GPIO 5 / 15
+  s_imuOk = imuBegin();
+  Serial.printf("Accelerometer: %s\n", s_imuOk ? "MPU6050 found" : "not found (SDA GPIO 5, SCL GPIO 15, 3.3 V)");
   for (int e = 0; e < 2; e++) {   // PCF8574 expanders: writing 0xFF makes every pin an input with its weak pull-up
     Wire.beginTransmission(0x20 + e); Wire.write(0xFF); s_pcfOk[e] = Wire.endTransmission() == 0;
   }
   Serial.printf("OLED: %s | expanders: 0x20 %s, 0x21 %s\n", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)",
                 s_pcfOk[0] ? "found" : "-", s_pcfOk[1] ? "found" : "-");
   int lastContrast = -1;
+  uint32_t tick = 0;
   for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(20));   // 50 Hz: the accelerometer every pass, the panel every 10th
+    if (s_imuOk) imuStep();
+    if (++tick % 10) continue;
     for (int e = 0; e < 2; e++) if (s_pcfOk[e] && Wire.requestFrom((uint8_t)(0x20 + e), (uint8_t)1) == 1) s_pcfBits[e] = Wire.read();
     uint8_t st[OLED_LAMPS];
     for (int i = 0; i < OLED_LAMPS; i++) {
@@ -526,7 +564,6 @@ static void oledTask(void *) {
       if (abs(contrast - lastContrast) > 4) { oledContrast((uint8_t)contrast); lastContrast = contrast; }
       oledShow(s_oledBuf);
     }
-    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 
@@ -793,6 +830,26 @@ static void setupWeb() {
     oledSave(); server.send(200, "text/plain", "Saved");
   });
   server.on("/oled/defaults", HTTP_GET, []() { oled_defaults(&s_oled); oledSave(); server.send(200, "text/plain", "Back to the defaults"); });
+  // ---- accelerometer (/imu.json, /imu/set, /imu/zero) ----
+  server.on("/imu.json", HTTP_GET, []() {
+    char b[360];
+    snprintf(b, sizeof b, "{\"found\":%s,\"fwd\":%d,\"left\":%d,\"zeroed\":%s,\"zeroing\":%s,\"lat\":%.2f,\"lon\":%.2f,\"vert\":%.2f,\"yaw\":%.1f,\"raw\":[%.3f,%.3f,%.3f,%.2f]}",
+             s_imuOk ? "true" : "false", s_imuCfg.fwd, s_imuCfg.left, s_imuCfg.zeroed ? "true" : "false", s_imuZeroLeft > 0 ? "true" : "false",
+             (double)g_imu_val[0], (double)g_imu_val[1], (double)g_imu_val[2], (double)g_imu_val[3], (double)s_imuRaw[0], (double)s_imuRaw[1], (double)s_imuRaw[2], (double)s_imuRaw[3]);
+    server.send(200, "application/json", b);
+  });
+  server.on("/imu/set", HTTP_GET, []() {
+    int f = server.arg("fwd").toInt(), l = server.arg("left").toInt();
+    if (!imu_axes_valid(f, l)) { server.send(400, "text/plain", "Forward and left must be two different axes"); return; }
+    s_imuCfg.fwd = f; s_imuCfg.left = l; s_imuCfg.zeroed = 0; imuSave();   // a new mounting needs a new zero
+    server.send(200, "text/plain", "Saved - now park on level ground and press Zero");
+  });
+  server.on("/imu/zero", HTTP_GET, []() {
+    if (!s_imuOk) { server.send(400, "text/plain", "No accelerometer found"); return; }
+    for (int i = 0; i < 4; i++) s_imuSum[i] = 0;
+    s_imuZeroLeft = 50;
+    server.send(200, "text/plain", "Zeroing: keep the car still for a second");
+  });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];
     portENTER_CRITICAL(&s_scrMux); memcpy(snap, s_screens, sizeof snap); portEXIT_CRITICAL(&s_scrMux);
@@ -923,6 +980,7 @@ void setup() {
   bindLoad();    // button actions (/buttons)
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
+  imuLoad();     // accelerometer mounting and zero
   // CAN: the hub is now the only CAN reader; the screens are all remotes
   twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g.rx_queue_len = 64;

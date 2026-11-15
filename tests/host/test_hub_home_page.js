@@ -10,7 +10,7 @@ const screens = [{ name: "Right", online: true, ip: "192.168.55.233", build: 185
                  { name: "Center", online: true, ip: "192.168.55.231", build: 185, mac: "80:45:6B:33:96:CC", age: 100 },
                  { name: "Left", online: false, ip: "192.168.55.232", build: 184, mac: "80:45:6B:33:94:40", age: 90000 }];
 const ctx = { document: { getElementById: el }, setInterval: () => 0, console,
-  fetch: async u => ({ json: async () => u === "/state" ? state : u === "/screens.json" ? screens : u === "/speed.json" ? { ecuok: true, ecumph: 0, gpsok: true, fix: false, sats: 3 } : null, text: async () => "" }) };
+  fetch: async u => ({ json: async () => u === "/state" ? state : u === "/screens.json" ? screens : u === "/speed.json" ? { ecuok: true, ecumph: 0, gpsok: true, fix: false, sats: 3 } : u === "/imu.json" ? { found: true, fwd: -1, left: 3, zeroed: false, zeroing: false, lat: 0.82, lon: -0.31, vert: 0.02, yaw: 24.5, raw: [0, 0, 1, 0] } : null, text: async () => "" }) };
 vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
 (async () => {
   await settle();
@@ -23,6 +23,9 @@ vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
   check(/ECU<\/b>rusEFI/.test(st) && /Signals live<\/b>25/.test(st) && /build 30/.test(st), "status grid: ECU, signals, hub build");
   check(/77 F/.test(el("sens").innerHTML) && /38 %/.test(el("sens").innerHTML), "hub sensors: ambient and fuel");
   check(/100 % now/.test(el("brisum").textContent), "brightness folded away, with a one-line summary");
+  { const m = el("imu").innerHTML;
+    check(/Lateral<\/b>0.82 G/.test(m) && /Accel \/ brake<\/b>-0.31 G/.test(m) && /Yaw rate<\/b>24.5 deg\/s/.test(m) && /not yet/.test(m), "accelerometer card: G values, yaw, zero not taken yet");
+    check(el("ifwd").value === "-1" && el("ileft").value === "3" && /\+Z<\/option>/.test(el("ifwd").innerHTML), "mounting boxes show the saved axes (-X front, +Z left)"); }
   for (const p of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML"]) {
     const h = hubPage(p);
     check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /\.nav\{/.test(h), p + " has the navigation bar (with OLED)");

@@ -17,6 +17,7 @@ bool g_ffat_mounts = true;
 FFatClass FFat;
 void *heap_caps_malloc(size_t n, int) { return malloc(n); }
 volatile float g_rpm, g_clt_f, g_boost_psi, g_afr, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph, g_gps_mph, g_gps_sats;
+volatile float g_imu_val[4]; volatile bool g_imu_has[4];
 volatile bool g_rpm_has_data, g_clt_has_data, g_boost_has_data, g_afr_has_data, g_oilp_has_data, g_oilt_has_data,
               g_fuelp_has_data, g_flex_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data, g_gps_has_data, g_sats_has_data;
 volatile uint16_t g_flag_bits, g_flag_seen;
@@ -61,7 +62,7 @@ int main() {
 
   printf("3. packets fit ESP-NOW\n");
   CHECK(sizeof(SlotsPacket) <= 250 && sizeof(LinkPacket) <= 250, "MSN1 and MSD1 are 250 bytes or less");
-  CHECK(SIG_COUNT == 45 && SIG_C16 == 43 && SIG_C1 == 28 && SIG_CLOCK == 44, "16 custom slots after the 27 fixed signals, then the clock (45 in all)");
+  CHECK(SIG_COUNT == 49 && SIG_C16 == 43 && SIG_C1 == 28 && SIG_CLOCK == 44 && SIG_YAW == 48, "16 custom slots after the 27 fixed signals, the clock, 4 accelerometer (49 in all)");
   CHECK(sizeof(((LinkPacket *)0)->has_mask) == 8, "the data packet's has-data mask is 64 bits");
 
   printf("4. the screen keeps the names from the hub\n");

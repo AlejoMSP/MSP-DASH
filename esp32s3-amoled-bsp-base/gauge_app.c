@@ -58,6 +58,8 @@ volatile float g_fuel_pct = 0;
 volatile float g_vss_mph = 0;
 volatile float g_gps_mph = 0;
 volatile float g_gps_sats = 0;
+volatile float g_imu_val[4] = {0, 0, 0, 0};
+volatile bool g_imu_has[4] = {false, false, false, false};
 
 volatile bool g_afr_has_data = false;
 volatile bool g_clt_has_data = false;

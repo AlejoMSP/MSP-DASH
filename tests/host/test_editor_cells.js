@@ -44,7 +44,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(r =>
   { const block = STYLE.match(/#define GAUGE_DEFAULT_RANGES\(X\)([\s\S]*?)\n\n/)[1];
     const fw = {}; for (const m of block.matchAll(/X\((SIG_[A-Z0-9_]+),\s*(-?\d+),\s*(-?\d+),\s*(\d),\s*(-?\d+),\s*(\d)\)/g)) fw[ENUM.indexOf(m[1])] = [+m[2], +m[3], +m[4], +m[5], +m[6]];
     const js = probe.run('JSON.stringify(SIGNAL_DEFAULT_RANGES)');
-    check(Object.keys(fw).length === 18 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's gauge templates are EXACTLY the firmware's list: " + js);
+    check(Object.keys(fw).length === 22 && JSON.stringify(Object.fromEntries(Object.entries(fw).sort((a, b) => a[0] - b[0]))) === JSON.stringify(JSON.parse(js)), "the editor's gauge templates are EXACTLY the firmware's list: " + js);
     check(fw[4].join() === "10,20,0,0,1" && fw[2].join() === "40,300,1,230,1" && fw[10].join() === "8,16,1,12,0" && fw[5].join() === "0,100,1,10,0", "AFR 10-20; coolant 40-300 F warn above 230; battery 8-16 V warn below 12; oil pressure 0-100 psi warn below 10");
     check(fw[3].join() === "-15,30,0,0,1", "MAP is boost psi: -15 (vacuum) to 30");
     check(Object.keys(fw).every(k => !(+k >= 11 && +k <= 19)), "the ECU on/off flags have no template"); }

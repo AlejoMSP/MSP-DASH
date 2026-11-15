@@ -25,6 +25,12 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <div class="card"><h3>Status</h3><div class="grid" id="stat"></div></div>
 <div class="card"><h3>Sensors on the hub</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
+<div class="card"><h3>Accelerometer</h3><div class="grid" id="imu"></div>
+<details><summary class="note">Mounting and zero</summary>
+<p class="note">MPU6050 on the OLED wires: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). Mount it solid to the chassis. Say which arrow printed on the module points to the front and which to the left, then park on level ground, engine running, and press Zero.</p>
+<div class="row"><label>Points to the front<select id="ifwd"></select></label><label>Points to the left<select id="ileft"></select></label></div>
+<div class="row"><button type="button" onclick="imuSet()">Save mounting</button><button type="button" onclick="imuZero()">Zero (car still and level)</button></div>
+<span id="imsg" class="note"></span></details></div>
 <div class="card"><details><summary><b>Clock</b> <span class="note" id="clk"></span></summary>
 <p class="note">From the GPS. The screens name their log files by it and stamp each row with it.</p>
 <label>Time zone<select id="tzstd"><option value="-300">Eastern</option><option value="-360">Central</option><option value="-420">Mountain</option><option value="-480">Pacific</option><option value="-540">Alaska</option><option value="-600">Hawaii</option><option value="0">UTC</option></select></label>
@@ -67,7 +73,16 @@ kv("Speed (rusEFI)",ecu)+kv("GPS",gps)+kv("Speed difference",cmp);}catch(e){}}
 async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
 if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
 async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
-poll();setInterval(poll,1000);scr();setInterval(scr,1000);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
+const AX=[[1,"+X"],[-1,"-X"],[2,"+Y"],[-2,"-Y"],[3,"+Z"],[-3,"-Z"]];
+["ifwd","ileft"].forEach(id=>{const e=$(id);if(e)e.innerHTML=AX.map(a=>'<option value="'+a[0]+'">'+a[1]+'</option>').join("");});
+async function imu(){try{const m=await (await fetch("/imu.json")).json();
+if(!m.found){$("imu").innerHTML=kv("Status","not found");return;}
+$("imu").innerHTML=kv("Lateral",m.lat.toFixed(2)+" G")+kv("Accel / brake",m.lon.toFixed(2)+" G")+kv("Vertical",m.vert.toFixed(2)+" G")+kv("Yaw rate",m.yaw.toFixed(1)+" deg/s")+
+ kv("Zero",m.zeroing?"zeroing...":m.zeroed?"done":"<span style=color:#ffb300>not yet</span>");
+if(!imu.done){$("ifwd").value=String(m.fwd);$("ileft").value=String(m.left);imu.done=1;}}catch(e){}}
+async function imuSet(){$("imsg").textContent=await (await fetch("/imu/set?fwd="+$("ifwd").value+"&left="+$("ileft").value)).text();}
+async function imuZero(){$("imsg").textContent=await (await fetch("/imu/zero")).text();}
+poll();setInterval(poll,1000);imu();setInterval(imu,500);scr();setInterval(scr,1000);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>
@@ -86,7 +101,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites"};
+20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const UNIT={1:"rpm",2:"F",3:"psi",4:"",5:"psi",6:"F",7:"psi",8:"%",9:"%",10:"V",20:"F",21:"F",22:"F",23:"%",24:"%",25:"mph",26:"mph",27:"sats"};
 const DEC={1:0,2:0,3:0,4:1,5:0,6:0,7:0,8:0,9:0,10:1,20:0,21:0,22:1,23:0,24:0,25:0,26:0,27:0};
 const HUB={4294901761:"MAX6675 thermocouple (GPIO 18/19/23)",4294901762:"DHT22 (GPIO 4)",4294901763:"Fuel sender pot (GPIO 36)",4294901764:"Bench simulator (FAKE)",4294901766:"GT-U7 GPS (GPIO 16/17, R17/R16)"};
@@ -121,7 +136,7 @@ static const char SIM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta n
 <script>
 const NAME={1:"RPM",2:"Coolant Temp (F)",3:"Boost (psi)",4:"AFR",5:"Oil Pressure (psi)",6:"Oil Temp (F)",7:"Fuel Pressure (psi)",8:"Ethanol %",9:"Throttle %",10:"Battery (V)",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
-20:"EGT (F)",21:"Intake Air Temp (F)",22:"Ambient Temp (F)",23:"Humidity %",24:"Fuel Level %",25:"Speed (mph)",26:"GPS Speed (mph)",27:"GPS Satellites"};
+20:"EGT (F)",21:"Intake Air Temp (F)",22:"Ambient Temp (F)",23:"Humidity %",24:"Fuel Level %",25:"Speed (mph)",26:"GPS Speed (mph)",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 let info=null,building="",sending=false,pending=null;
 function setMsg(t,bad){const m=document.getElementById("msg");m.textContent=t;m.className=bad?"bad":"";}
 async function post(p){const r=await fetch("/sim",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(p).toString()});
@@ -314,7 +329,7 @@ select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;
 <p class="note">Inputs: GPIO 2 (R20), GPIO 12 (L18, must not be held HIGH at power-up), GPIO 0 (R19, the BOOT button, must not be held LOW at power-up), and up to two PCF8574 expanders (8 inputs each, address 0x20 and 0x21) on the OLED's two wires (SDA GPIO 5 / R15, SCL GPIO 15 / R21, 3.3 V). Every input has a pull-up: wire a switch to ground and pick "lit when LOW".</p></div>
 <script>
 )HTML" OLED_ICONS_JS R"HTML(
-const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites"};
+const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
 const $=id=>document.getElementById(id);let cfg=null;
 const OPS=["Is on","Above","Below","Input wire"],STATE=["off","WARNING","DANGER"];
 const INPUTS=[[1,"GPIO 2 (R20)"],[2,"GPIO 12 (L18)"],[3,"GPIO 0 (R19, BOOT)"]];

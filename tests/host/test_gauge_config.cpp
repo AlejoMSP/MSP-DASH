@@ -32,6 +32,7 @@ bool g_ffat_mounts = true;
 FFatClass FFat;
 void *heap_caps_malloc(size_t n, int) { return malloc(n); }
 volatile float g_afr, g_clt_f, g_oilp_psi, g_oilt_f, g_fuelp_psi, g_flex_pct, g_boost_psi, g_rpm, g_tps, g_battv, g_egt_f, g_iat_f, g_ambt_f, g_hum_pct, g_fuel_pct, g_vss_mph, g_gps_mph, g_gps_sats;
+volatile float g_imu_val[4]; volatile bool g_imu_has[4];
 volatile bool g_afr_has_data, g_clt_has_data, g_oilp_has_data, g_oilt_has_data, g_fuelp_has_data,
               g_flex_has_data, g_boost_has_data, g_rpm_has_data, g_tps_has_data, g_battv_has_data, g_egt_has_data, g_iat_has_data, g_ambt_has_data, g_hum_has_data, g_fuel_has_data, g_vss_has_data, g_gps_has_data, g_sats_has_data;
 volatile int g_requested_page = -1;
@@ -291,7 +292,7 @@ int main(int argc, char **argv) {
   {
     static const char *NAMES[9] = { "Rev Limiter Active", "Main Relay", "Fuel Pump", "Check Engine Light", "O2 Heater", "Lambda Protection", "Fan 1", "Fan 2", "Brake Pedal" };
     bool namesOk = true; for (int i = 0; i < 9; i++) if (strcmp(gauge_config_signal_name((SignalId)(SIG_FIRST_FLAG + i)), NAMES[i]) != 0) namesOk = false;
-    CHECK(namesOk && SIG_COUNT == 45 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (45 signals in all: 16 custom slots, then the clock)");
+    CHECK(namesOk && SIG_COUNT == 49 && SIG_FLAG_COUNT == 9, "nine flag signals with readable names (49 signals in all: 16 custom slots, the clock, 4 accelerometer)");
     CHECK(!gauge_signal_is_flag(SIG_BATTV) && gauge_signal_is_flag(SIG_REVLIM) && gauge_signal_is_flag(SIG_BRAKE) && !gauge_signal_is_flag(SIG_COUNT) && !gauge_signal_is_flag(SIG_EGT) && !gauge_signal_is_flag(SIG_IAT) && !gauge_signal_is_flag(SIG_AMBT) && !gauge_signal_is_flag(SIG_HUM) && !gauge_signal_is_flag(SIG_FUEL) && !gauge_signal_is_flag(0), "which signals are flags");
     g_fake_millis = 50000; g_flag_bits = 0; g_flag_seen = 0;
     CHECK(!gauge_config_signal_has_data(SIG_FAN) && gauge_config_signal_value(SIG_FAN) == 0.0f, "before any frame: no data");

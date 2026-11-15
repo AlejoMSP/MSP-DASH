@@ -67,3 +67,9 @@ Not on the hub: hall speed sensor (wired to rusEFI).
 | PCF8574 0x21 P0-P7 | same wires | 8 more; A0 to 3.3 V, A1-A2 to GND |
 
 All inputs are pulled up: wire each switch to ground and pick "lit when LOW".
+
+## Accelerometer (hub build 36)
+
+MPU6050 module on the same two wires as the OLED: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). AD0 open =
+address 0x68 (AD0 to 3.3 V = 0x69). INT not used. Mount it solid to the chassis (not the dash plastic), any way round:
+tell the hub home page which printed arrow points to the front and which to the left, then Zero it parked on level ground.

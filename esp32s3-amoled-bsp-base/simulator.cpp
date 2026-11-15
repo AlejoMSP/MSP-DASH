@@ -65,6 +65,8 @@ SimRange sim_range(int sig) {
     case SIG_VSS: return {0, 160, 1};
     case SIG_GPS_SPD: return {0, 160, 1};
     case SIG_GPS_SATS: return {0, 20, 1};
+    case SIG_GLAT: case SIG_GLONG: case SIG_GVERT: return {-2, 2, 0.05f};
+    case SIG_YAW: return {-120, 120, 1};
     default:        return gauge_signal_is_flag(sig) ? SimRange{0, 1, 1} : SimRange{0, 0, 1};   // an on/off flag: 0 or 1
   }
 }
@@ -151,6 +153,7 @@ static void writeValues(const float *v) {
   g_vss_mph = v[SIG_VSS];     g_vss_has_data = true;   gauge_config_mark_signal_active(SIG_VSS);
   g_gps_mph = v[SIG_GPS_SPD]; g_gps_has_data = true;   gauge_config_mark_signal_active(SIG_GPS_SPD);
   g_gps_sats = v[SIG_GPS_SATS]; g_sats_has_data = true; gauge_config_mark_signal_active(SIG_GPS_SATS);
+  for (int k = 0; k < 4; k++) { g_imu_val[k] = v[SIG_GLAT + k]; g_imu_has[k] = true; gauge_config_mark_signal_active((SignalId)(SIG_GLAT + k)); }
   for (int i = 0; i < CUSTOM_SLOTS; i++) { g_custom_val[i] = v[SIG_C1 + i]; g_custom_has[i] = true; gauge_config_mark_signal_active((SignalId)(SIG_C1 + i)); }
 
   uint16_t bits = 0;
