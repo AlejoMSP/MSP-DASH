@@ -5,9 +5,11 @@
 #include <Arduino.h>
 #include "oled_icons.h"   // OLED_ICONS_JS for the /oled page
 
-// The navigation bar on every hub page (HUB_NAV, styled by HUB_NAV_STYLE inside each page's <style>).
-#define HUB_NAV_STYLE ".nav{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px;padding:6px;background:#0b1a1d;border-radius:8px;position:sticky;top:0;z-index:5}\n.nav a{color:#4dd0e1;text-decoration:none;padding:6px 10px;border-radius:5px;font-size:14px}.nav a:hover{background:#1d2b2e}"
-#define HUB_NAV "<div class=\"nav\"><a href=\"/\">Hub</a><a href=\"/sensors\">Sensors</a><a href=\"/custom\">Custom sensors</a><a href=\"/buttons\">Buttons</a><a href=\"/simulator\">Simulator</a><a href=\"/oled\">OLED</a><a href=\"/rf\">433 MHz</a><a href=\"/can\">Raw CAN</a><a href=\"/update\">Firmware</a></div>"
+// The side menu on every hub page (HUB_NAV, styled by HUB_NAV_STYLE inside each page's <style>): grouped by task, a
+// drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
+// onerror of a 1-pixel image, so the menu adds no <script> to the page.
+#define HUB_NAV_STYLE "*{box-sizing:border-box}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:8px;left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:48px!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Hub</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
@@ -20,7 +22,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.kv{background:#000;border-radius:6px;padding:8px}
 .kv b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:2px}details summary{cursor:pointer;color:#4dd0e1}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
-<h2>MSP-DASH Hub</h2>
+<h2>Dashboard</h2>
 <div class="card"><h3>Screens</h3><div id="scr">Waiting for screens...</div></div>
 <div class="card"><h3>Status</h3><div class="grid" id="stat"></div></div>
 <div class="card"><h3>Sensors on the hub</h3><div class="grid" id="sens"></div>
@@ -64,7 +66,7 @@ const order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase
 l.sort((a,b)=>order(a.name)-order(b.name)||(a.ip<b.ip?-1:1));
 $("scr").innerHTML=l.length?l.map(s=>{const u="http://"+s.ip;return '<div class="scr"><span class="who"><span class="dot '+(s.online?'on':'off')+'"></span><b>'+(s.name||'(no name)')+'</b> '+
 (s.online?'online':'OFFLINE, last heard '+ago(s.age))+'<br><span class="note">'+s.ip+' | build '+s.build+' | '+s.mac+'</span></span>'+
-'<a class="btn" href="'+u+'/">Live</a><a class="btn" href="'+u+'/gauges">Gauges</a><a class="btn" href="'+u+'/log-channels">Logging</a><a class="btn" href="'+u+'/sd">SD card</a><a class="btn" href="'+u+'/settings">Settings</a></div>';}).join(''):
+(()=>{const q="/screen?s="+encodeURIComponent(s.name||s.ip)+"&p=";return '<a class="btn" href="'+q+'">Live</a><a class="btn" href="'+q+'gauges">Gauges</a><a class="btn" href="'+q+'log-channels">Logging</a><a class="btn" href="'+q+'sd">SD card</a><a class="btn" href="'+q+'settings">Settings</a></div>';})();}).join(''):
 'No screens heard yet. Screens set to main do not say hello.';}catch(e){}}
 async function spd(){try{const g=await (await fetch("/speed.json")).json();
 const gps=!g.gpsok?"not connected":!g.fix?"no fix ("+g.sats+" sats)":g.gpsmph.toFixed(1)+" mph, "+g.sats+" sats";
@@ -399,4 +401,64 @@ function savePage(i){const p=pg.pages[i],q={i:i,type:$("pt"+i).value,count:$("pc
 const addPage=()=>pcall("/oled/page/add"),delPage=i=>pcall("/oled/page/del?i="+i),movePage=(i,d)=>pcall("/oled/page/move?i="+i+"&d="+d),showPage=i=>pcall("/oled/page/show?i="+i);
 const pageOpts=()=>pcall("/oled/pageopts?cycle="+$("cyc").value+"&takeover="+($("tko").checked?1:0)),pagesDefaults=()=>pcall("/oled/pages/defaults"),peakReset=()=>pcall("/oled/peak/reset");
 load();loadPages();live();setInterval(live,700);
+</script></body></html>)HTML";
+// /screen: one screen's own pages (live view, gauge editor, logging, SD card, settings) inside the hub's site, with a
+// Left / Center / Right picker, so no screen address has to be typed. ?s=<screen name>&p=<page>.
+static const char SCREEN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Screens</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;margin:0;padding:12px}h2{color:#4dd0e1;margin:4px 0 10px}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}.bar button{background:#1d2b2e;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;padding:7px 12px;font-size:14px}
+.bar button.on{background:#4dd0e1;color:#000;font-weight:bold}.bar button:disabled{opacity:.4}.sep{width:12px}
+iframe{width:100%;height:calc(100vh - 130px);border:1px solid #222;border-radius:8px;background:#000}.note{color:#888;font-size:13px}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Screens</h2>
+<div class="bar" id="who"></div>
+<div class="bar" id="tabs"></div>
+<div class="note" id="where"></div>
+<iframe id="fr" src="about:blank"></iframe>
+<script>
+const TABS=[["","Live"],["gauges","Gauges"],["log-channels","Logging"],["sd","SD card"],["settings","Settings"]];
+const q=new URLSearchParams(location.search);let cur=q.get("s")||"",page=q.get("p")||"gauges",list=[];
+const $=id=>document.getElementById(id),order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
+function show(){const s=list.find(x=>(x.name||x.ip)===cur)||list[0];if(!s){$("where").textContent="No screens heard yet.";return;}
+ cur=s.name||s.ip;history.replaceState(null,"","/screen?s="+encodeURIComponent(cur)+"&p="+page);
+ $("who").innerHTML=list.map(x=>'<button class="'+((x.name||x.ip)===cur?"on":"")+'" onclick="pick(\''+(x.name||x.ip).replace(/'/g,"")+'\')">'+(x.name||x.ip)+(x.online?"":" (offline)")+'</button>').join("");
+ $("tabs").innerHTML=TABS.map(t=>'<button class="'+(t[0]===page?"on":"")+'" onclick="tab(\''+t[0]+'\')">'+t[1]+'</button>').join("");
+ const u="http://"+s.ip+"/"+page;$("where").innerHTML=(s.online?"":"<b style=color:#ff6b6b>Offline</b> - ")+s.ip+" | build "+s.build+' | <a style="color:#4dd0e1" href="'+u+'" target="_blank">open on its own</a>';
+ if($("fr").src!==u)$("fr").src=u;}
+function pick(n){cur=n;show();}function tab(p){page=p;show();}
+async function load(){try{list=await (await fetch("/screens.json")).json();list.sort((a,b)=>order(a.name)-order(b.name)||(a.ip<b.ip?-1:1));show();}catch(e){$("where").textContent="Could not reach the hub";}}
+load();
+</script></body></html>)HTML";
+
+// /can: every CAN frame the hub hears, live.
+static const char CAN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Raw CAN</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:900px;padding:12px}h2{color:#4dd0e1}td,th{padding:3px 10px;font-family:monospace}th{text-align:left;color:#4dd0e1}.old{color:#666}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Raw CAN</h2><div id="s"></div><table><thead><tr><th>ID</th><th>Bytes</th><th>Count</th><th>Age ms</th></tr></thead><tbody id="t"></tbody></table>
+<script>
+const ST=['stopped','running','bus-off','recovering'];
+async function u(){try{const r=await fetch('/can.json');const j=await r.json();
+document.getElementById('s').textContent='Frames: '+j.total+' | bus: '+(ST[j.state]||'?')+' | rx errors: '+j.rxerr+' | missed: '+j.missed;
+j.ids.sort((a,b)=>a.id-b.id);document.getElementById('t').innerHTML=j.ids.map(e=>'<tr class='+(e.age>2000?'old':'')+'><td>0x'+e.id.toString(16).toUpperCase().padStart(3,'0')+'</td><td>'+e.d+'</td><td>'+e.n+'</td><td>'+e.age+'</td></tr>').join('');}catch(x){}}
+setInterval(u,500);u();
+</script></body></html>)HTML";
+
+// /firmware: every board's build in one table; the hub's own update form; each screen's update page.
+static const char FIRMWARE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Firmware</title>
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;padding:12px}h2{color:#4dd0e1}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;text-align:left}th{color:#4dd0e1;font-weight:normal}a{color:#4dd0e1}.note{color:#888;font-size:13px}
+input,button{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:6px}button{background:#4dd0e1;color:#000;border:0}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Firmware</h2>
+<div class="card"><table><thead><tr><th>Board</th><th>Address</th><th>Build</th><th>Status</th><th></th></tr></thead><tbody id="b"></tbody></table></div>
+<div class="card"><b>Update the hub</b><form method="POST" action="/update" enctype="multipart/form-data" style="margin-top:8px"><input type="file" name="firmware" accept=".bin"> <button>Upload</button></form>
+<p class="note">The hub restarts when the upload finishes. Usually it is quicker to use the PowerShell flash commands, which build and upload in one go.</p></div>
+<script>
+const order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
+async function load(){try{const st=await (await fetch("/state")).json(),l=await (await fetch("/screens.json")).json();
+l.sort((a,b)=>order(a.name)-order(b.name));
+let h='<tr><td><b>Hub</b></td><td>'+st.ip+'</td><td>'+st.build+'</td><td><span class="chip ok">online</span></td><td></td></tr>';
+h+=l.map(s=>'<tr><td><b>'+(s.name||"(no name)")+'</b></td><td>'+s.ip+'</td><td>'+s.build+'</td><td><span class="chip '+(s.online?"ok":"bad")+'">'+(s.online?"online":"offline")+'</span></td><td><a href="http://'+s.ip+'/update" target="_blank">update page</a></td></tr>').join("");
+document.getElementById("b").innerHTML=h;}catch(e){}}
+load();setInterval(load,3000);
 </script></body></html>)HTML";

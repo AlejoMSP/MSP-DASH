@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 194**, **hub 39**.
+Current builds: **screens 194**, **hub 40**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
@@ -46,7 +46,7 @@ expanders, two page buttons, dash dimmer and lights-on inputs. Every GPIO with i
 - OLED warning panel (`/oled`): 8 lamps with icons, WARNING and DANGER levels, signal or wire-input triggers, plus
   pages (big number, values, G-meter, clock); a lit lamp takes the screen over.
 - Bench simulator (`/simulator`) that drives every screen without the car.
-- Web pages with a nav bar: Hub, Sensors, Custom sensors, Buttons, Simulator, OLED, 433 MHz, Raw CAN, Firmware.
+- One web app at the hub's address, with a side menu: Dashboard, Screens (each screen's own pages, picked Left / Center / Right), OLED, Live and custom sensors, Buttons, Logging, Firmware, Simulator, Raw CAN, 433 MHz.
 
 ## Getting started
 

@@ -47,7 +47,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 39
+#define INPUT_BUILD 40
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -604,7 +604,7 @@ static void oledTask(void *) {
 
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
-    server.send(200, "text/html", HOME_HTML);
+    server.send_P(200, "text/html", HOME_HTML, strlen_P(HOME_HTML));
   });
   // ---- raw CAN monitor: every ID seen, latest bytes, count, age ----
   server.on("/can.json", HTTP_GET, []() {
@@ -623,18 +623,9 @@ static void setupWeb() {
     j += "]}";
     server.send(200, "application/json", j);
   });
-  server.on("/can", HTTP_GET, []() {
-    server.send(200, "text/html", F(
-      "<!doctype html><meta name=viewport content='width=device-width'><title>Hub CAN</title>"
-      "<style>body{font-family:sans-serif;background:#111;color:#eee}td,th{padding:3px 10px;font-family:monospace}th{text-align:left}.old{color:#666}</style>"
-      "<h3>Hub raw CAN</h3><div id=s></div><table><thead><tr><th>ID</th><th>Bytes</th><th>Count</th><th>Age ms</th></tr></thead><tbody id=t></tbody></table>"
-      "<p><a href='/'>Back</a></p><script>"
-      "const ST=['stopped','running','bus-off','recovering'];"
-      "async function u(){try{const r=await fetch('/can.json');const j=await r.json();"
-      "s.textContent='Frames: '+j.total+' | bus: '+(ST[j.state]||'?')+' | rx errors: '+j.rxerr+' | missed: '+j.missed;"
-      "j.ids.sort((a,b)=>a.id-b.id);t.innerHTML=j.ids.map(e=>'<tr class='+(e.age>2000?'old':'')+'><td>0x'+e.id.toString(16).toUpperCase().padStart(3,'0')+'</td><td>'+e.d+'</td><td>'+e.n+'</td><td>'+e.age+'</td></tr>').join('');}catch(e){}}"
-      "setInterval(u,500);u();</script>"));
-  });
+  server.on("/can", HTTP_GET, []() { server.send_P(200, "text/html", CAN_HTML, strlen_P(CAN_HTML)); });
+  server.on("/screen", HTTP_GET, []() { server.send_P(200, "text/html", SCREEN_HTML, strlen_P(SCREEN_HTML)); });
+  server.on("/firmware", HTTP_GET, []() { server.send_P(200, "text/html", FIRMWARE_HTML, strlen_P(FIRMWARE_HTML)); });
   // ---- sensors: every signal that has ever had data, its value, age and where it comes from ----
   server.on("/sensors.json", HTTP_GET, []() {
     uint32_t now = millis();
@@ -652,7 +643,7 @@ static void setupWeb() {
     server.send(200, "application/json", j);
   });
   server.on("/sensors", HTTP_GET, []() {
-    server.send(200, "text/html", SENSORS_HTML);
+    server.send_P(200, "text/html", SENSORS_HTML, strlen_P(SENSORS_HTML));
   });
   // ---- bench simulator (moved here from the screens in build 15; safety rules in simulator.h) ----
   server.on("/sim.json", HTTP_GET, []() {
@@ -686,10 +677,10 @@ static void setupWeb() {
     } else server.send(400, "text/plain", "Unknown command");
   });
   server.on("/simulator", HTTP_GET, []() {
-    server.send(200, "text/html", SIM_HTML);
+    server.send_P(200, "text/html", SIM_HTML, strlen_P(SIM_HTML));
   });
   // ---- custom sensor slots (/custom) ----
-  server.on("/custom", HTTP_GET, []() { server.send(200, "text/html", CUSTOM_HTML); });
+  server.on("/custom", HTTP_GET, []() { server.send_P(200, "text/html", CUSTOM_HTML, strlen_P(CUSTOM_HTML)); });
   server.on("/custom.json", HTTP_GET, []() {
     String j = "[";
     for (int i = 0; i < CUSTOM_SLOTS; i++) {
@@ -735,7 +726,7 @@ static void setupWeb() {
     server.send(200, "text/plain", "Cleared");
   });
   // ---- 433 MHz listen mode (/rf) ----
-  server.on("/rf", HTTP_GET, []() { server.send(200, "text/html", RF_HTML); });
+  server.on("/rf", HTTP_GET, []() { server.send_P(200, "text/html", RF_HTML, strlen_P(RF_HTML)); });
   server.on("/rf.json", HTTP_GET, []() {
     String j;
     j.reserve(12000);
@@ -795,7 +786,7 @@ static void setupWeb() {
     server.send(200, "text/plain", "Saved");
   });
   // ---- button actions (/buttons) ----
-  server.on("/buttons", HTTP_GET, []() { server.send(200, "text/html", BUTTONS_HTML); });
+  server.on("/buttons", HTTP_GET, []() { server.send_P(200, "text/html", BUTTONS_HTML, strlen_P(BUTTONS_HTML)); });
   server.on("/buttons.json", HTTP_GET, []() {
     String j = "{\"actions\":[";
     for (int a = 0; a < BA_COUNT; a++) { if (a) j += ","; j += "\""; j += BA_NAMES[a]; j += "\""; }

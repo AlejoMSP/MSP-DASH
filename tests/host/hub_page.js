@@ -15,5 +15,5 @@ function hubPage(name) {
   while ((m = re.exec(decl))) out += m[1] !== undefined ? m[1] : macro(m[2]);
   return out;
 }
-function hubScript(name) { const m = hubPage(name).match(/<script>([\s\S]*?)<\/script>/); return m ? m[1] : null; }
+function hubScript(name) { const m = hubPage(name).match(/<script>([\s\S]*?)<\/script>/); return m ? m[1] : null; }   // the page's own script (the menu adds none)
 module.exports = { hubPage, hubScript, SRC };

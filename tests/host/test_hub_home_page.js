@@ -16,8 +16,8 @@ vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
   await settle();
   const s = el("scr").innerHTML;
   check(s.indexOf("Left") < s.indexOf("Center") && s.indexOf("Center") < s.indexOf("Right"), "screens listed Left, Center, Right");
-  for (const [ip, p] of [["192.168.55.231", "/gauges"], ["192.168.55.231", "/log-channels"], ["192.168.55.232", "/settings"], ["192.168.55.233", "/sd"], ["192.168.55.233", "/"]])
-    check(s.includes('href="http://' + ip + p + '"'), "link to " + ip + p);
+  for (const [n, p] of [["Center", "gauges"], ["Center", "log-channels"], ["Left", "settings"], ["Right", "sd"], ["Right", ""]])
+    check(s.includes('href="/screen?s=' + n + '&p=' + p + '"'), "link to " + n + " " + (p || "live") + " through the hub's Screens page");
   check(/OFFLINE, last heard 2 min ago/.test(s), "an offline screen says when it was last heard");
   const st = el("stat").innerHTML;
   check(/ECU<\/b>rusEFI/.test(st) && /Signals live<\/b>25/.test(st) && /build 30/.test(st), "status grid: ECU, signals, hub build");
@@ -29,9 +29,9 @@ vm.createContext(ctx); vm.runInContext(hubScript('HOME_HTML'), ctx);
   { const b = el("i2c").innerHTML;
     check(/0x3C<\/b>OLED/.test(b) && /0x48<\/b>ADS1115/.test(b) && /0x68<\/b>MPU6050/.test(b) && /0x55<\/b>unknown device/.test(b), "I2C card: each address found, named");
     check(/ADS1115 A1<\/b>1.650 V/.test(b) && /ADS1115 A2<\/b>3.300 V/.test(b), "ADS1115 inputs in volts"); }
-  for (const p of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML"]) {
+  for (const p of ["HOME_HTML", "SENSORS_HTML", "SIM_HTML", "CUSTOM_HTML", "RF_HTML", "BUTTONS_HTML", "OLED_HTML", "SCREEN_HTML", "CAN_HTML", "FIRMWARE_HTML"]) {
     const h = hubPage(p);
-    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /\.nav\{/.test(h), p + " has the navigation bar (with OLED)");
+    check(/<div class="nav">/.test(h) && /href="\/buttons"/.test(h) && /href="\/oled"/.test(h) && /href="\/screen"/.test(h) && /href="\/firmware"/.test(h) && /\.nav\{/.test(h) && !/<script>[^<]*querySelectorAll\('\.nav a'\)/.test(h), p + " has the side menu (and it adds no <script>)");
   }
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();
