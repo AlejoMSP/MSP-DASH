@@ -220,3 +220,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | 193 | 2026-11-14 | (this commit) | Accelerometer: MPU6050 on the hub's I2C bus (hub 36), mounting axes + zero on the hub home page; new signals Lateral G, Accel/Brake G, Vertical G, Yaw Rate (45-48) for gauges, lamps and logging |
 | 194 | 2026-11-15 | (this commit) | OLED pages (hub 37): warning lamps, big number, values, G-meter, clock; OLED next page button action, timer, lamp takeover; set up on /oled |
 | (hub 38) | 2026-11-15 | (this commit) | All hub GPIOs in esp32-input/hub_pins.h; docs/HUB_PINS.md rewritten as one table; test_hub_pins.js keeps them in step (no behaviour change) |
+| (hub 39) | 2026-11-15 | (this commit) | ADS1115 4-input ADC detected on the I2C bus (0x48-0x4B), I2C bus scan at boot, I2C card on the hub home page with every device found and A0-A3 volts |

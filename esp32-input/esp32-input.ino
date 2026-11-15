@@ -43,10 +43,11 @@
 #include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
 #include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
 #include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
+#include "ads1115.h"          // ADS1115 4-input ADC on the same wires
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 38
+#define INPUT_BUILD 39
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -529,9 +530,23 @@ static void imuStep() {
   for (int i = 0; i < 4; i++) { g_imu_val[i] = imu_smooth(g_imu_val[i], out[i], 0.17f); markLocal((SignalId)(SIG_GLAT + i), SRC_HUB_IMU); }
 }
 
+// Every address that answered on the I2C bus at boot, for the home page (0 = end of list).
+static uint8_t s_i2cFound[16];
+static void i2cScan() {
+  int n = 0;
+  for (uint8_t a = 0x08; a < 0x78 && n < 15; a++) { Wire.beginTransmission(a); if (Wire.endTransmission() == 0) s_i2cFound[n++] = a; }
+  s_i2cFound[n] = 0;
+  Serial.print("I2C bus:");
+  for (int i = 0; i < n; i++) Serial.printf(" 0x%02X", s_i2cFound[i]);
+  Serial.println(n ? "" : " nothing found");
+}
+
 static void oledTask(void *) {
   s_oledOk = oledBegin();   // starts Wire on GPIO 5 / 15
+  i2cScan();
   s_imuOk = imuBegin();
+  bool adsOk = adsBegin();
+  Serial.printf("ADS1115: %s\n", adsOk ? "found" : "not found (ADDR to GND = 0x48)");
   Serial.printf("Accelerometer: %s\n", s_imuOk ? "MPU6050 found" : "not found (SDA GPIO 5, SCL GPIO 15, 3.3 V)");
   for (int e = 0; e < 2; e++) {   // PCF8574 expanders: writing 0xFF makes every pin an input with its weak pull-up
     Wire.beginTransmission(0x20 + e); Wire.write(0xFF); s_pcfOk[e] = Wire.endTransmission() == 0;
@@ -543,6 +558,7 @@ static void oledTask(void *) {
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(20));   // 50 Hz: the accelerometer every pass, the panel every 10th
     if (s_imuOk) imuStep();
+    adsStep();
     if (++tick % 10) continue;
     for (int e = 0; e < 2; e++) if (s_pcfOk[e] && Wire.requestFrom((uint8_t)(0x20 + e), (uint8_t)1) == 1) s_pcfBits[e] = Wire.read();
     uint8_t st[OLED_LAMPS];
@@ -927,6 +943,13 @@ static void setupWeb() {
     for (int i = 0; i < 4; i++) s_imuSum[i] = 0;
     s_imuZeroLeft = 50;
     server.send(200, "text/plain", "Zeroing: keep the car still for a second");
+  });
+  server.on("/i2c.json", HTTP_GET, []() {   // what the boot scan found, and the ADS1115 inputs
+    String j = "{\"found\":[";
+    for (int i = 0; s_i2cFound[i]; i++) { if (i) j += ","; j += String((int)s_i2cFound[i]); }
+    char b[120];
+    snprintf(b, sizeof b, "],\"ads\":%d,\"adsv\":[%.4f,%.4f,%.4f,%.4f]}", s_adsAddr, (double)s_adsV[0], (double)s_adsV[1], (double)s_adsV[2], (double)s_adsV[3]);
+    server.send(200, "application/json", j + b);
   });
   server.on("/screens.json", HTTP_GET, []() {
     ScreenSlot snap[SCREEN_MAX];

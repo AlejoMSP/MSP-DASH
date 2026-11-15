@@ -52,6 +52,7 @@ Terminals: L = left row, R = right row of the Freenove board.
 | MPU6050 accelerometer | 0x68 (AD0 to 3.3 V: 0x69) | mount solid to the chassis; zero on the hub home page |
 | PCF8574 expander #1 | 0x20 (A0-A2 to GND) | 8 lamp inputs P0-P7 |
 | PCF8574 expander #2 | 0x21 (A0 to 3.3 V) | 8 more |
+| ADS1115 16-bit ADC | 0x48 (ADDR to GND; VDD 0x49, SDA 0x4A, SCL 0x4B) | 4 analog inputs A0-A3, 0 to 3.3 V, spare for now |
 
 Wire the devices in parallel from one junction. Keep the bus short (about 30 cm), SDA and SCL twisted with a ground.
 Every module has its own pull-ups; past about 5 modules remove all but one set.
