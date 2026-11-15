@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 194**, **hub 41**.
+Current builds: **screens 194**, **hub 42**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
@@ -75,6 +75,7 @@ arduino-cli compile --clean --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,C
 foreach ($ip in "192.168.55.201","192.168.55.202","192.168.55.203") { $r = curl.exe -s -H "Expect:" -w " HTTP %{http_code}" -F "firmware=@C:\esp32build\esp32s3-amoled-bsp-base.ino.bin" http://$ip/update; Write-Host "$ip -> $r" }
 ```
 
+Or build with the commands above and upload from the hub's Firmware page: the hub, and all screens from one file.
 If a board stops answering over WiFi, flash it over USB with `arduino-cli upload -p COMx --fqbn <same fqbn> --input-dir <build path> <sketch folder>`.
 
 ## Tests

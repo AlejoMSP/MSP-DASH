@@ -78,25 +78,12 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .scr .who{flex:1 1 200px}.scr a.btn{background:#1d2b2e;color:#4dd0e1;text-decoration:none;padding:5px 10px;border-radius:5px;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.kv{background:#000;border-radius:6px;padding:8px}
 .kv b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:2px}details summary{cursor:pointer;color:#4dd0e1}
+.jump{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}.jump a{background:#1d2b2e;color:#4dd0e1;text-decoration:none;padding:5px 10px;border-radius:5px;font-size:13px}
+.card{scroll-margin-top:56px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Setup</h2>
-<div class="card"><h3>Hub</h3><div class="grid" id="stat"></div></div>
-<div class="card"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
-<p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
-<div class="card"><h3>I2C bus</h3><div class="grid" id="i2c"></div>
-<p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it. ADS1115 inputs read 0 to 3.3 V; an input with nothing connected drifts.</p></div>
-<div class="card"><h3>Accelerometer</h3><div class="grid" id="imu"></div>
-<details><summary class="note">Mounting and zero</summary>
-<p class="note">MPU6050 on the OLED wires: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). Mount it solid to the chassis. Say which arrow printed on the module points to the front and which to the left, then park on level ground, engine running, and press Zero.</p>
-<div class="row"><label>Points to the front<select id="ifwd"></select></label><label>Points to the left<select id="ileft"></select></label></div>
-<div class="row"><button type="button" onclick="imuSet()">Save mounting</button><button type="button" onclick="imuZero()">Zero (car still and level)</button></div>
-<span id="imsg" class="note"></span></details></div>
-<div class="card"><details><summary><b>Clock</b> <span class="note" id="clk"></span></summary>
-<p class="note">From the GPS. The screens name their log files by it and stamp each row with it.</p>
-<label>Time zone<select id="tzstd"><option value="-300">Eastern</option><option value="-360">Central</option><option value="-420">Mountain</option><option value="-480">Pacific</option><option value="-540">Alaska</option><option value="-600">Hawaii</option><option value="0">UTC</option></select></label>
-<label><input type="checkbox" id="tzdst" style="width:auto"> US daylight saving time</label>
-<button type="button" onclick="saveTz()">Save</button> <span id="tzmsg" class="note"></span></details></div>
-<div class="card"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
+<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#speed">Speed check</a><a href="#hub">Hub</a></div>
+<div class="card" id="brightness"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
 <div class="row"><label>Night, dimmer lowest (%)<input type="number" id="nmin" min="5" max="100"></label>
@@ -107,6 +94,22 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <label>Lights count as on above (V)<input type="number" id="lon" step="0.1"></label>
 <button type="button" onclick="save()">Save</button> <span id="msg" class="note"></span>
 <p class="note">Turn the lights on, roll the dimmer all the way down and press "Use now as lowest", all the way up and press "Use now as highest", then Save.</p></details></div>
+<div class="card" id="clock"><details><summary><b>Clock</b> <span class="note" id="clk"></span></summary>
+<p class="note">From the GPS. The screens name their log files by it and stamp each row with it.</p>
+<label>Time zone<select id="tzstd"><option value="-300">Eastern</option><option value="-360">Central</option><option value="-420">Mountain</option><option value="-480">Pacific</option><option value="-540">Alaska</option><option value="-600">Hawaii</option><option value="0">UTC</option></select></label>
+<label><input type="checkbox" id="tzdst" style="width:auto"> US daylight saving time</label>
+<button type="button" onclick="saveTz()">Save</button> <span id="tzmsg" class="note"></span></details></div>
+<div class="card" id="accel"><h3>Accelerometer</h3><div class="grid" id="imu"></div>
+<details><summary class="note">Mounting and zero</summary>
+<p class="note">MPU6050 on the OLED wires: VCC 3.3 V (L6), GND, SDA GPIO 5 (R15), SCL GPIO 15 (R21). Mount it solid to the chassis. Say which arrow printed on the module points to the front and which to the left, then park on level ground, engine running, and press Zero.</p>
+<div class="row"><label>Points to the front<select id="ifwd"></select></label><label>Points to the left<select id="ileft"></select></label></div>
+<div class="row"><button type="button" onclick="imuSet()">Save mounting</button><button type="button" onclick="imuZero()">Zero (car still and level)</button></div>
+<span id="imsg" class="note"></span></details></div>
+<div class="card" id="i2c"><h3>I2C bus</h3><div class="grid" id="i2c"></div>
+<p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it. ADS1115 inputs read 0 to 3.3 V; an input with nothing connected drifts.</p></div>
+<div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
+<p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
+<div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div></div>
 <script>
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];const $=id=>document.getElementById(id);
 const kv=(k,v)=>'<div class="kv"><b>'+k+'</b>'+v+'</div>';
@@ -494,20 +497,55 @@ setInterval(u,500);u();
 
 // /firmware: every board's build in one table; the hub's own update form; each screen's update page.
 static const char FIRMWARE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Firmware</title>
-<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;padding:12px}h2{color:#4dd0e1}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
 table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;text-align:left}th{color:#4dd0e1;font-weight:normal}a{color:#4dd0e1}.note{color:#888;font-size:13px}
-input,button{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:6px}button{background:#4dd0e1;color:#000;border:0}
+input,button{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:6px}button{background:#4dd0e1;color:#000;border:0}button:disabled{opacity:.4}
+progress{width:100%;height:14px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Firmware</h2>
-<div class="card"><table><thead><tr><th>Board</th><th>Address</th><th>Build</th><th>Status</th><th></th></tr></thead><tbody id="b"></tbody></table></div>
-<div class="card"><b>Update the hub</b><form method="POST" action="/update" enctype="multipart/form-data" style="margin-top:8px"><input type="file" name="firmware" accept=".bin"> <button>Upload</button></form>
-<p class="note">The hub restarts when the upload finishes. Usually it is quicker to use the PowerShell flash commands, which build and upload in one go.</p></div>
+<div class="card"><table><thead><tr><th></th><th>Board</th><th>Address</th><th>Build</th><th>Status</th><th>Update</th></tr></thead><tbody id="b"></tbody></table></div>
+<div class="card"><h3>Update the screens</h3>
+<p class="note">Pick the screens' .bin once (C:\esp32build\esp32s3-amoled-bsp-base.ino.bin); it goes to every ticked screen, one after another. Each restarts and comes back with its new build.</p>
+<input type="file" id="sbin" accept=".bin"> <button id="sgo" onclick="updScreens()">Update ticked screens</button></div>
+<div class="card"><h3>Update the hub</h3>
+<p class="note">C:\esp32build-input\esp32-input.ino.bin. The hub restarts at the end; this page comes back by itself.</p>
+<input type="file" id="hbin" accept=".bin"> <button id="hgo" onclick="updHub()">Upload</button><progress id="hp" max="100" value="0" style="display:none"></progress></div>
+<p class="note">The PowerShell flash commands still work and also build the firmware. Keep the boards powered during an update.</p>
 <script>
-const order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
-async function load(){try{const st=await (await fetch("/state")).json(),l=await (await fetch("/screens.json")).json();
-l.sort((a,b)=>order(a.name)-order(b.name));
-let h='<tr><td><b>Hub</b></td><td>'+st.ip+'</td><td>'+st.build+'</td><td><span class="chip ok">online</span></td><td></td></tr>';
-h+=l.map(s=>'<tr><td><b>'+(s.name||"(no name)")+'</b></td><td>'+s.ip+'</td><td>'+s.build+'</td><td><span class="chip '+(s.online?"ok":"bad")+'">'+(s.online?"online":"offline")+'</span></td><td><a href="http://'+s.ip+'/update" target="_blank">update page</a></td></tr>').join("");
-document.getElementById("b").innerHTML=h;}catch(e){}}
-load();setInterval(load,3000);
+const $=id=>document.getElementById(id),order=n=>({left:0,center:1,centre:1,middle:1,right:2})[(n||"").toLowerCase()]??3;
+let st={},scr=[],stat={},busy=false;
+function render(){
+ let h='<tr><td></td><td><b>Hub</b></td><td>'+(st.ip||"")+'</td><td>'+(st.build||"")+'</td><td><span class="chip ok">online</span></td><td>'+(stat.hub||"")+'</td></tr>';
+ h+=scr.map(s=>'<tr><td><input type="checkbox" id="t_'+s.ip+'"'+(s.online?" checked":" disabled")+'></td><td><b>'+(s.name||"(no name)")+'</b></td><td>'+s.ip+'</td><td>'+s.build+'</td><td><span class="chip '+(s.online?"ok":"bad")+'">'+(s.online?"online":"offline")+'</span></td><td>'+(stat[s.ip]||'<a href="http://'+s.ip+'/update" target="_blank">update page</a>')+'</td></tr>').join("");
+ const keep={};scr.forEach(s=>{const e=$("t_"+s.ip);if(e)keep[s.ip]=e.checked;});
+ $("b").innerHTML=h;scr.forEach(s=>{const e=$("t_"+s.ip);if(e&&s.ip in keep&&s.online)e.checked=keep[s.ip];});}
+async function load(){try{st=await (await fetch("/state")).json();scr=await (await fetch("/screens.json")).json();scr.sort((a,b)=>order(a.name)-order(b.name));render();}catch(e){}}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function updScreens(){
+ const f=$("sbin").files[0];if(!f){alert("Pick the screens' .bin first");return;}
+ const targets=scr.filter(s=>s.online&&$("t_"+s.ip)&&$("t_"+s.ip).checked);if(!targets.length){alert("Tick at least one online screen");return;}
+ if(!confirm("Update "+targets.map(s=>s.name||s.ip).join(", ")+" with "+f.name+"?"))return;
+ busy=true;$("sgo").disabled=true;
+ for(const s of targets){
+  stat[s.ip]="uploading...";render();
+  const before=s.build;const fd=new FormData();fd.append("firmware",f,f.name);
+  try{await fetch("http://"+s.ip+"/update",{method:"POST",mode:"no-cors",body:fd});stat[s.ip]="sent, restarting...";}catch(e){stat[s.ip]="<span class=\"chip bad\">upload failed</span>";render();continue;}
+  render();
+  let back=false;
+  for(let k=0;k<45&&!back;k++){await sleep(2000);await load();const n=scr.find(x=>x.ip===s.ip);if(n&&n.online&&k>2){back=true;stat[s.ip]=n.build!==before?'<span class="chip ok">done, build '+n.build+'</span>':'<span class="chip warn">back, still build '+n.build+'</span>';}}
+  if(!back)stat[s.ip]='<span class="chip bad">not back yet</span>';render();
+ }
+ busy=false;$("sgo").disabled=false;}
+function updHub(){
+ const f=$("hbin").files[0];if(!f){alert("Pick the hub's .bin first");return;}
+ if(!confirm("Update the hub with "+f.name+"?"))return;
+ const fd=new FormData();fd.append("firmware",f,f.name);const x=new XMLHttpRequest();$("hp").style.display="block";$("hgo").disabled=true;
+ x.upload.onprogress=e=>{if(e.lengthComputable){$("hp").value=Math.round(e.loaded*100/e.total);stat.hub="uploading "+$("hp").value+" %";render();}};
+ x.onload=async()=>{stat.hub=x.responseText==="OK"?"restarting...":'<span class="chip bad">'+x.responseText+'</span>';render();
+  if(x.responseText!=="OK"){$("hgo").disabled=false;return;}
+  const before=st.build;for(let k=0;k<40;k++){await sleep(2000);try{const n=await (await fetch("/state")).json();st=n;stat.hub='<span class="chip ok">done, build '+n.build+'</span>';break;}catch(e){}}
+  $("hgo").disabled=false;$("hp").style.display="none";load();};
+ x.onerror=()=>{stat.hub='<span class="chip bad">upload failed</span>';render();$("hgo").disabled=false;};
+ x.open("POST","/update");x.send(fd);}
+load();setInterval(()=>{if(!busy)load();},3000);
 </script></body></html>)HTML";
