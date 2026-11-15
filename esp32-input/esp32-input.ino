@@ -48,7 +48,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 45
+#define INPUT_BUILD 46
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -215,7 +215,22 @@ static void cfgSave() {
 // ---- readings: smoothed volts at the car side of each divider, and the knob ----
 static float s_lightsV = 0, s_dimV = 0, s_potAvg = -1;
 static uint32_t s_lastBriMs = 0;
-static float carVolts(int pin) { return analogReadMilliVolts(pin) / 1000.0f * DIVIDER; }
+// The ADC is shared by two tasks (fuel, and the main loop: knob, lights, dimmer). Two reads at the same moment fail
+// ("adc oneshot read fail") and return 0, so every analog read goes through this lock.
+static SemaphoreHandle_t s_adcLock = NULL;
+static int adcRaw(int pin) {
+  if (s_adcLock) xSemaphoreTake(s_adcLock, portMAX_DELAY);
+  int v = analogRead(pin);
+  if (s_adcLock) xSemaphoreGive(s_adcLock);
+  return v;
+}
+static uint32_t adcMilliVolts(int pin) {
+  if (s_adcLock) xSemaphoreTake(s_adcLock, portMAX_DELAY);
+  uint32_t v = analogReadMilliVolts(pin);
+  if (s_adcLock) xSemaphoreGive(s_adcLock);
+  return v;
+}
+static float carVolts(int pin) { return adcMilliVolts(pin) / 1000.0f * DIVIDER; }
 static int clampPct(int v) { return v < 5 ? 5 : (v > 100 ? 100 : v); }
 
 static int wantedPct() {
@@ -371,9 +386,9 @@ static void dhtTask(void *) {
 // ---- Fuel level: pot (mock sender) on GPIO36, 0-3.3 V = 0-100 %, smoothed, read every 100 ms ----
 static volatile float s_fuelPct = 0;   // the pot's own reading, shown on the home page even while the simulator runs
 static void fuelTask(void *) {
-  float avg = analogRead(FUEL_PIN);
+  float avg = adcRaw(FUEL_PIN);
   for (;;) {
-    avg += (analogRead(FUEL_PIN) - avg) * 0.1f;      // slow filter: fuel sloshes, the gauge should not
+    avg += (adcRaw(FUEL_PIN) - avg) * 0.1f;      // slow filter: fuel sloshes, the gauge should not
     s_fuelPct = avg * 100.0f / 4095.0f;
     if (simOwns()) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }
     g_fuel_pct = avg * 100.0f / 4095.0f;
@@ -385,7 +400,7 @@ static void fuelTask(void *) {
 
 // every 50 ms: smooth the inputs; send when the result moves 2 % or more, and every 2 s so a screen that reboots catches up
 static void readKnob() {
-  int raw = analogRead(POT_PIN);
+  int raw = adcRaw(POT_PIN);
   s_potAvg = s_potAvg < 0 ? raw : s_potAvg * 0.85f + raw * 0.15f;
   s_lightsV = s_lightsV * 0.8f + carVolts(LIGHTS_PIN) * 0.2f;
   s_dimV = s_dimV * 0.8f + carVolts(DIMMER_PIN) * 0.2f;
@@ -1035,6 +1050,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(BTN_NEXT, INPUT_PULLUP);
   pinMode(BTN_PREV, INPUT_PULLUP);
+  s_adcLock = xSemaphoreCreateMutex();   // before any task reads the ADC
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);   // about 0 - 3.1 V at the pins
   cfgLoad();

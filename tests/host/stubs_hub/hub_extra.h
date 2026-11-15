@@ -23,3 +23,9 @@ long random(long); long random(long, long);
 #define F(x) (x)
 // String::replace exists on Arduino; the shared stub lacks it, so hub code calls go through this helper type.
 #define strlen_P strlen
+// FreeRTOS mutex (the real one comes with the ESP32 core through Arduino.h)
+typedef void *SemaphoreHandle_t;
+#ifndef portMAX_DELAY
+#define portMAX_DELAY 0xFFFFFFFFu
+#endif
+SemaphoreHandle_t xSemaphoreCreateMutex(); int xSemaphoreTake(SemaphoreHandle_t, uint32_t); int xSemaphoreGive(SemaphoreHandle_t);
