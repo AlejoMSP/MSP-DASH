@@ -46,6 +46,24 @@ int main() {
   { InputBtn c = {}; uint32_t tt = 0; int got = 0; for (int k = 0; k < 6; k++) { tt += 5; if (input_btn_step(&c, tt, k % 2 == 0)) got = 1; } CHECK(!got, "chatter under 30 ms is ignored"); }
   (void)ev;
   CHECK(sizeof(HubInput) == 52, "saved input: 52 bytes");
+  printf("6. expander pins and outputs\n");
+  { uint8_t mm[PR_COUNT]; pin_map_defaults(mm);
+    mm[PR_BTN_NEXT] = PIN_MCP_BASE + 4; CHECK(pin_map_valid(mm), "a page button can move onto an expander pin");
+    mm[PR_BTN_NEXT] = 25; mm[PR_FUEL] = PIN_MCP_BASE + 5; CHECK(!pin_map_valid(mm), "the fuel sender cannot (no analog on the expander)");
+    pin_map_defaults(mm); mm[PR_CAN_TX] = PIN_MCP_BASE + 6; CHECK(!pin_map_valid(mm), "nor can CAN"); }
+  CHECK(output_pin_fits(13) && output_pin_fits(PIN_MCP_BASE + 9) && !output_pin_fits(34) && !output_pin_fits(6), "outputs: GPIOs that drive and expander pins, not 34-39 or the flash");
+  HubOutput o; output_defaults(&o); o.type = OUT_SIGNAL; o.sig = 2; o.cond = OUTC_ABOVE; o.level = 200; o.hyst = 5;
+  CHECK(!output_want(&o, 199, true, false, false, false) && output_want(&o, 201, true, false, false, false), "above 200: on at 201");
+  CHECK(output_want(&o, 197, true, false, false, true) && !output_want(&o, 194, true, false, false, true), "hysteresis: stays on down to 195, off at 194");
+  CHECK(!output_want(&o, 300, false, false, false, true), "no data: off (a dead sensor must not hold a fan on)");
+  o.cond = OUTC_BELOW; o.level = 12; o.hyst = 0.5f;
+  CHECK(output_want(&o, 11.9f, true, false, false, false) && output_want(&o, 12.3f, true, false, false, true) && !output_want(&o, 12.6f, true, false, false, true), "below 12 V, back off above 12.5");
+  o.cond = OUTC_ON; CHECK(output_want(&o, 1, true, false, false, false) && !output_want(&o, 0, true, false, false, true), "a flag: on when set");
+  o.type = OUT_INPUT; CHECK(output_want(&o, 0, false, true, false, false) && !output_want(&o, 0, false, false, false, true), "follows an input");
+  o.type = OUT_MANUAL; CHECK(output_want(&o, 0, false, false, true, false) && !output_want(&o, 0, false, false, false, true), "toggled");
+  o.active_low = 1; o.blink = 0; CHECK(!output_pin_high(&o, true, 0) && output_pin_high(&o, false, 0), "relay (LOW = on): on drives LOW, off HIGH");
+  o.active_low = 0; o.blink = 1; CHECK(output_pin_high(&o, true, 100) && !output_pin_high(&o, true, 300) && !output_pin_high(&o, false, 100), "blinking: on/off every 250 ms while on, steady off");
+  CHECK(sizeof(HubOutput) == 32, "saved output: 32 bytes");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

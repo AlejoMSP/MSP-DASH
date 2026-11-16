@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 204**, **hub 50**.
+Current builds: **screens 211**, **hub 51**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
@@ -41,7 +41,7 @@ expanders, two page buttons, dash dimmer and lights-on inputs. Every GPIO with i
 - Own sensors: EGT, cabin temp/humidity, fuel level, GPS speed/time, accelerometer (lateral, accel/brake and vertical
   G, yaw rate), lamp inputs.
 - Brightness from the car's lights and dimmer (or a knob), with day/night levels.
-- Inputs and pins page: every GPIO and expander pin with what uses it; move any function to another GPIO; up to 16 inputs on free pins as buttons (active LOW or HIGH, press and hold actions), switches or analog sensors (pressure, voltage, temperature presets, or custom) feeding custom sensor slots.
+- Inputs and pins page: every GPIO and expander pin with what uses it; move any function to another GPIO; up to 16 inputs on free pins as buttons (active LOW or HIGH, press and hold actions), switches or analog sensors (pressure, voltage, temperature presets, or custom) feeding custom sensor slots; up to 16 outputs (relays, LEDs) switched by a signal, an input or a button.
 - Two buttons, configurable on `/buttons`: press or hold 1/2/3/5/10 s, left/right/both. Actions: next/previous page,
   choose screen, go to page, dim/brighten, colour scheme, race mode, clear warning, log marker, show IPs, OLED next page.
 - OLED warning panel (`/oled`): 8 lamps with icons, WARNING and DANGER levels, signal or wire-input triggers, plus

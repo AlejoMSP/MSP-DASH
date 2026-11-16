@@ -7,6 +7,11 @@
 #include <Wire.h>
 
 static uint8_t s_mcpAddr[2] = { 0, 0 };           // 0 = not found
+// Outputs on the expander: the pins set as outputs (1 = output) and the levels wanted (1 = HIGH), filled by the outputs
+// code; mcpApplyOutputs() writes them from the I2C task when they change.
+static volatile uint16_t s_mcpOutMask[2] = { 0, 0 }, s_mcpOutBits[2] = { 0, 0 };
+static uint16_t s_mcpDirSent[2] = { 0, 0 }, s_mcpLatSent[2] = { 0, 0 };
+static bool s_mcpSent[2] = { false, false };
 static volatile uint16_t s_mcpBits[2] = { 0xFFFF, 0xFFFF };   // bit 0-7 = PA0-PA7, bit 8-15 = PB0-PB7; 1 = HIGH
 
 static bool mcpWrite(uint8_t a, uint8_t reg, uint8_t v) { Wire.beginTransmission(a); Wire.write(reg); Wire.write(v); return Wire.endTransmission() == 0; }
@@ -23,6 +28,21 @@ static int mcpBegin() {
     if (ok) s_mcpAddr[n++] = (uint8_t)a;
   }
   return n;
+}
+// Sets output pins (IODIR 0) and their levels (OLAT) when they change. Input pins stay inputs with pull-ups.
+static void mcpApplyOutputs() {
+  for (int e = 0; e < 2; e++) {
+    if (!s_mcpAddr[e]) continue;
+    uint16_t mask = s_mcpOutMask[e], lat = s_mcpOutBits[e] & mask;
+    if (!s_mcpSent[e] || lat != s_mcpLatSent[e]) {   // levels first, so a new output does not glitch
+      if (mcpWrite(s_mcpAddr[e], 0x14, lat & 0xFF) && mcpWrite(s_mcpAddr[e], 0x15, lat >> 8)) s_mcpLatSent[e] = lat;
+    }
+    if (!s_mcpSent[e] || mask != s_mcpDirSent[e]) {
+      uint16_t dir = (uint16_t)~mask;   // IODIR: 1 = input
+      if (mcpWrite(s_mcpAddr[e], 0x00, dir & 0xFF) && mcpWrite(s_mcpAddr[e], 0x01, dir >> 8)) s_mcpDirSent[e] = mask;
+    }
+    s_mcpSent[e] = true;
+  }
 }
 // Reads both ports of each board (GPIOA, then GPIOB).
 static void mcpRead() {

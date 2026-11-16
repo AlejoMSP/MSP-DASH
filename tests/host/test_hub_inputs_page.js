@@ -6,8 +6,10 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
 const gp = (g, caps, user, note) => ({ g, caps, user: user || "", note: note || "", low: false });
 const noInput = { type: 0, pin: 0, contact: 0, slot: 0, ap: 0, pp: 0, ah: 0, ph: 0, preset: 0, mult: 1, v1: 0, val1: 0, v2: 3.3, val2: 100, pullup: 2490, name: "", active: false, value: 0 };
 const D = {
-  roles: [{ key: "btn_next", name: "Right (next) button", gpio: 25, def: 25, need: 9 }, { key: "fuel", name: "Fuel level sender", gpio: 36, def: 36, need: 4 },
-          { key: "can_tx", name: "CAN TX", gpio: 21, def: 21, need: 2 }],
+  roles: [{ key: "btn_next", name: "Right (next) button", gpio: 25, def: 25, need: 9, mcp: true }, { key: "fuel", name: "Fuel level sender", gpio: 36, def: 36, need: 4, mcp: false },
+          { key: "can_tx", name: "CAN TX", gpio: 21, def: 21, need: 2, mcp: false }],
+  outputs: [{ type: 1, pin: 13, low: 1, blink: 0, sig: 2, cond: 1, input: 0, level: 200, hyst: 5, name: "Fan relay", on: true },
+            { type: 3, pin: 108, low: 0, blink: 1, sig: 0, cond: 0, input: 0, level: 0, hyst: 0, name: "Light bar", on: false }].concat(Array(14).fill({ type: 0, pin: 0, low: 0, blink: 0, sig: 0, cond: 0, input: 0, level: 0, hyst: 0, name: "", on: false })),
   gpios: [gp(0, 11, "", "BOOT button"), gp(2, 11, "Input 1 (Horn)"), gp(12, 11), gp(21, 11, "CAN TX"), gp(25, 11, "Right (next) button"), gp(33, 15, "Input 2 (Oil psi)"), gp(34, 5, "", "input only"), gp(36, 5, "Fuel level sender")],
   mcp: [0x27, 0], mcpbits: [0xFFFF, 0xFFFF], mcpusers: Array(32).fill("").map((u, n) => n === 3 ? "OLED lamp 5" : ""),
   inputs: [Object.assign({}, noInput, { type: 1, pin: 2, contact: 0, ap: 1, ah: 8, ph: 2, name: "Horn", active: true }),
@@ -32,13 +34,29 @@ const R = c => vm.runInContext(c, ctx);
   check(/onchange="if\(this.value!==''\)movePin\('fuel',\+this.value\)"/.test(fuelRow) && /value="34">GPIO 34/.test(fuelRow) && !/value="12"/.test(fuelRow) && !/value="33"/.test(fuelRow), "fuel can move to a free analog GPIO (34), not a digital one (12) or a taken one (33)");
   await R("movePin('fuel', 34)"); await settle();
   check(gets.includes("/pins/set?role=fuel&gpio=34"), "moving sends the role and the GPIO (the hub restarts)");
-  check(/GPIO 12<\/td>[\s\S]*?onclick="assignPin\(12,11\)">Set up an input/.test(p) && /MCP23017 #1 PB7<\/td>[\s\S]*?onclick="assignPin\(115,9\)">Set up an input/.test(p), "free pins (GPIO and expander) offer 'Set up an input'");
+  check(/GPIO 12<\/td>[\s\S]*?onclick="assignPin\(12,11\)">Set up an input/.test(p) && /MCP23017 #1 PB7<\/td>[\s\S]*?onclick="assignPin\(115,11\)">Set up an input/.test(p), "free pins (GPIO and expander) offer 'Set up an input'");
   check(/GPIO 2<\/td>[\s\S]*?onclick="edit\(0\)">Edit input/.test(p) && /PA3<\/td>[\s\S]*?href="\/oled"/.test(p), "a pin with an input offers Edit; a lamp's pin links to the OLED page");
   R("assignPin(115, 9)"); let ae = el("editor").innerHTML;
   check(/<option value="115" selected>MCP23017 #1 PB7<\/option>/.test(ae) && /<option value="2" selected>Switch<\/option>/.test(ae), "from the pin table: the editor opens on that pin, as a switch");
   R("assignPin(34, 5)"); ae = el("editor").innerHTML;
   check(/<option value="34" selected>GPIO 34<\/option>/.test(ae) && /<option value="3" selected>Analog sensor<\/option>/.test(ae), "an analog-only pin opens as a sensor");
   R("editing = null; drawEditor()"); check(el("editor").innerHTML === "", "Cancel closes the editor");
+  console.log("1b. buttons onto the expander, outputs");
+  const btnRow = p.split("<tr>").find(r => r.includes("GPIO 25"));
+  check(/value="100">MCP23017 #1 PA0/.test(btnRow) && !/value="103"/.test(btnRow), "a page button can move onto a free expander pin (not the lamp's PA3)");
+  check(!/value="10\d">MCP/.test(fuelRow), "the fuel sender cannot (analog)");
+  check(/GPIO 12<\/td>[\s\S]*?assignOut\(12\)">Set up an output/.test(p) && !/GPIO 34<\/td>[^]*?assignOut\(34\)/.test(p.split("<tr>").find(r => r.includes("GPIO 34"))), "free GPIOs that can drive offer 'Set up an output' (not input-only 34)");
+  const o = el("outputs").innerHTML;
+  check(/Fan relay<\/td><td>Coolant Temp above 200<\/td><td>GPIO 13 \(LOW = on\)<\/td><td><span class="on">ON/.test(o), "output list: signal, level, pin, LOW = on, state");
+  check(/Light bar<\/td><td>toggled, blinking<\/td><td>MCP23017 #1 PB0<\/td><td>off<\/td><td><button onclick="toggleOut\(1\)">Turn on/.test(o), "a toggled output on the expander, with a Turn on button");
+  R("assignOut(12)"); let oe = el("oeditor").innerHTML;
+  check(/Output 3/.test(oe) && /<option value="12" selected>GPIO 12/.test(oe) && !/>GPIO 34</.test(oe) && /MCP23017 #1 PA0/.test(oe), "output editor on GPIO 12; output pins only (no 34), expander pins offered");
+  check(/LOW \(most relay modules\)/.test(oe) && /<option value="1" selected>above<\/option>/.test(oe) && /Hysteresis/.test(oe), "relay level, condition, hysteresis");
+  el("o_name").value = "Pump"; el("o_pin").value = "12"; el("o_low").value = "1"; el("o_sig").value = "6"; el("o_cond").value = "1"; el("o_level").value = "230"; el("o_hyst").value = "10"; el("o_blink").checked = false;
+  await R("saveOut()"); await settle();
+  let oq = new URLSearchParams(gets.filter(u => u.startsWith("/outputs/set?")).pop().split("?")[1]);
+  check(oq.get("i") === "2" && oq.get("type") === "1" && oq.get("pin") === "12" && oq.get("low") === "1" && oq.get("sig") === "6" && oq.get("level") === "230" && oq.get("hyst") === "10", "output saved: GPIO 12, LOW = on, Oil Temp above 230, 10 back");
+  await R("toggleOut(1)"); await settle(); check(gets.includes("/outputs/toggle?i=1"), "Turn on / off from the list");
   console.log("2. the inputs list");
   const l = el("inputs").innerHTML;
   check(/Horn<\/td><td>Button \(active LOW\)<\/td><td>GPIO 2<\/td><td><span class="on">ACTIVE<\/span>/.test(l), "button: active LOW, GPIO 2, active now");

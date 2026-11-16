@@ -11,8 +11,8 @@
 
 #define HUB_INPUTS 16
 // Where an input is: 0..39 = hub GPIO, MCP_PIN0.. = MCP23017 board 1 PA0..PB7 (16 pins), then board 2.
-#define INPUT_MCP_BASE 100
-static inline bool input_is_mcp(int pin) { return pin >= INPUT_MCP_BASE && pin < INPUT_MCP_BASE + 32; }
+#define INPUT_MCP_BASE PIN_MCP_BASE
+static inline bool input_is_mcp(int pin) { return pin_is_mcp(pin); }
 
 enum { IN_NONE = 0, IN_BUTTON = 1, IN_SWITCH = 2, IN_ANALOG = 3 };
 // When an input counts as active (the page says "Active when LOW / HIGH"):
@@ -104,4 +104,44 @@ static inline int input_btn_step(InputBtn *b, uint32_t now, bool active) {
 static inline void input_defaults(HubInput *in) {
   memset(in, 0, sizeof *in);
   in->mult = 1.0f; in->v1 = 0; in->val1 = 0; in->v2 = 3.3f; in->val2 = 100; in->pullup = 2490.0f;
+}
+
+// ---- outputs (Inputs and pins page): up to 16, on a hub GPIO that can drive or an MCP23017 pin ----
+// An output turns on when its condition holds: a signal (on / above / below a level, with hysteresis), an input being
+// active, or a button action toggling it. Drive a relay module, a transistor or an LED: a pin gives 3.3 V and a few mA.
+#define HUB_OUTPUTS 16
+enum { OUT_NONE = 0, OUT_SIGNAL = 1, OUT_INPUT = 2, OUT_MANUAL = 3 };
+enum { OUTC_ON = 0, OUTC_ABOVE = 1, OUTC_BELOW = 2 };
+typedef struct __attribute__((packed)) {
+  uint8_t type;        // OUT_*
+  uint8_t pin;         // GPIO or PIN_MCP_BASE + n
+  uint8_t active_low;  // 1 = the pin goes LOW when on (most relay modules), 0 = HIGH when on
+  uint8_t blink;       // 1 = flashes (2 Hz) while on
+  uint8_t sig;         // OUT_SIGNAL: the signal
+  uint8_t cond;        // OUT_SIGNAL: OUTC_*
+  uint8_t input;       // OUT_INPUT: which input (0..15)
+  uint8_t spare;
+  float level, hyst;   // OUT_SIGNAL above / below: the level, and how far back it must come to switch off
+  char name[16];
+} HubOutput;
+#define HUB_OUTPUTS_VERSION 1
+static inline void output_defaults(HubOutput *o) { memset(o, 0, sizeof *o); }
+static inline bool output_pin_fits(int pin) { return pin_is_mcp(pin) || (gpio_caps(pin) & CAP_OUT); }
+// Should it be on? wasOn: its state before (for the hysteresis). manualOn: its toggled state (OUT_MANUAL).
+static inline bool output_want(const HubOutput *o, float value, bool hasData, bool inputActive, bool manualOn, bool wasOn) {
+  switch (o->type) {
+    case OUT_INPUT: return inputActive;
+    case OUT_MANUAL: return manualOn;
+    case OUT_SIGNAL:
+      if (!hasData) return false;   // no data: off (a dead sensor must not hold a fan or a pump on)
+      if (o->cond == OUTC_ON) return value != 0.0f;
+      if (o->cond == OUTC_ABOVE) return wasOn ? value > o->level - o->hyst : value > o->level;
+      return wasOn ? value < o->level + o->hyst : value < o->level;
+    default: return false;
+  }
+}
+// The pin level for a state: blinking flips every 250 ms while on.
+static inline bool output_pin_high(const HubOutput *o, bool on, uint32_t nowMs) {
+  bool lit = on && (!o->blink || (nowMs / 250) % 2 == 0);
+  return o->active_low ? !lit : lit;
 }

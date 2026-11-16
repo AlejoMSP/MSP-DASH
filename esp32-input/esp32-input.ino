@@ -48,7 +48,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 50
+#define INPUT_BUILD 51
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -426,6 +426,12 @@ static void readKnob() {
 
 // ---- web: status page and WiFi updates (curl -F "firmware=@...bin" http://192.168.55.204/update) ----
 static void oledNextPage();   // OLED panel: next page (defined with the panel, below)
+static void outputToggle(int n);   // outputs: toggle output n (1-based), for the "Toggle output" action (below)
+// LOW on a pin? Hub GPIOs are read directly, expander pins from the expander's last read (50 times a second).
+static bool anyPinLow(int pin) {
+  if (pin_is_mcp(pin)) { int n = pin - PIN_MCP_BASE, e = n / 16, b = n % 16; return s_mcpAddr[e] && !((s_mcpBits[e] >> b) & 1); }
+  return digitalRead(pin) == LOW;
+}
 // ---- buttons: configurable on /buttons (button_actions.h, btn_logic.h). Left = GPIO 26 (L15), right = GPIO 25 (L14) ----
 static BtnState s_btn = {};   // all zero = released (same as btn_init)
 static BtnBinding s_bind[BTN_INPUTS][BTN_LEVELS];
@@ -471,11 +477,12 @@ static void runAction(const BtnBinding *b) {
     case BA_CLEAR_WARNING: sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
     case BA_LOG_MARK: sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
     case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;
-    case BA_OLED_NEXT: oledNextPage(); break;   // every screen: its name and IP
+    case BA_OLED_NEXT: oledNextPage(); break;
+    case BA_OUT_TOGGLE: outputToggle(b->param); break;   // every screen: its name and IP
   }
 }
 static void handleButtons() {
-  BtnEvent e = btn_step(&s_btn, millis(), digitalRead(BTN_PREV) == LOW, digitalRead(BTN_NEXT) == LOW);   // left, right
+  BtnEvent e = btn_step(&s_btn, millis(), anyPinLow(BTN_PREV), anyPinLow(BTN_NEXT));   // left, right (GPIO or expander pin)
   if (e.type == BTN_EV_LEVEL) {   // held long enough for another action: tell the screens what letting go will do
     const BtnBinding *b = btn_pick(s_bind, e.input, e.level);
     if (b && (b->action != s_hintAction || b->param != s_hintParam)) {
@@ -585,6 +592,7 @@ static void oledTask(void *) {
     vTaskDelay(pdMS_TO_TICKS(20));   // 50 Hz: the accelerometer every pass, the panel every 10th
     if (s_imuOk) imuStep();
     mcpRead();   // expander pins every pass: buttons on them need it
+    mcpApplyOutputs();   // and outputs on them, when they change
     if (++tick % 10) continue;
     uint8_t st[OLED_LAMPS];
     bool anyLit = false;
@@ -646,13 +654,13 @@ static void inputPinSetup(const HubInput &in) {
   pinMode(in.pin, (gpio_caps(in.pin) & CAP_PULLUP) ? INPUT_PULLUP : INPUT);
 }
 // LOW on the input's pin? (MCP23017 pins: from the expander's last read.)
-static bool inputPinLow(int pin) {
-  if (input_is_mcp(pin)) { int n = pin - INPUT_MCP_BASE, e = n / 16, b = n % 16; return s_mcpAddr[e] && !((s_mcpBits[e] >> b) & 1); }
-  return digitalRead(pin) == LOW;
-}
+static bool inputPinLow(int pin) { return anyPinLow(pin); }
 // Who uses a hub GPIO or an expander pin? "" = free. skipInput: an input to leave out (the one being edited).
-static String pinUser(int pin, int skipInput) {
-  if (!input_is_mcp(pin)) { int r = pin_map_role_at(g_pins, pin); if (r >= 0) return HUB_PIN_ROLES[r].name; }
+static HubOutput s_outputs[HUB_OUTPUTS];
+static String pinUser(int pin, int skipInput, int skipOutput = -1) {
+  { int r = pin_map_role_at(g_pins, pin); if (r >= 0) return HUB_PIN_ROLES[r].name; }
+  for (int i = 0; i < HUB_OUTPUTS; i++) if (i != skipOutput && s_outputs[i].type != OUT_NONE && s_outputs[i].pin == pin)
+    return String("Output ") + (i + 1) + (s_outputs[i].name[0] ? String(" (") + s_outputs[i].name + ")" : String(""));
   for (int i = 0; i < HUB_INPUTS; i++) if (i != skipInput && s_inputs[i].type != IN_NONE && s_inputs[i].pin == pin)
     return String("Input ") + (i + 1) + (s_inputs[i].name[0] ? String(" (") + s_inputs[i].name + ")" : String(""));
   for (int i = 0; i < OLED_LAMPS; i++) {
@@ -663,6 +671,40 @@ static String pinUser(int pin, int skipInput) {
   }
   return "";
 }
+// ---- outputs ----
+static volatile bool s_outOn[HUB_OUTPUTS], s_outManual[HUB_OUTPUTS];
+static void outputsLoad() {
+  Preferences p; p.begin("outputs", true);
+  uint8_t ver = p.getUChar("ver", 0);
+  if (ver != HUB_OUTPUTS_VERSION || p.getBytes("cfg", s_outputs, sizeof s_outputs) != sizeof s_outputs) for (int i = 0; i < HUB_OUTPUTS; i++) output_defaults(&s_outputs[i]);
+  p.end();
+  for (int i = 0; i < HUB_OUTPUTS; i++) { s_outputs[i].name[15] = 0; if (s_outputs[i].type > OUT_MANUAL || !output_pin_fits(s_outputs[i].pin)) s_outputs[i].type = OUT_NONE; }
+}
+static void outputsSave() { Preferences p; p.begin("outputs", false); p.putUChar("ver", HUB_OUTPUTS_VERSION); p.putBytes("cfg", s_outputs, sizeof s_outputs); p.end(); }
+static void outputPinSetup(const HubOutput &o) {
+  if (o.type == OUT_NONE || pin_is_mcp(o.pin)) return;
+  digitalWrite(o.pin, output_pin_high(&o, false, 0) ? HIGH : LOW);   // off before it becomes an output
+  pinMode(o.pin, OUTPUT);
+}
+static void outputToggle(int n) { if (n >= 1 && n <= HUB_OUTPUTS && s_outputs[n - 1].type == OUT_MANUAL) s_outManual[n - 1] = !s_outManual[n - 1]; }
+// Every 20 ms: each output's state, written to its GPIO or queued for the expander.
+static void outputsStep() {
+  uint32_t now = millis();
+  uint16_t mask[2] = { 0, 0 }, bits[2] = { 0, 0 };
+  for (int i = 0; i < HUB_OUTPUTS; i++) {
+    const HubOutput &o = s_outputs[i];
+    if (o.type == OUT_NONE) continue;
+    SignalId sg = (SignalId)(o.sig < SIG_COUNT ? o.sig : 0);
+    bool on = output_want(&o, gauge_config_signal_value(sg), sg && gauge_config_signal_has_data(sg),
+                          o.input < HUB_INPUTS && s_inActive[o.input], s_outManual[i], s_outOn[i]);
+    s_outOn[i] = on;
+    bool high = output_pin_high(&o, on, now);
+    if (pin_is_mcp(o.pin)) { int n = o.pin - PIN_MCP_BASE, e = n / 16, b = n % 16; mask[e] |= 1u << b; if (high) bits[e] |= 1u << b; }
+    else digitalWrite(o.pin, high ? HIGH : LOW);
+  }
+  for (int e = 0; e < 2; e++) { s_mcpOutMask[e] = mask[e]; s_mcpOutBits[e] = bits[e]; }
+}
+
 // Every 20 ms: read each input, run button actions, fill the switch / sensor slots.
 static void inputsStep() {
   uint32_t now = millis();
@@ -1039,7 +1081,8 @@ static void setupWeb() {
     for (int r = 0; r < PR_COUNT; r++) {
       if (r) j += ",";
       j += "{\"key\":\""; j += HUB_PIN_ROLES[r].key; j += "\",\"name\":\""; j += HUB_PIN_ROLES[r].name;
-      j += "\",\"gpio\":"; j += String((int)g_pins[r]); j += ",\"def\":"; j += String((int)HUB_PIN_ROLES[r].def); j += ",\"need\":"; j += String((int)HUB_PIN_ROLES[r].need); j += "}";
+      j += "\",\"gpio\":"; j += String((int)g_pins[r]); j += ",\"def\":"; j += String((int)HUB_PIN_ROLES[r].def); j += ",\"need\":"; j += String((int)HUB_PIN_ROLES[r].need);
+      j += ",\"mcp\":"; j += pin_role_mcp_ok(r) ? "true" : "false"; j += "}";
     }
     j += "],\"gpios\":[";
     const int list[] = GPIO_LIST; bool first = true;
@@ -1059,6 +1102,13 @@ static void setupWeb() {
                i ? "," : "", in.type, in.pin, in.contact, in.slot, in.act_press, in.prm_press, in.act_hold, in.prm_hold, in.preset,
                (double)in.mult, (double)in.v1, (double)in.val1, (double)in.v2, (double)in.val2, (double)in.pullup, in.name,
                s_inActive[i] ? "true" : "false", (double)s_inValue[i]);
+      j += b;
+    }
+    j += "],\"outputs\":[";
+    for (int i = 0; i < HUB_OUTPUTS; i++) {
+      const HubOutput &o = s_outputs[i]; char b[260];
+      snprintf(b, sizeof b, "%s{\"type\":%u,\"pin\":%u,\"low\":%u,\"blink\":%u,\"sig\":%u,\"cond\":%u,\"input\":%u,\"level\":%g,\"hyst\":%g,\"name\":\"%s\",\"on\":%s}",
+               i ? "," : "", o.type, o.pin, o.active_low, o.blink, o.sig, o.cond, o.input, (double)o.level, (double)o.hyst, o.name, s_outOn[i] ? "true" : "false");
       j += b;
     }
     j += "],\"slots\":[";
@@ -1115,6 +1165,41 @@ static void setupWeb() {
     if (old.type == IN_SWITCH || old.type == IN_ANALOG) { memset(&s_slots[old.slot], 0, sizeof s_slots[old.slot]); g_custom_has[old.slot] = false; slotsSave(); }
     input_defaults(&s_inputs[i]); inputsSave();
     server.send(200, "text/plain", String("Input ") + (i + 1) + " removed");
+  });
+  server.on("/outputs/set", HTTP_GET, []() {
+    int i = server.arg("i").toInt(), type = server.arg("type").toInt(), pin = server.arg("pin").toInt();
+    if (i < 0 || i >= HUB_OUTPUTS || type < OUT_SIGNAL || type > OUT_MANUAL) { server.send(400, "text/plain", "Bad output"); return; }
+    if (!output_pin_fits(pin)) { server.send(400, "text/plain", "That pin cannot drive an output (GPIO 34-39 are input only)"); return; }
+    String user = pinUser(pin, -1, i);
+    if (user.length()) { server.send(400, "text/plain", "That pin is already used by " + user); return; }
+    if (pin_is_mcp(pin) && !s_mcpAddr[(pin - PIN_MCP_BASE) / 16]) { server.send(400, "text/plain", "That expander was not found"); return; }
+    String nm = server.arg("name"); nm.trim();
+    if (!nm.length()) { server.send(400, "text/plain", "Give the output a name"); return; }
+    HubOutput o; output_defaults(&o);
+    o.type = type; o.pin = pin; o.active_low = server.arg("low") == "1"; o.blink = server.arg("blink") == "1";
+    int sg = server.arg("sig").toInt(), cd = server.arg("cond").toInt(), in = server.arg("input").toInt();
+    if (type == OUT_SIGNAL && (sg < 1 || sg >= SIG_COUNT || cd < OUTC_ON || cd > OUTC_BELOW)) { server.send(400, "text/plain", "Pick a signal and when it switches on"); return; }
+    if (type == OUT_INPUT && (in < 0 || in >= HUB_INPUTS || s_inputs[in].type == IN_NONE)) { server.send(400, "text/plain", "Pick an input that is set up"); return; }
+    o.sig = sg; o.cond = cd; o.input = in; o.level = server.arg("level").toFloat(); o.hyst = fabsf(server.arg("hyst").toFloat());
+    int w = 0; for (unsigned c = 0; c < nm.length() && w < 15; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') o.name[w++] = ch; } o.name[w] = 0;
+    const HubOutput &old = s_outputs[i];
+    if (old.type != OUT_NONE && old.pin != pin && !pin_is_mcp(old.pin)) pinMode(old.pin, INPUT);   // let the old pin go
+    s_outputs[i] = o; s_outOn[i] = false; s_outManual[i] = false;
+    outputPinSetup(o); outputsSave();
+    server.send(200, "text/plain", String("Output ") + (i + 1) + " saved");
+  });
+  server.on("/outputs/clear", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= HUB_OUTPUTS) { server.send(400, "text/plain", "Bad output"); return; }
+    const HubOutput &old = s_outputs[i];
+    if (old.type != OUT_NONE && !pin_is_mcp(old.pin)) pinMode(old.pin, INPUT);
+    output_defaults(&s_outputs[i]); s_outOn[i] = false; outputsSave();
+    server.send(200, "text/plain", String("Output ") + (i + 1) + " removed");
+  });
+  server.on("/outputs/toggle", HTTP_GET, []() {   // the page's on / off button for a "button or page" output
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= HUB_OUTPUTS || s_outputs[i].type != OUT_MANUAL) { server.send(400, "text/plain", "Not a switchable output"); return; }
+    outputToggle(i + 1); server.send(200, "text/plain", s_outManual[i] ? "On" : "Off");
   });
   server.on("/pins/set", HTTP_GET, []() {   // move a fixed function to another GPIO: saved, applied after a restart
     String key = server.arg("role"); int g = server.arg("gpio").toInt(), r = -1;
@@ -1226,8 +1311,8 @@ static void dataTask(void *) {
 void setup() {
   Serial.begin(115200);
   pinsLoad();   // first: every pin below comes from the map
-  pinMode(BTN_NEXT, INPUT_PULLUP);
-  pinMode(BTN_PREV, INPUT_PULLUP);
+  if (!pin_is_mcp(BTN_NEXT)) pinMode(BTN_NEXT, INPUT_PULLUP);   // on the expander, its pull-ups do it
+  if (!pin_is_mcp(BTN_PREV)) pinMode(BTN_PREV, INPUT_PULLUP);
   s_adcLock = xSemaphoreCreateMutex();   // before any task reads the ADC
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);   // about 0 - 3.1 V at the pins
@@ -1268,6 +1353,8 @@ void setup() {
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   inputsLoad();  // configurable inputs
+  outputsLoad(); // configurable outputs
+  for (int i = 0; i < HUB_OUTPUTS; i++) outputPinSetup(s_outputs[i]);
   for (int i = 0; i < HUB_INPUTS; i++) inputPinSetup(s_inputs[i]);
   imuLoad();     // accelerometer mounting and zero
   pagesLoad();   // OLED pages
@@ -1292,7 +1379,7 @@ void setup() {
 
 void loop() {
   handleButtons();
-  { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); } }
+  { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); outputsStep(); } }
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }
   sim_loop();

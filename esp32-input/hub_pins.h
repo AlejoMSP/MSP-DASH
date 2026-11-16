@@ -59,9 +59,16 @@ static const HubPinRoleInfo HUB_PIN_ROLES[PR_COUNT] = {
   { "i2c_sda",  "I2C SDA (OLED, MPU6050, MCP23017)", 5, CAP_IN | CAP_OUT, "R15" },
   { "i2c_scl",  "I2C SCL (OLED, MPU6050, MCP23017)", 15, CAP_IN | CAP_OUT, "R21" },
 };
-// Can this role sit on that GPIO?
+// Pins 100.. are MCP23017 expander pins: board 1 PA0..PB7 = 100..115, board 2 = 116..131 (used by inputs, outputs and
+// the two page buttons; nothing else can run through the expander).
+#define PIN_MCP_BASE 100
+static inline bool pin_is_mcp(int p) { return p >= PIN_MCP_BASE && p < PIN_MCP_BASE + 32; }
+// Roles that may sit on an expander pin: slow on/off inputs only.
+static inline bool pin_role_mcp_ok(int role) { return role == PR_BTN_NEXT || role == PR_BTN_PREV; }
+// Can this role sit on that GPIO (or expander pin)?
 static inline bool pin_role_fits(int role, int g) {
   if (role < 0 || role >= PR_COUNT) return false;
+  if (pin_is_mcp(g)) return pin_role_mcp_ok(role);
   uint8_t c = gpio_caps(g), need = HUB_PIN_ROLES[role].need;
   return c && (c & need) == need;
 }

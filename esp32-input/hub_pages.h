@@ -580,11 +580,17 @@ button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px
 <div class="card"><h3>Inputs</h3><div id="inputs"></div><p><button onclick="edit(-1)">Add an input</button></p>
 <div id="editor"></div>
 <p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. Active when LOW: a switch to ground (closed = active), or a 12 V signal through a PC817 optocoupler board. Active when HIGH: a switch that opens when active, or a 12 V signal through a 47k / 10k divider with a clamp. Never 12 V straight to a pin (3.3 V at most). Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
+<div class="card"><h3>Outputs</h3><div id="outputs"></div><p><button onclick="editOut(-1)">Add an output</button></p>
+<div id="oeditor"></div>
+<p class="note">An output switches on when a signal crosses a level (with hysteresis so it does not chatter), when an input is active, or when you toggle it (here, or with the "Toggle output" button action and its number). A pin gives 3.3 V and a few mA: drive a relay module, a transistor or an LED, never a motor or a lamp directly. Most relay modules switch on with LOW.</p></div>
 <div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
 <p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
 <p class="note">Free pin: "Set up an input" makes it a button, switch or sensor. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
 <script>
-const $=id=>document.getElementById(id);let D=null,editing=null;
+const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
+11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
+20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
+const $=id=>document.getElementById(id);let D=null,editing=null,oedit=null;
 const TYPES=["","Button","Switch","Analog sensor"],CAPS={1:"in",2:"out",4:"analog",8:"pull-up"};
 const PARAM_ACTIONS={4:"page",7:"scheme",8:"race page"};
 const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
@@ -593,13 +599,14 @@ const pinName=p=>p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+(
 function caps(c){return Object.keys(CAPS).filter(k=>c&k).map(k=>'<span class="cap">'+CAPS[k]+'</span>').join("");}
 function msg(t){$("msg").textContent=t;}
 async function load(){try{D=await (await fetch("/inputs.json")).json();render();}catch(e){msg("Could not reach the hub");}}
-function render(){
+function render(){renderOutputs();
  const rows=D.gpios.map(g=>{const role=D.roles.find(r=>r.gpio===g.g);
   let mv="";if(role){const fits=D.gpios.filter(x=>(x.caps&role.need)===role.need&&(!x.user||x.g===g.g));
-   mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
+   const mcpFree=[];if(role.mcp)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])mcpFree.push(100+e*16+n);
+   mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+mcpFree.map(p=>opt(p,pinName(p))).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
   if(!role)mv=pinAction(g.g,g.user,g.caps);
   return '<tr><td>GPIO '+g.g+'</td><td>'+caps(g.caps)+(g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</td><td'+(g.user?'':' class="free"')+'>'+(g.user?esc(g.user):"free")+'</td><td>'+mv+'</td></tr>';});
- for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+pinAction(100+e*16+n,u,9)+'</td></tr>');}
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];const rl=D.roles.find(r=>r.gpio===100+e*16+n);rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">out</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+(rl?moveList(rl,100+e*16+n):pinAction(100+e*16+n,u,11))+'</td></tr>');}
  $("pins").innerHTML=rows.join("");
  const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
@@ -608,9 +615,14 @@ function render(){
   return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
  if(editing!==null)drawEditor();}
 // The button beside a pin: set up an input on a free pin, edit the input already on it, or open the OLED lamps.
+function moveList(role,at){   // a fixed function on an expander pin: move it back to a GPIO or to another expander pin
+ const g=D.gpios.filter(x=>(x.caps&role.need)===role.need&&!x.user).map(x=>x.g),m=[];
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])m.push(100+e*16+n);
+ return '<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+g.concat(m).filter(p=>p!==at).map(p=>opt(p,pinName(p))).join("")+'</select>';}
 function pinAction(pin,user,c){
- if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>';
+ if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>'+((c&2)?' <button class="sec" onclick="assignOut('+pin+')">Set up an output</button>':'');
  const m=/^Input (\d+)/.exec(user);if(m)return '<button class="sec" onclick="edit('+(m[1]-1)+')">Edit input</button>';
+ const o=/^Output (\d+)/.exec(user);if(o)return '<button class="sec" onclick="editOut('+(o[1]-1)+')">Edit output</button>';
  if(/^OLED lamp/.test(user))return '<a href="/oled" style="color:#4dd0e1">OLED lamps</a>';
  return "";}
 function assignPin(pin,c){const i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}
@@ -654,5 +666,42 @@ async function clearIn(i){if(!confirm("Remove input "+(i+1)+"?"))return;const r=
 async function movePin(key,g){const role=D.roles.find(r=>r.key===key);if(!confirm("Move "+role.name+" from GPIO "+role.gpio+" to GPIO "+g+"? The hub restarts."))return;
  const r=await fetch("/pins/set?role="+key+"&gpio="+g);msg(await r.text());if(r.ok)setTimeout(load,6000);}
 async function pinsDefaults(){if(!confirm("Put every function back on its default GPIO? The hub restarts."))return;msg(await (await fetch("/pins/defaults")).text());setTimeout(load,6000);}
-load();setInterval(()=>{if(editing===null)load();},2000);
+// ---- outputs ----
+const OTYPES=["","A signal","An input is active","Toggled (button action or this page)"],OCOND=["is on","above","below"];
+function outPins(i){const cur=D.outputs[i]||{},out=[];
+ D.gpios.forEach(g=>{if((g.caps&2)&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
+ return out;}
+function renderOutputs(){const used=D.outputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
+ $("outputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>On when</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
+  const when=x.type===1?(NAME[x.sig]||"signal "+x.sig)+" "+OCOND[x.cond]+(x.cond?" "+x.level:""):x.type===2?"input "+(x.input+1)+" ("+esc((D.inputs[x.input]||{}).name||"")+") active":"toggled";
+  return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+esc(when)+(x.blink?", blinking":"")+'</td><td>'+pinName(x.pin)+(x.low?" (LOW = on)":"")+'</td><td>'+(x.on?'<span class="on">ON</span>':"off")+'</td><td>'+
+   (x.type===3?'<button onclick="toggleOut('+i+')">'+(x.on?"Turn off":"Turn on")+'</button> ':'')+'<button class="sec" onclick="editOut('+i+')">Edit</button> <button class="sec" onclick="clearOut('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No outputs set up yet.</p>';}
+function editOut(i){if(i<0){i=D.outputs.findIndex(x=>!x.type);if(i<0){msg("All 16 outputs are in use");return;}}
+ const x=D.outputs[i];oedit={i:i,type:x.type||1,pin:x.pin,low:x.low,blink:x.blink,sig:x.sig||2,cond:x.type?x.cond:1,input:x.input,level:x.level,hyst:x.hyst,name:x.name||""};drawOut();
+ setTimeout(()=>{const ed=$("oeditor");if(ed&&ed.scrollIntoView)ed.scrollIntoView({behavior:"smooth"});},0);}
+function assignOut(pin){editOut(-1);if(!oedit)return;oedit.pin=pin;drawOut();}
+function okeep(){const o=oedit;if(!o)return;o.name=val("o_name",o.name);o.pin=+val("o_pin",o.pin);o.low=+val("o_low",o.low);o.sig=+val("o_sig",o.sig);o.cond=+val("o_cond",o.cond);
+ o.level=val("o_level",o.level);o.hyst=val("o_hyst",o.hyst);o.input=+val("o_input",o.input);const b=$("o_blink");if(b&&b.checked!==undefined)o.blink=b.checked?1:0;}
+function drawOut(){if(!oedit){$("oeditor").innerHTML="";return;}
+ const o=oedit,pins=outPins(o.i);if(!pins.includes(o.pin))o.pin=pins[0];
+ let h='<div class="card" style="background:#0b1a1d"><h3>Output '+(o.i+1)+'</h3><div class="form">'+
+  '<label>Name<input id="o_name" maxlength="15" value="'+esc(o.name)+'"></label>'+
+  '<label>Pin<select id="o_pin">'+pins.map(p=>opt(p,pinName(p),p===o.pin)).join("")+'</select></label>'+
+  '<label>On means<select id="o_low">'+opt(0,"HIGH (LED, transistor)",!o.low)+opt(1,"LOW (most relay modules)",!!o.low)+'</select></label>'+
+  '<label>Switch on when<select onchange="okeep();oedit.type=+this.value;drawOut()">'+[1,2,3].map(t=>opt(t,OTYPES[t],t===o.type)).join("")+'</select></label>';
+ if(o.type===1)h+='<label>Signal<select id="o_sig">'+Object.keys(NAME).map(k=>opt(k,esc(NAME[k]),+k===o.sig)).join("")+'</select></label>'+
+  '<label>Condition<select id="o_cond" onchange="okeep();drawOut()">'+OCOND.map((c,k)=>opt(k,c,k===o.cond)).join("")+'</select></label>'+
+  (o.cond?'<label>Level<input id="o_level" type="number" step="any" value="'+o.level+'"></label><label>Hysteresis (switches off this far back)<input id="o_hyst" type="number" step="any" value="'+o.hyst+'"></label>':'');
+ if(o.type===2){const ins=D.inputs.map((x,k)=>[x,k]).filter(a=>a[0].type);h+='<label>Input<select id="o_input">'+(ins.length?ins.map(([x,k])=>opt(k,(k+1)+". "+esc(x.name),k===o.input)).join(""):'<option value="">(set up an input first)</option>')+'</select></label>';}
+ if(o.type===3)h+='<p class="note">Turn it on and off from the outputs list, or with a button set to "Toggle output" and number '+(o.i+1)+'.</p>';
+ h+='<label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="o_blink"'+(o.blink?" checked":"")+'> Blink while on</label></div>'+
+  '<button onclick="saveOut()">Save output '+(o.i+1)+'</button> <button class="sec" onclick="oedit=null;drawOut()">Cancel</button></div>';
+ $("oeditor").innerHTML=h;}
+async function saveOut(){okeep();const o=oedit;
+ const q={i:o.i,type:o.type,pin:o.pin,low:o.low,blink:o.blink,name:o.name,sig:o.sig,cond:o.cond,level:o.level,hyst:o.hyst,input:o.input};
+ const r=await fetch("/outputs/set?"+new URLSearchParams(q));msg(await r.text());if(r.ok){oedit=null;drawOut();load();}}
+async function clearOut(i){if(!confirm("Remove output "+(i+1)+"?"))return;msg(await (await fetch("/outputs/clear?i="+i)).text());load();}
+async function toggleOut(i){msg("Output "+(i+1)+": "+(await (await fetch("/outputs/toggle?i="+i)).text()));load();}
+load();setInterval(()=>{if(editing===null&&oedit===null)load();},2000);
 </script></body></html>)HTML";
