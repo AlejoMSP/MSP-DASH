@@ -582,7 +582,7 @@ button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px
 <p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. Active when LOW: a switch to ground (closed = active), or a 12 V signal through a PC817 optocoupler board. Active when HIGH: a switch that opens when active, or a 12 V signal through a 47k / 10k divider with a clamp. Never 12 V straight to a pin (3.3 V at most). Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
 <div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
 <p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
-<p class="note">Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
+<p class="note">Free pin: "Set up an input" makes it a button, switch or sensor. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
 <script>
 const $=id=>document.getElementById(id);let D=null,editing=null;
 const TYPES=["","Button","Switch","Analog sensor"],CAPS={1:"in",2:"out",4:"analog",8:"pull-up"};
@@ -597,8 +597,9 @@ function render(){
  const rows=D.gpios.map(g=>{const role=D.roles.find(r=>r.gpio===g.g);
   let mv="";if(role){const fits=D.gpios.filter(x=>(x.caps&role.need)===role.need&&(!x.user||x.g===g.g));
    mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
+  if(!role)mv=pinAction(g.g,g.user,g.caps);
   return '<tr><td>GPIO '+g.g+'</td><td>'+caps(g.caps)+(g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</td><td'+(g.user?'':' class="free"')+'>'+(g.user?esc(g.user):"free")+'</td><td>'+mv+'</td></tr>';});
- for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td></td></tr>');}
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+pinAction(100+e*16+n,u,9)+'</td></tr>');}
  $("pins").innerHTML=rows.join("");
  const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
@@ -606,14 +607,24 @@ function render(){
   const lvl=x.contact?"active HIGH":"active LOW";const what=x.type===1?"Button ("+lvl+")":x.type===2?"Switch ("+lvl+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
   return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
  if(editing!==null)drawEditor();}
+// The button beside a pin: set up an input on a free pin, edit the input already on it, or open the OLED lamps.
+function pinAction(pin,user,c){
+ if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>';
+ const m=/^Input (\d+)/.exec(user);if(m)return '<button class="sec" onclick="edit('+(m[1]-1)+')">Edit input</button>';
+ if(/^OLED lamp/.test(user))return '<a href="/oled" style="color:#4dd0e1">OLED lamps</a>';
+ return "";}
+function assignPin(pin,c){const i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}
+ edit(i);editing.pin=pin;editing.type=(c&4)&&!(c&8)?3:2;drawEditor();}   // analog-only pins start as a sensor, others as a switch
 function freePins(type,i){const cur=D.inputs[i]||{};const out=[];
  D.gpios.forEach(g=>{const ok=type===3?(g.caps&4):(g.caps&1);if(ok&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
  if(type!==3)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
  return out;}
 function edit(i){if(i<0){i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}}
+ setTimeout(()=>{const ed=$("editor");if(ed&&ed.scrollIntoView)ed.scrollIntoView({behavior:"smooth"});},0);
  const x=D.inputs[i];editing={i:i,type:x.type||1,pin:x.pin,contact:x.contact,slot:x.slot,ap:x.ap,pp:x.pp,ah:x.ah,ph:x.ph,preset:x.preset,mult:x.mult||1,v1:x.v1,val1:x.val1,v2:x.v2||3.3,val2:x.val2||100,pullup:x.pullup||2490,name:x.name||"",unit:""};drawEditor();}
 function freeSlots(e){return D.slots.map((s,k)=>[s,k]).filter(([s,k])=>!s.name||(D.inputs[e.i].type>1&&D.inputs[e.i].slot===k)).map(a=>a[1]);}
-function drawEditor(){const e=editing,pins=freePins(e.type,e.i);if(!pins.includes(e.pin))e.pin=pins[0];
+function drawEditor(){if(!editing){$("editor").innerHTML="";return;}   // Cancel
+ const e=editing,pins=freePins(e.type,e.i);if(!pins.includes(e.pin))e.pin=pins[0];
  let h='<div class="card" style="background:#0b1a1d"><h3>Input '+(e.i+1)+'</h3><div class="form">'+
   '<label>Name<input id="e_name" maxlength="15" value="'+esc(e.name)+'"></label>'+
   '<label>Type<select onchange="editing.type=+this.value;keep();drawEditor()">'+[1,2,3].map(t=>opt(t,TYPES[t],t===e.type)).join("")+'</select></label>'+
