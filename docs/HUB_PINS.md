@@ -43,7 +43,7 @@ Analog-capable GPIOs (ADC1): 32-36 and 39 (all taken by default; move a role to 
 
 | Terminal | What |
 |---|---|
-| L6 | 3.3 V: CC1101, OLED, MPU6050, MCP23017 (never 5 V to the CC1101 or on the I2C bus) |
+| L6 | 3.3 V: CC1101, OLED, MPU6050, MCP23017, ADS1115 (never 5 V to the CC1101 or on the I2C bus) |
 | L24 | 5 V: GPS power |
 | R9 / R10 | GPIO 1 / 3: USB serial (uploads, serial monitor) - do not use |
 | (none) | GPIO 6-11: the flash chip - not usable |
@@ -56,13 +56,15 @@ Analog-capable GPIOs (ADC1): 32-36 and 39 (all taken by default; move a role to 
 | MPU6050 accelerometer | 0x68 (AD0 to 3.3 V: 0x69) | mount solid to the chassis; zero on the hub home page |
 | MCP23017 board 1 (SG-IO-E017) | 0x27 (DIP switch default) | 16 lamp inputs PA0-PA7, PB0-PB7; VCC 3.3 V, never 5 V; INTA/INTB not used |
 | MCP23017 board 2 | 0x26 (set the DIP switch) | 16 more |
+| ADS1115 board 1 | 0x48 (ADDR to GND) | 4 analog channels A0-A3 (pins "ADS1115 #1 A0-A3"); VDD 3.3 V, inputs 0-3.3 V (dividers for 5 V / 12 V) |
+| ADS1115 boards 2-4 | 0x49 (ADDR to VDD), 0x4A (to SDA), 0x4B (to SCL) | 4 channels each |
 
 Wire the devices in parallel from one junction. Keep the bus short (about 30 cm), SDA and SCL twisted with a ground.
 Every module has its own pull-ups; past about 5 modules remove all but one set.
 
 ## Free
 
-GPIO 0, 2 and 12 (power-up limits above), plus 16 inputs on each MCP23017 expander.
+GPIO 0, 2 and 12 (power-up limits above), plus 16 pins on each MCP23017 expander and 4 analog channels on each ADS1115.
 
 ## Elsewhere
 

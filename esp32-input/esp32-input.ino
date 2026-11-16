@@ -44,11 +44,12 @@
 #include "oled_ssd1306.h"    // its I2C driver (GPIO 5 / 15)
 #include "imu_math.h"         // accelerometer: mounting axes, zero, smoothing (host-tested)
 #include "imu_mpu6050.h"      // MPU6050 on the same I2C wires
-#include "mcp23017.h"         // MCP23017 16-input expanders on the same wires (lamp inputs)
+#include "mcp23017.h"         // MCP23017 16-pin expanders on the same wires (inputs, outputs)
+#include "ads1115.h"          // ADS1115 analog channels on the same wires (pins 140..155)
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 51
+#define INPUT_BUILD 52
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -232,12 +233,14 @@ static uint32_t s_lastBriMs = 0;
 // ("adc oneshot read fail") and return 0, so every analog read goes through this lock.
 static SemaphoreHandle_t s_adcLock = NULL;
 static int adcRaw(int pin) {
+  if (pin_is_ads(pin)) return (int)(s_adsV[pin - PIN_ADS_BASE] / 3.3f * 4095.0f + 0.5f);   // ADS1115 channel, on the same 0-4095 scale
   if (s_adcLock) xSemaphoreTake(s_adcLock, portMAX_DELAY);
   int v = analogRead(pin);
   if (s_adcLock) xSemaphoreGive(s_adcLock);
   return v;
 }
 static uint32_t adcMilliVolts(int pin) {
+  if (pin_is_ads(pin)) { float v = s_adsV[pin - PIN_ADS_BASE]; return v > 0 ? (uint32_t)(v * 1000.0f + 0.5f) : 0; }   // ADS1115 channel
   if (s_adcLock) xSemaphoreTake(s_adcLock, portMAX_DELAY);
   uint32_t v = analogReadMilliVolts(pin);
   if (s_adcLock) xSemaphoreGive(s_adcLock);
@@ -583,6 +586,10 @@ static void oledTask(void *) {
   s_imuOk = imuBegin();
   Serial.printf("Accelerometer: %s\n", s_imuOk ? "MPU6050 found" : "not found (SDA GPIO 5, SCL GPIO 15, 3.3 V)");
   int mcpN = mcpBegin();
+  int adsN = adsBegin();
+  Serial.printf("ADS1115: %d board(s)", adsN);
+  for (int b = 0; b < ADS_BOARDS; b++) if (s_adsAddr[b]) Serial.printf(" (0x%02X)", s_adsAddr[b]);
+  Serial.println(adsN ? "" : " - none found (ADDR to GND = 0x48)");
   Serial.printf("OLED: %s | MCP23017 expanders: %d", s_oledOk ? "SSD1306 found" : "not found (VCC 3.3 V, SDA GPIO 5, SCL GPIO 15)", mcpN);
   for (int e = 0; e < mcpN; e++) Serial.printf(" (0x%02X)", s_mcpAddr[e]);
   Serial.println();
@@ -593,6 +600,7 @@ static void oledTask(void *) {
     if (s_imuOk) imuStep();
     mcpRead();   // expander pins every pass: buttons on them need it
     mcpApplyOutputs();   // and outputs on them, when they change
+    adsStep();           // ADS1115 channels: the next conversion on each board
     if (++tick % 10) continue;
     uint8_t st[OLED_LAMPS];
     bool anyLit = false;
@@ -1094,6 +1102,12 @@ static void setupWeb() {
     j += "],\"mcp\":["; j += String((int)s_mcpAddr[0]); j += ","; j += String((int)s_mcpAddr[1]); j += "],\"mcpbits\":["; j += String((int)s_mcpBits[0]); j += ","; j += String((int)s_mcpBits[1]);
     j += "],\"mcpusers\":[";
     for (int n = 0; n < 32; n++) { if (n) j += ","; j += "\""; j += pinUser(INPUT_MCP_BASE + n, -1); j += "\""; }
+    j += "],\"ads\":[";
+    for (int b = 0; b < ADS_BOARDS; b++) { if (b) j += ","; j += String((int)s_adsAddr[b]); }
+    j += "],\"adsv\":[";
+    for (int n = 0; n < 16; n++) { char v[16]; snprintf(v, sizeof v, "%s%.3f", n ? "," : "", (double)s_adsV[n]); j += v; }
+    j += "],\"adsusers\":[";
+    for (int n = 0; n < 16; n++) { if (n) j += ","; j += "\""; j += pinUser(PIN_ADS_BASE + n, -1); j += "\""; }
     j += "],\"inputs\":[";
     for (int i = 0; i < HUB_INPUTS; i++) {
       const HubInput &in = s_inputs[i]; char b[420];
@@ -1122,7 +1136,8 @@ static void setupWeb() {
   server.on("/inputs/set", HTTP_GET, []() {
     int i = server.arg("i").toInt(), type = server.arg("type").toInt(), pin = server.arg("pin").toInt(), slot = server.arg("slot").toInt();
     if (i < 0 || i >= HUB_INPUTS || type < IN_BUTTON || type > IN_ANALOG) { server.send(400, "text/plain", "Bad input"); return; }
-    if (!input_pin_fits(type, pin)) { server.send(400, "text/plain", type == IN_ANALOG ? "An analog sensor needs an analog GPIO: 32, 33, 34, 35, 36 or 39" : "That pin cannot be an input"); return; }
+    if (!input_pin_fits(type, pin)) { server.send(400, "text/plain", type == IN_ANALOG ? "An analog sensor needs an analog pin: GPIO 32-36, 39 or an ADS1115 channel" : "That pin cannot be an input"); return; }
+    if (pin_is_ads(pin) && !adsFound(pin)) { server.send(400, "text/plain", "That ADS1115 was not found"); return; }
     String user = pinUser(pin, i);
     if (user.length()) { server.send(400, "text/plain", "That pin is already used by " + user); return; }
     if (type != IN_BUTTON) {
@@ -1206,6 +1221,7 @@ static void setupWeb() {
     for (int k = 0; k < PR_COUNT; k++) if (key == HUB_PIN_ROLES[k].key) r = k;
     if (r < 0) { server.send(400, "text/plain", "Unknown function"); return; }
     if (!pin_role_fits(r, g)) { server.send(400, "text/plain", String("GPIO ") + g + " cannot do that (" + HUB_PIN_ROLES[r].name + ")"); return; }
+    if (pin_is_ads(g) && !adsFound(g)) { server.send(400, "text/plain", "That ADS1115 was not found"); return; }
     String user = pinUser(g, -1);
     if (user.length() && pin_map_role_at(g_pins, g) != r) { server.send(400, "text/plain", "GPIO " + String(g) + " is already used by " + user); return; }
     uint8_t m[PR_COUNT]; memcpy(m, g_pins, sizeof m); m[r] = g;

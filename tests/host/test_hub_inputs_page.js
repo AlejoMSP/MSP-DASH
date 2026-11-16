@@ -11,7 +11,7 @@ const D = {
   outputs: [{ type: 1, pin: 13, low: 1, blink: 0, sig: 2, cond: 1, input: 0, level: 200, hyst: 5, name: "Fan relay", on: true },
             { type: 3, pin: 108, low: 0, blink: 1, sig: 0, cond: 0, input: 0, level: 0, hyst: 0, name: "Light bar", on: false }].concat(Array(14).fill({ type: 0, pin: 0, low: 0, blink: 0, sig: 0, cond: 0, input: 0, level: 0, hyst: 0, name: "", on: false })),
   gpios: [gp(0, 11, "", "BOOT button"), gp(2, 11, "Input 1 (Horn)"), gp(12, 11), gp(21, 11, "CAN TX"), gp(25, 11, "Right (next) button"), gp(33, 15, "Input 2 (Oil psi)"), gp(34, 5, "", "input only"), gp(36, 5, "Fuel level sender")],
-  mcp: [0x27, 0], mcpbits: [0xFFFF, 0xFFFF], mcpusers: Array(32).fill("").map((u, n) => n === 3 ? "OLED lamp 5" : ""),
+  mcp: [0x27, 0], mcpbits: [0xFFFF, 0xFFFF], ads: [0x48, 0, 0, 0], adsv: [1.234, 0.5, 0, 3.1].concat(Array(12).fill(0)), adsusers: ["", "Input 9 (Boost)", "", ""].concat(Array(12).fill("")), mcpusers: Array(32).fill("").map((u, n) => n === 3 ? "OLED lamp 5" : ""),
   inputs: [Object.assign({}, noInput, { type: 1, pin: 2, contact: 0, ap: 1, ah: 8, ph: 2, name: "Horn", active: true }),
            Object.assign({}, noInput, { type: 3, pin: 33, slot: 4, preset: 1, name: "Oil psi", active: true, value: 42.4 })].concat(Array(14).fill(noInput)),
   slots: Array(16).fill(0).map((x, k) => ({ name: k === 4 ? "Oil psi" : k === 0 ? "Wastegate" : "", src: k === 4 ? 2 : k === 0 ? 1 : 0 })),
@@ -57,6 +57,13 @@ const R = c => vm.runInContext(c, ctx);
   let oq = new URLSearchParams(gets.filter(u => u.startsWith("/outputs/set?")).pop().split("?")[1]);
   check(oq.get("i") === "2" && oq.get("type") === "1" && oq.get("pin") === "12" && oq.get("low") === "1" && oq.get("sig") === "6" && oq.get("level") === "230" && oq.get("hyst") === "10", "output saved: GPIO 12, LOW = on, Oil Temp above 230, 10 back");
   await R("toggleOut(1)"); await settle(); check(gets.includes("/outputs/toggle?i=1"), "Turn on / off from the list");
+  console.log("1c. ADS1115 channels");
+  check(/ADS1115 #1 A0<\/td>[\s\S]*?now 1.234 V[\s\S]*?class="free">free[\s\S]*?assignPin\(140,4\)">Set up an input/.test(p) && !/assignOut\(140\)/.test(p), "an ADS channel: its volts, free, can be an input (not an output)");
+  check(/ADS1115 #1 A1<\/td>[\s\S]*?Input 9 \(Boost\)/.test(p) && /ADS1115 #1 A3/.test(p) && !/ADS1115 #2/.test(p), "used channels named; only found boards listed");
+  check(/value="140">ADS1115 #1 A0/.test(fuelRow) && !/value="141"/.test(fuelRow) && !/value="140"/.test(btnRow), "the fuel sender can move onto a free ADS channel; a button cannot");
+  R("assignPin(140, 4)"); { const ae = el("editor").innerHTML;
+    check(/<option value="3" selected>Analog sensor<\/option>/.test(ae) && /<option value="140" selected>ADS1115 #1 A0<\/option>/.test(ae) && !/value="141"/.test(ae), "set up on an ADS channel: an analog sensor there (taken A1 not offered)"); }
+  R("editing = null; drawEditor()");
   console.log("2. the inputs list");
   const l = el("inputs").innerHTML;
   check(/Horn<\/td><td>Button \(active LOW\)<\/td><td>GPIO 2<\/td><td><span class="on">ACTIVE<\/span>/.test(l), "button: active LOW, GPIO 2, active now");

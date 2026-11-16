@@ -148,7 +148,7 @@ $("imu").innerHTML=kv("Lateral",m.lat.toFixed(2)+" G")+kv("Accel / brake",m.lon.
 if(!imu.done){$("ifwd").value=String(m.fwd);$("ileft").value=String(m.left);imu.done=1;}}catch(e){}}
 async function imuSet(){$("imsg").textContent=await (await fetch("/imu/set?fwd="+$("ifwd").value+"&left="+$("ileft").value)).text();}
 async function imuZero(){$("imsg").textContent=await (await fetch("/imu/zero")).text();}
-const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x20:"MCP23017",0x21:"MCP23017",0x22:"MCP23017",0x23:"MCP23017",0x24:"MCP23017",0x25:"MCP23017",0x26:"MCP23017",0x27:"MCP23017"};
+const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x48:"ADS1115",0x49:"ADS1115",0x4A:"ADS1115",0x4B:"ADS1115",0x20:"MCP23017",0x21:"MCP23017",0x22:"MCP23017",0x23:"MCP23017",0x24:"MCP23017",0x25:"MCP23017",0x26:"MCP23017",0x27:"MCP23017"};
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 $("i2c").innerHTML=h;}catch(e){}}
@@ -585,7 +585,7 @@ button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px
 <p class="note">An output switches on when a signal crosses a level (with hysteresis so it does not chatter), when an input is active, or when you toggle it (here, or with the "Toggle output" button action and its number). A pin gives 3.3 V and a few mA: drive a relay module, a transistor or an LED, never a motor or a lamp directly. Most relay modules switch on with LOW.</p></div>
 <div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
 <p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
-<p class="note">Free pin: "Set up an input" makes it a button, switch or sensor. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
+<p class="note">ADS1115 channels (if fitted, ADDR to GND = 0x48) are analog pins: sensors and the analog functions can use them; 0 to 3.3 V only. Free pin: "Set up an input" makes it a button, switch or sensor. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
@@ -595,7 +595,9 @@ const TYPES=["","Button","Switch","Analog sensor"],CAPS={1:"in",2:"out",4:"analo
 const PARAM_ACTIONS={4:"page",7:"scheme",8:"race page"};
 const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
 const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
-const pinName=p=>p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+((p-100)%8):"GPIO "+p;
+const pinName=p=>p>=140?"ADS1115 #"+(Math.floor((p-140)/4)+1)+" A"+((p-140)%4):p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+((p-100)%8):"GPIO "+p;
+// ADS1115 channels found, free or not: [pin, user]
+function adsPins(){const out=[];(D.ads||[]).forEach((a,b)=>{if(a)for(let c=0;c<4;c++)out.push([140+b*4+c,(D.adsusers||[])[b*4+c]||""]);});return out;}
 function caps(c){return Object.keys(CAPS).filter(k=>c&k).map(k=>'<span class="cap">'+CAPS[k]+'</span>').join("");}
 function msg(t){$("msg").textContent=t;}
 async function load(){try{D=await (await fetch("/inputs.json")).json();render();}catch(e){msg("Could not reach the hub");}}
@@ -603,10 +605,14 @@ function render(){renderOutputs();
  const rows=D.gpios.map(g=>{const role=D.roles.find(r=>r.gpio===g.g);
   let mv="";if(role){const fits=D.gpios.filter(x=>(x.caps&role.need)===role.need&&(!x.user||x.g===g.g));
    const mcpFree=[];if(role.mcp)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])mcpFree.push(100+e*16+n);
+   if(role.need===4)adsPins().forEach(([p,u])=>{if(!u)mcpFree.push(p);});   // analog-only roles: an ADS1115 channel
    mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+mcpFree.map(p=>opt(p,pinName(p))).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
   if(!role)mv=pinAction(g.g,g.user,g.caps);
   return '<tr><td>GPIO '+g.g+'</td><td>'+caps(g.caps)+(g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</td><td'+(g.user?'':' class="free"')+'>'+(g.user?esc(g.user):"free")+'</td><td>'+mv+'</td></tr>';});
  for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];const rl=D.roles.find(r=>r.gpio===100+e*16+n);rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">out</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+(rl?moveList(rl,100+e*16+n):pinAction(100+e*16+n,u,11))+'</td></tr>');}
+ adsPins().forEach(([p,u])=>{const rl=D.roles.find(r=>r.gpio===p),b=Math.floor((p-140)/4);
+  rows.push('<tr><td>'+pinName(p)+'</td><td><span class="cap">analog</span><div class="note">0x'+D.ads[b].toString(16).toUpperCase()+', now '+((D.adsv||[])[p-140]||0).toFixed(3)+' V (0-3.3 V)</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+
+   (rl?moveList(rl,p):pinAction(p,u,4))+'</td></tr>');});
  $("pins").innerHTML=rows.join("");
  const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
@@ -615,9 +621,10 @@ function render(){renderOutputs();
   return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
  if(editing!==null)drawEditor();}
 // The button beside a pin: set up an input on a free pin, edit the input already on it, or open the OLED lamps.
-function moveList(role,at){   // a fixed function on an expander pin: move it back to a GPIO or to another expander pin
+function moveList(role,at){   // a fixed function on an expander or ADS pin: move it to a GPIO or another such pin
  const g=D.gpios.filter(x=>(x.caps&role.need)===role.need&&!x.user).map(x=>x.g),m=[];
- for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])m.push(100+e*16+n);
+ if(role.mcp)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])m.push(100+e*16+n);
+ if(role.need===4)adsPins().forEach(([p,u])=>{if(!u)m.push(p);});
  return '<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+g.concat(m).filter(p=>p!==at).map(p=>opt(p,pinName(p))).join("")+'</select>';}
 function pinAction(pin,user,c){
  if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>'+((c&2)?' <button class="sec" onclick="assignOut('+pin+')">Set up an output</button>':'');
@@ -630,6 +637,7 @@ function assignPin(pin,c){const i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("Al
 function freePins(type,i){const cur=D.inputs[i]||{};const out=[];
  D.gpios.forEach(g=>{const ok=type===3?(g.caps&4):(g.caps&1);if(ok&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
  if(type!==3)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
+ if(type===3)adsPins().forEach(([p,u])=>{if(!u||(cur.type&&cur.pin===p))out.push(p);});
  return out;}
 function edit(i){if(i<0){i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}}
  setTimeout(()=>{const ed=$("editor");if(ed&&ed.scrollIntoView)ed.scrollIntoView({behavior:"smooth"});},0);

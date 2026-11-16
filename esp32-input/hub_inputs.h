@@ -58,6 +58,7 @@ typedef struct __attribute__((packed)) {
 // Is the pin usable for this kind of input? (Pull-up needed for buttons / switches on hub pins: 34-39 have none.)
 static inline bool input_pin_fits(int type, int pin) {
   if (input_is_mcp(pin)) return type == IN_BUTTON || type == IN_SWITCH;   // the MCP23017 has no analog
+  if (pin_is_ads(pin)) return type == IN_ANALOG;                           // the ADS1115 is analog only
   uint8_t c = gpio_caps(pin);
   if (type == IN_ANALOG) return (c & CAP_ADC) != 0;
   if (type == IN_BUTTON || type == IN_SWITCH) return (c & CAP_IN) != 0;   // 34-39 work with an outside pull-up

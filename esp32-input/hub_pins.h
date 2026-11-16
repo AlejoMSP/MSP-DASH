@@ -63,12 +63,16 @@ static const HubPinRoleInfo HUB_PIN_ROLES[PR_COUNT] = {
 // the two page buttons; nothing else can run through the expander).
 #define PIN_MCP_BASE 100
 static inline bool pin_is_mcp(int p) { return p >= PIN_MCP_BASE && p < PIN_MCP_BASE + 32; }
+// Pins 140.. are ADS1115 analog channels: board 1 (0x48) A0..A3 = 140..143, 0x49 = 144..147, 0x4A, 0x4B (up to 16).
+#define PIN_ADS_BASE 140
+static inline bool pin_is_ads(int p) { return p >= PIN_ADS_BASE && p < PIN_ADS_BASE + 16; }
 // Roles that may sit on an expander pin: slow on/off inputs only.
 static inline bool pin_role_mcp_ok(int role) { return role == PR_BTN_NEXT || role == PR_BTN_PREV; }
 // Can this role sit on that GPIO (or expander pin)?
 static inline bool pin_role_fits(int role, int g) {
   if (role < 0 || role >= PR_COUNT) return false;
   if (pin_is_mcp(g)) return pin_role_mcp_ok(role);
+  if (pin_is_ads(g)) return HUB_PIN_ROLES[role].need == CAP_ADC;   // analog-only roles (fuel, knob, lights, dimmer)
   uint8_t c = gpio_caps(g), need = HUB_PIN_ROLES[role].need;
   return c && (c & need) == need;
 }

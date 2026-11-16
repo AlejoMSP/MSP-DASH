@@ -64,6 +64,9 @@ int main() {
   o.active_low = 1; o.blink = 0; CHECK(!output_pin_high(&o, true, 0) && output_pin_high(&o, false, 0), "relay (LOW = on): on drives LOW, off HIGH");
   o.active_low = 0; o.blink = 1; CHECK(output_pin_high(&o, true, 100) && !output_pin_high(&o, true, 300) && !output_pin_high(&o, false, 100), "blinking: on/off every 250 ms while on, steady off");
   CHECK(sizeof(HubOutput) == 32, "saved output: 32 bytes");
+  { uint8_t mm[PR_COUNT]; pin_map_defaults(mm); mm[PR_FUEL] = PIN_ADS_BASE + 2; CHECK(pin_map_valid(mm), "the fuel sender can move onto an ADS1115 channel");
+    pin_map_defaults(mm); mm[PR_BTN_NEXT] = PIN_ADS_BASE; CHECK(!pin_map_valid(mm), "a button cannot (analog only)"); }
+  CHECK(input_pin_fits(IN_ANALOG, PIN_ADS_BASE + 7) && !input_pin_fits(IN_SWITCH, PIN_ADS_BASE) && !output_pin_fits(PIN_ADS_BASE), "ADS channels: analog sensors only, not switches or outputs");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

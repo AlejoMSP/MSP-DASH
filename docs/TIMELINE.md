@@ -233,3 +233,4 @@ Every commit in order. The number is the build number (build number = commit cou
 | (hub 49) | 2026-11-15 | (this commit) | Inputs page: NO/NC renamed to Active when LOW (switch to ground, optocoupler) / Active when HIGH (12 V through a divider), with the 12 V wiring note |
 | (hub 50) | 2026-11-15 | (this commit) | Inputs page: every free pin (GPIO and MCP23017) has 'Set up an input' (opens the editor on that pin), pins with an input have 'Edit input', lamp pins link to /oled; Cancel fixed |
 | 211 | 2026-11-15 | (this commit) | Hub 51: outputs (signal level with hysteresis / input / toggle; GPIO or MCP23017; HIGH or LOW = on; blink), page buttons can move onto expander pins, Toggle output button action (screens: its name in the pop-up) |
+| (hub 52) | 2026-11-15 | (this commit) | ADS1115 back on the bus: up to 4 boards, channels as analog pins on the Inputs and pins page (analog sensors, and the fuel / knob / lights / dimmer functions can move onto them) |
