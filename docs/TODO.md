@@ -42,3 +42,7 @@ V at input = V in x R2 / (R1 + R2). Aim for about 3.0 V at the highest voltage e
 Clamp for 12 V lines (load-dump spikes up to about 40 V): BAT54S dual Schottky, middle pin to the input, ends to 3.3 V
 and GND (or a 3.3 V zener from input to GND); the 47 k limits the current. Use 1 % resistors and check the multiplier
 once against a multimeter.
+
+## PDM (parked)
+
+- Power distribution module: notes in [pdm/README.md](../pdm/README.md). Pick the board approach (carrier first or fully integrated), then the CAN layout.
