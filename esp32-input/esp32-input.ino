@@ -1,17 +1,18 @@
 // esp32-input - MSP-DASH input board.
-// Reads 2 buttons (next / previous page) and a knob (brightness) and sends them to every screen over ESP-NOW.
+// Reads the buttons (Buttons page) and a knob (brightness) and sends them to every screen over ESP-NOW.
 // Also on the home network for WiFi updates: same curl command as the screens, at its own IP.
 //
 // Bench board: ESP32-D (classic ESP32, fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio: at the default 80 MHz this board
 // boot-looped reading garbage from flash). Later: the S2 Mini (change the pins below).
 // Car inputs (see the web page at this board's IP for settings): lights-on wire -> 47k -> GPIO 35, and 10k from GPIO 35 to GND;
 //   dimmer wire the same into GPIO 32 (add 10 uF from GPIO 32 to GND if the dimmer is PWM).
-// Wiring: button between BTN_NEXT and GND, button between BTN_PREV and GND (internal pull-ups),
+// Wiring: buttons to GND on any free pin (internal pull-ups), or several on one analog pin through resistors (Buttons page),
 //         10k knob: outer legs to 3.3 V and GND, middle leg to POT_PIN (ADC1 only: ADC2 doesn't work with the radio on).
 // Copy wifi_config.h.example to wifi_config.h and fill in the network, the same one the screens use.
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
-#include "hub_inputs.h"       // configurable inputs: buttons, switches, analog sensors (Inputs page)
+#include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "hub_buttons.h"      // every button: digital or on a resistor ladder, one action each (Buttons page)
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -29,7 +30,7 @@
 #include "custom_slots.h"    // copied in: the 16 custom sensor slots (the /custom page)
 #include "color_presets.h"   // copied in: the 10 colour schemes
 #include "button_actions.h"  // copied in: the actions the buttons can run (/buttons page)
-#include "btn_logic.h"       // press / hold-time events (host-tested)
+#include "btn_logic.h"       // screen order for "Next gauge"; the old button table (read once, host-tested)
 // Runtime serial messages are off unless SERIAL_STREAM is 1; boot messages always print (same macro as can_parsing.h).
 #ifndef RT_LOG
 #if defined(SERIAL_STREAM) && SERIAL_STREAM
@@ -49,7 +50,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 52
+#define INPUT_BUILD 53
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -98,11 +99,22 @@ volatile bool g_imu_has[4];
 // ---- the pin map (hub_pins.h): defaults, or the moves saved on the Inputs page (NVS "pins"), applied at start-up ----
 uint8_t g_pins[PR_COUNT];
 static bool s_pinsMoved = false;
+static uint8_t s_oldBtnNext = PIN_BTN_NEXT_DEF, s_oldBtnPrev = PIN_BTN_PREV_DEF;   // page buttons from a map saved before hub 53
 static void pinsLoad() {
   pin_map_defaults(g_pins);
   uint8_t m[PR_COUNT];
-  Preferences p; p.begin("pins", true);
-  bool got = p.getBytes("map", m, sizeof m) == sizeof m;
+  Preferences p; p.begin("pins", false);
+  size_t len = p.getBytesLength("map");
+  bool got = false;
+  if (len == PIN_MAP_OLD_COUNT) {   // saved before hub 53: the two page buttons were in it. Take them out (Buttons page).
+    uint8_t old[PIN_MAP_OLD_COUNT];
+    if (p.getBytes("map", old, sizeof old) == sizeof old) {
+      pin_map_upgrade(old, m, &s_oldBtnNext, &s_oldBtnPrev);
+      got = true;
+      if (pin_map_valid(m)) p.putBytes("map", m, sizeof m); else p.remove("map");
+      Serial.printf("Pin map upgraded: page buttons on %d / %d go to the Buttons page\n", s_oldBtnPrev, s_oldBtnNext);
+    }
+  } else if (len == sizeof m) got = p.getBytes("map", m, sizeof m) == sizeof m;
   p.end();
   if (got && pin_map_valid(m)) memcpy(g_pins, m, sizeof m);   // a saved map that does not check out: defaults
   for (int r = 0; r < PR_COUNT; r++) if (g_pins[r] != HUB_PIN_ROLES[r].def) s_pinsMoved = true;
@@ -199,7 +211,7 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   const char *what = cmd == LINK_CMD_PAGE_NEXT ? "next page" : cmd == LINK_CMD_PAGE_PREV ? "previous page" : cmd == LINK_CMD_SELECT ? "buttons control"
                    : cmd == LINK_CMD_ALERT_ACK ? "clear warning" : cmd == LINK_CMD_LOG_MARK ? "log marker" : cmd == LINK_CMD_GOTO_PAGE ? "go to page"
                    : cmd == LINK_CMD_COLOR ? "color scheme" : cmd == LINK_CMD_RACE ? "race mode" : cmd == LINK_CMD_HINT ? "hint"
-                   : cmd == LINK_CMD_SHOW_IP ? "show IP" : "brightness";
+                   : cmd == LINK_CMD_SHOW_IP ? "show IP" : cmd == LINK_CMD_POPUP ? "pop-up" : "brightness";
   if (cmd == LINK_CMD_SELECT) snprintf(s_last, sizeof(s_last), "%s %s", what, target[0] ? target : "all screens");
   else if (cmd == LINK_CMD_ALERT_ACK) snprintf(s_last, sizeof(s_last), "%s", what);
   else snprintf(s_last, sizeof(s_last), "%s %d%s%s", what, value, target[0] ? " to " : "", target);
@@ -340,12 +352,24 @@ static void gpsTask(void *) {
   }
 }
 
-// ---- CAN frame 0x7F0 to rusEFI, 4 times a second: EGT ----
+// ---- CAN frames to rusEFI, 4 times a second: 0x7F0 EGT, and the ECU map frame ----
 //   bytes 0-1 EGT deg C (LE), byte 2 = 1 if the thermocouple is open. (Speed: the hall sensor is wired to rusEFI.)
 // Sent only while the ECU was heard in the last second (an unanswered frame pushes the hub to bus-off).
+static EcuMapCfg s_ecuMap;                         // the ECU maps (Buttons page), the one in use
+static volatile bool s_ecuMapUsed = false;         // a button runs "ECU map (next)": the map frame goes out
+static volatile bool s_ecuMapSendNow = false;      // just changed: send it now
+// ECU map frame (Buttons page, "ECU map (next)"): its id, byte 0 = map number (1-based), byte 1 = how many maps.
+// Sent with the EGT frame (same rule: only while the ECU is heard), and at once after a press. Only if a button uses it.
+static void canSendEcuMap() {
+  if (!s_ecuMapUsed || s_egtHeld) return;
+  s_ecuMapSendNow = false;
+  twai_message_t m = {};
+  m.identifier = s_ecuMap.id; m.data_length_code = 2; m.data[0] = s_ecuMap.cur + 1; m.data[1] = s_ecuMap.count;
+  twai_transmit(&m, pdMS_TO_TICKS(5));
+}
 static void canTxTask(void *) {
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(EGT_PERIOD_MS));
+    for (int k = 0; k < EGT_PERIOD_MS / 10; k++) { vTaskDelay(pdMS_TO_TICKS(10)); if (s_ecuMapSendNow) canSendEcuMap(); }
     twai_message_t m = {};
     m.identifier = CAN_ID_EGT_PLACEHOLDER; m.data_length_code = 3;
     bool open = s_egtOpen;
@@ -353,6 +377,7 @@ static void canTxTask(void *) {
     m.data[0] = ci & 0xFF; m.data[1] = ci >> 8; m.data[2] = open ? 1 : 0;
     s_egtHeld = !s_canLastRxMs || millis() - s_canLastRxMs > EGT_HOLD_MS;
     if (!s_egtHeld && twai_transmit(&m, pdMS_TO_TICKS(5)) == ESP_OK) s_egtSent++;
+    canSendEcuMap();
   }
 }
 
@@ -435,21 +460,27 @@ static bool anyPinLow(int pin) {
   if (pin_is_mcp(pin)) { int n = pin - PIN_MCP_BASE, e = n / 16, b = n % 16; return s_mcpAddr[e] && !((s_mcpBits[e] >> b) & 1); }
   return digitalRead(pin) == LOW;
 }
-// ---- buttons: configurable on /buttons (button_actions.h, btn_logic.h). Left = GPIO 26 (L15), right = GPIO 25 (L14) ----
-static BtnState s_btn = {};   // all zero = released (same as btn_init)
-static BtnBinding s_bind[BTN_INPUTS][BTN_LEVELS];
-static char s_target[LINK_NAME_LEN + 1] = "";   // the screen the buttons control; "" = all
+// ---- buttons (hub_buttons.h, Buttons page): digital or on a resistor ladder, one action each on a press ----
+static HubButton s_btns[HUB_BUTTONS];
+static HbDebounce s_btnDeb[HUB_BUTTONS];          // digital: its own; ladder: in the slot of the pin's first button
+static volatile int16_t s_btnMv[HUB_BUTTONS];     // ladder: the pin's last reading, millivolts (for the page)
+static volatile bool s_btnDown[HUB_BUTTONS];
+static char s_target[LINK_NAME_LEN + 1] = "";     // "Chosen screen": picked with "Next gauge"; "" = all
 static uint32_t s_lastBtnMs = 0;
 static int s_markN = 0;
-static int s_hintAction = -1, s_hintParam = -1;
-#define BTN_TARGET_IDLE_MS 60000                  // back to all screens after a minute without a press
-static void bindLoad() {
-  Preferences p; p.begin("btncfg", true);
-  if (p.getBytes("b", s_bind, sizeof s_bind) != sizeof s_bind) btn_defaults(s_bind);
-  p.end();
-  for (int i = 0; i < BTN_INPUTS; i++) for (int l = 0; l < BTN_LEVELS; l++) if (s_bind[i][l].action >= BA_COUNT) s_bind[i][l].action = BA_NONE;
+#define BTN_TARGET_IDLE_MS 60000                  // the chosen screen goes back to all after a minute without a press
+static void buttonsSave() { Preferences p; p.begin("buttons", false); p.putUChar("ver", HUB_BUTTONS_VERSION); p.putBytes("cfg", s_btns, sizeof s_btns); p.end(); }
+static void ecuMapSave() { Preferences p; p.begin("buttons", false); p.putBytes("ecu", &s_ecuMap, sizeof s_ecuMap); p.end(); }
+static void buttonsReset() {   // after a change: fresh debounce, pins set up, is the ECU map in use
+  bool ecu = false;
+  for (int i = 0; i < HUB_BUTTONS; i++) {
+    hb_deb_init(&s_btnDeb[i]); s_btnDown[i] = false;
+    const HubButton &b = s_btns[i];
+    if (b.kind == HB_DIGITAL && !pin_is_mcp(b.pin)) pinMode(b.pin, (gpio_caps(b.pin) & CAP_PULLUP) ? INPUT_PULLUP : INPUT);
+    if (b.kind != HB_NONE && b.action == BA_ECU_MAP) ecu = true;
+  }
+  s_ecuMapUsed = ecu;
 }
-static void bindSave() { Preferences p; p.begin("btncfg", false); p.putBytes("b", s_bind, sizeof s_bind); p.end(); }
 static void chooseNextScreen() {
   const char *names[SCREEN_MAX]; static char copy[SCREEN_MAX][LINK_NAME_LEN + 1];
   portENTER_CRITICAL(&s_scrMux);
@@ -463,41 +494,66 @@ static void chooseNextScreen() {
   strcpy(s_target, k < 0 ? "" : copy[k]);
   sendCmd(LINK_CMD_SELECT, 0, s_target);   // only that screen (or all) shows the pop-up
 }
-static void runAction(const BtnBinding *b) {
-  switch (b->action) {
-    case BA_NEXT_PAGE: sendCmd(LINK_CMD_PAGE_NEXT, 0, s_target); break;
-    case BA_PREV_PAGE: sendCmd(LINK_CMD_PAGE_PREV, 0, s_target); break;
+// The screen name for a target: Left / Center / Right by the names the screens report (any case, "centre" too).
+static void targetName(int target, char *out) {
+  out[0] = 0;
+  if (target == HBT_ALL) return;
+  if (target == HBT_CHOSEN) { strcpy(out, s_target); return; }
+  portENTER_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX && !out[0]; i++) if (s_screens[i].used && hb_target_is(target, s_screens[i].name)) strcpy(out, s_screens[i].name);
+  portEXIT_CRITICAL(&s_scrMux);
+  if (!out[0]) strcpy(out, HBT_NAMES[target]);   // not heard yet: the usual name
+}
+// Page actions (next, previous, go to page) go to the button's screen; the rest are for every screen.
+static void runAction(int action, int param, int target) {
+  char t[LINK_NAME_LEN + 1]; targetName(target, t);
+  switch (action) {
+    case BA_NEXT_PAGE: sendCmd(LINK_CMD_PAGE_NEXT, 0, t); break;
+    case BA_PREV_PAGE: sendCmd(LINK_CMD_PAGE_PREV, 0, t); break;
     case BA_NEXT_GAUGE: chooseNextScreen(); break;
-    case BA_GOTO_PAGE: sendCmd(LINK_CMD_GOTO_PAGE, b->param ? b->param : 1, s_target); break;
+    case BA_GOTO_PAGE: sendCmd(LINK_CMD_GOTO_PAGE, param ? param : 1, t); break;
     case BA_DIM:    s_briOffset = s_briOffset - 20 < -95 ? -95 : s_briOffset - 20; s_briOffsetBase = wantedPct(); s_briPct = -1; break;
     case BA_BRIGHT: s_briOffset = s_briOffset + 20 > 95 ? 95 : s_briOffset + 20; s_briOffsetBase = wantedPct(); s_briPct = -1; break;
-    case BA_COLOR: sendCmd(LINK_CMD_COLOR, b->param, ""); break;
+    case BA_COLOR: sendCmd(LINK_CMD_COLOR, param, ""); break;
     case BA_RACE:
       s_raceOn = !s_raceOn; s_briPct = -1;
       sendCmd(LINK_CMD_RACE, s_raceOn ? 1 : 0, "");
-      if (s_raceOn) sendCmd(LINK_CMD_GOTO_PAGE, b->param ? b->param : 1, "");
+      if (s_raceOn) sendCmd(LINK_CMD_GOTO_PAGE, param ? param : 1, "");
       break;
     case BA_CLEAR_WARNING: sendCmd(LINK_CMD_ALERT_ACK, 0, ""); break;
     case BA_LOG_MARK: sendCmd(LINK_CMD_LOG_MARK, ++s_markN, ""); break;
-    case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;
+    case BA_SHOW_IP: sendCmd(LINK_CMD_SHOW_IP, WiFi.localIP()[3], ""); break;   // every screen: its name and IP
     case BA_OLED_NEXT: oledNextPage(); break;
-    case BA_OUT_TOGGLE: outputToggle(b->param); break;   // every screen: its name and IP
+    case BA_OUT_TOGGLE: outputToggle(param); break;
+    case BA_ECU_MAP: {   // next map: saved, sent to the ECU now, its name on every screen
+      ecu_map_next(&s_ecuMap); ecuMapSave(); s_ecuMapSendNow = true;
+      char lb[LINK_NAME_LEN + 1]; ecu_map_label(&s_ecuMap, lb, sizeof lb);
+      sendCmd(LINK_CMD_POPUP, s_ecuMap.cur + 1, lb);
+      break;
+    }
   }
 }
+// Every 10 ms: read each button (a ladder pin once), run the action of a new press.
 static void handleButtons() {
-  BtnEvent e = btn_step(&s_btn, millis(), anyPinLow(BTN_PREV), anyPinLow(BTN_NEXT));   // left, right (GPIO or expander pin)
-  if (e.type == BTN_EV_LEVEL) {   // held long enough for another action: tell the screens what letting go will do
-    const BtnBinding *b = btn_pick(s_bind, e.input, e.level);
-    if (b && (b->action != s_hintAction || b->param != s_hintParam)) {
-      s_hintAction = b->action; s_hintParam = b->param;
-      sendCmd(LINK_CMD_HINT, (int16_t)((b->action << 8) | b->param), s_target);
+  uint32_t now = millis();
+  for (int i = 0; i < HUB_BUTTONS; i++) {
+    const HubButton &b = s_btns[i];
+    if (b.kind == HB_DIGITAL) {
+      bool low = anyPinLow(b.pin), act = b.active_high ? !low : low;
+      s_btnDown[i] = act;
+      if (hb_deb_step(&s_btnDeb[i], now, act ? i : -1, HB_DEBOUNCE_MS) == i) { s_lastBtnMs = now; runAction(b.action, b.param, b.target); }
+    } else if (b.kind == HB_LADDER) {
+      bool first = true;
+      for (int k = 0; k < i && first; k++) if (s_btns[k].kind == HB_LADDER && s_btns[k].pin == b.pin) first = false;
+      if (!first) continue;   // one read per ladder pin
+      int mv = (int)adcMilliVolts(b.pin);
+      int hit = hb_ladder_match(s_btns, HUB_BUTTONS, b.pin, mv);
+      for (int k = i; k < HUB_BUTTONS; k++) if (s_btns[k].kind == HB_LADDER && s_btns[k].pin == b.pin) { s_btnMv[k] = mv; s_btnDown[k] = k == hit; }
+      int pr = hb_deb_step(&s_btnDeb[i], now, hit, HB_LADDER_DEBOUNCE_MS);
+      if (pr >= 0) { s_lastBtnMs = now; runAction(s_btns[pr].action, s_btns[pr].param, s_btns[pr].target); }
     }
-  } else if (e.type == BTN_EV_RELEASE) {
-    const BtnBinding *b = btn_pick(s_bind, e.input, e.level);
-    s_hintAction = s_hintParam = -1; s_lastBtnMs = millis();
-    if (b) runAction(b);
   }
-  if (s_target[0] && millis() - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
+  if (s_target[0] && now - s_lastBtnMs > BTN_TARGET_IDLE_MS) { s_target[0] = 0; sendCmd(LINK_CMD_SELECT, 0, ""); }
 }
 
 // ---- OLED warning panel (oled_panel.h): 0.96" SSD1306 on GPIO 5 (SDA, R15) / 15 (SCL, R21). Lamp inputs: GPIO 2 (R20),
@@ -645,8 +701,7 @@ static void oledTask(void *) {
 
 // ---- configurable inputs (hub_inputs.h, Inputs page) ----
 static HubInput s_inputs[HUB_INPUTS];
-static InputBtn s_inBtn[HUB_INPUTS];
-static volatile float s_inValue[HUB_INPUTS];     // last reading (sensors) or 1 / 0 (switches, buttons), for the page
+static volatile float s_inValue[HUB_INPUTS];     // last reading (sensors) or 1 / 0 (switches), for the page
 static volatile bool s_inActive[HUB_INPUTS];
 static void inputsLoad() {
   Preferences p; p.begin("inputs", true);
@@ -656,6 +711,41 @@ static void inputsLoad() {
   for (int i = 0; i < HUB_INPUTS; i++) { s_inputs[i].name[15] = 0; if (s_inputs[i].type > IN_ANALOG || s_inputs[i].slot >= CUSTOM_SLOTS) s_inputs[i].type = IN_NONE; }
 }
 static void inputsSave() { Preferences p; p.begin("inputs", false); p.putUChar("ver", HUB_INPUTS_VERSION); p.putBytes("cfg", s_inputs, sizeof s_inputs); p.end(); }
+// After inputsLoad(): the first start on hub 53 builds the list from the old page buttons and any button inputs.
+static void buttonsLoad() {
+  Preferences p; p.begin("buttons", true);
+  bool got = p.getUChar("ver", 0) == HUB_BUTTONS_VERSION && p.getBytes("cfg", s_btns, sizeof s_btns) == sizeof s_btns;
+  if (p.getBytes("ecu", &s_ecuMap, sizeof s_ecuMap) != sizeof s_ecuMap) ecu_map_defaults(&s_ecuMap);
+  p.end();
+  ecu_map_fix(&s_ecuMap);
+  if (!got) {
+    for (int i = 0; i < HUB_BUTTONS; i++) hb_defaults(&s_btns[i]);
+    BtnBinding bind[BTN_INPUTS][BTN_LEVELS];
+    Preferences q; q.begin("btncfg", true);
+    if (q.getBytes("b", bind, sizeof bind) != sizeof bind) btn_defaults(bind);
+    q.end();
+    int n = hb_from_old(s_btns, s_oldBtnPrev, s_oldBtnNext, bind);
+    bool moved = false;
+    for (int i = 0; i < HUB_INPUTS && n < HUB_BUTTONS; i++) {
+      HubInput &in = s_inputs[i];
+      if (in.type != IN_BUTTON) continue;
+      HubButton &b = s_btns[n++]; hb_defaults(&b);
+      b.kind = HB_DIGITAL; b.pin = in.pin; b.active_high = in.contact == CONTACT_NC; b.action = in.act_press < BA_COUNT ? in.act_press : BA_NONE;
+      b.param = in.prm_press; b.target = HBT_ALL; memcpy(b.name, in.name, sizeof b.name); b.name[15] = 0;
+      input_defaults(&in); moved = true;
+    }
+    buttonsSave(); if (moved) inputsSave();
+    Serial.printf("Buttons: set up from the old settings (%d buttons)\n", n);
+  }
+  for (int i = 0; i < HUB_BUTTONS; i++) {
+    HubButton &b = s_btns[i];
+    b.name[15] = 0;
+    if (b.kind > HB_LADDER || !hb_pin_fits(b.kind, b.pin)) b.kind = HB_NONE;
+    if (b.action >= BA_COUNT) b.action = BA_NONE;
+    if (b.target >= HBT_COUNT) b.target = HBT_ALL;
+  }
+  buttonsReset();
+}
 static void inputPinSetup(const HubInput &in) {
   if (in.type == IN_NONE || input_is_mcp(in.pin)) return;
   if (in.type == IN_ANALOG) return;   // the ADC sets the pin up itself
@@ -663,19 +753,31 @@ static void inputPinSetup(const HubInput &in) {
 }
 // LOW on the input's pin? (MCP23017 pins: from the expander's last read.)
 static bool inputPinLow(int pin) { return anyPinLow(pin); }
-// Who uses a hub GPIO or an expander pin? "" = free. skipInput: an input to leave out (the one being edited).
+// Who uses a hub GPIO, an expander pin or an ADS1115 channel? "" = free. One user per pin; the skip arguments leave out
+// the thing being edited. ladderShare: a ladder button asking, so other ladder buttons on that pin do not count.
 static HubOutput s_outputs[HUB_OUTPUTS];
-static String pinUser(int pin, int skipInput, int skipOutput = -1) {
+static int lampPin(int in) { return in >= OLED_IN_GPIO_BASE ? in - OLED_IN_GPIO_BASE : INPUT_MCP_BASE + (in - OLED_IN_MCP0); }
+static String pinUser(int pin, int skipInput, int skipOutput = -1, int skipButton = -1, bool ladderShare = false, int skipLamp = -1) {
   { int r = pin_map_role_at(g_pins, pin); if (r >= 0) return HUB_PIN_ROLES[r].name; }
   for (int i = 0; i < HUB_OUTPUTS; i++) if (i != skipOutput && s_outputs[i].type != OUT_NONE && s_outputs[i].pin == pin)
     return String("Output ") + (i + 1) + (s_outputs[i].name[0] ? String(" (") + s_outputs[i].name + ")" : String(""));
   for (int i = 0; i < HUB_INPUTS; i++) if (i != skipInput && s_inputs[i].type != IN_NONE && s_inputs[i].pin == pin)
     return String("Input ") + (i + 1) + (s_inputs[i].name[0] ? String(" (") + s_inputs[i].name + ")" : String(""));
+  for (int i = 0; i < HUB_BUTTONS; i++) {
+    const HubButton &b = s_btns[i];
+    if (i == skipButton || b.kind == HB_NONE || b.pin != pin) continue;
+    if (b.kind == HB_LADDER) {
+      if (ladderShare) continue;
+      String names; int n = 0;
+      for (int k = 0; k < HUB_BUTTONS; k++) if (k != skipButton && s_btns[k].kind == HB_LADDER && s_btns[k].pin == pin) { names += n++ ? ", " : ""; names += s_btns[k].name; }
+      return "Button ladder (" + names + ")";
+    }
+    return String("Button ") + (i + 1) + (b.name[0] ? String(" (") + b.name + ")" : String(""));
+  }
   for (int i = 0; i < OLED_LAMPS; i++) {
     const OledLamp &l = s_oled.lamp[i];
-    if (!l.icon || l.op != OLED_INPUT) continue;
-    int lp = l.input >= OLED_IN_GPIO_BASE ? l.input - OLED_IN_GPIO_BASE : INPUT_MCP_BASE + (l.input - OLED_IN_MCP0);
-    if (lp == pin) return String("OLED lamp ") + (i + 1);
+    if (i == skipLamp || !l.icon || l.op != OLED_INPUT) continue;
+    if (lampPin(l.input) == pin) return String("OLED lamp ") + (i + 1);
   }
   return "";
 }
@@ -713,9 +815,8 @@ static void outputsStep() {
   for (int e = 0; e < 2; e++) { s_mcpOutMask[e] = mask[e]; s_mcpOutBits[e] = bits[e]; }
 }
 
-// Every 20 ms: read each input, run button actions, fill the switch / sensor slots.
+// Every 20 ms: read each input, fill the switch / sensor slots.
 static void inputsStep() {
-  uint32_t now = millis();
   for (int i = 0; i < HUB_INPUTS; i++) {
     const HubInput &in = s_inputs[i];
     if (in.type == IN_NONE) continue;
@@ -727,17 +828,10 @@ static void inputsStep() {
       if (!simOwns()) { g_custom_val[in.slot] = sm; g_custom_has[in.slot] = true; markLocal((SignalId)(SIG_C1 + in.slot), SRC_HUB_INPUT); }
       continue;
     }
+    if (in.type != IN_SWITCH) continue;   // (an old button input moved to the Buttons page)
     bool act = input_active(&in, inputPinLow(in.pin));
     s_inActive[i] = act; s_inValue[i] = act ? 1.0f : 0.0f;
-    if (in.type == IN_SWITCH) {
-      if (!simOwns()) { g_custom_val[in.slot] = act ? 1.0f : 0.0f; g_custom_has[in.slot] = true; markLocal((SignalId)(SIG_C1 + in.slot), SRC_HUB_INPUT); }
-    } else {
-      int e = input_btn_step(&s_inBtn[i], now, act);
-      BtnBinding b = { 0, 0 };
-      if (e == IBTN_PRESS) { b.action = in.act_press; b.param = in.prm_press; }
-      if (e == IBTN_HOLD) { b.action = in.act_hold; b.param = in.prm_hold; }
-      if (b.action != BA_NONE && b.action < BA_COUNT) runAction(&b);
-    }
+    if (!simOwns()) { g_custom_val[in.slot] = act ? 1.0f : 0.0f; g_custom_has[in.slot] = true; markLocal((SignalId)(SIG_C1 + in.slot), SRC_HUB_INPUT); }
   }
 }
 
@@ -927,33 +1021,86 @@ static void setupWeb() {
     rfSaveSettings(); s_rfReconfig = true;
     server.send(200, "text/plain", "Saved");
   });
-  // ---- button actions (/buttons) ----
+  // ---- buttons (/buttons) ----
   server.on("/buttons", HTTP_GET, []() { server.send_P(200, "text/html", BUTTONS_HTML, strlen_P(BUTTONS_HTML)); });
   server.on("/buttons.json", HTTP_GET, []() {
     String j = "{\"actions\":[";
     for (int a = 0; a < BA_COUNT; a++) { if (a) j += ","; j += "\""; j += BA_NAMES[a]; j += "\""; }
     j += "],\"colors\":[";
     for (int c = 0; c < COLOR_PRESET_COUNT; c++) { if (c) j += ","; j += "\""; j += COLOR_PRESETS_C[c].name; j += "\""; }
+    j += "],\"targets\":[";
+    for (int t = 0; t < HBT_COUNT; t++) { if (t) j += ","; j += "\""; j += HBT_NAMES[t]; j += "\""; }
     j += "],\"race\":"; j += s_raceOn ? "true" : "false";
-    j += ",\"target\":\""; j += s_target; j += "\",\"bind\":[";
-    for (int i = 0; i < BTN_INPUTS; i++) {
-      if (i) j += ",";
-      j += "[";
-      for (int l = 0; l < BTN_LEVELS; l++) { if (l) j += ","; j += "["; j += String((int)s_bind[i][l].action); j += ","; j += String((int)s_bind[i][l].param); j += "]"; }
-      j += "]";
+    j += ",\"chosen\":\""; j += s_target; j += "\",\"buttons\":[";
+    for (int i = 0; i < HUB_BUTTONS; i++) {
+      const HubButton &b = s_btns[i]; char t[200];
+      snprintf(t, sizeof t, "%s{\"kind\":%u,\"pin\":%u,\"high\":%u,\"a\":%u,\"p\":%u,\"t\":%u,\"mv\":%u,\"name\":\"%s\",\"down\":%s,\"now\":%d}",
+               i ? "," : "", b.kind, b.pin, b.active_high, b.action, b.param, b.target, b.mv, b.name, s_btnDown[i] ? "true" : "false", (int)s_btnMv[i]);
+      j += t;
     }
-    server.send(200, "application/json", j + "]}");
+    // every pin a button could use, with what uses it now: [pin, caps, user]
+    j += "],\"pins\":[";
+    bool first = true;
+    auto add = [&](int pin, int caps) { if (!first) j += ","; first = false; j += "["; j += String(pin); j += ","; j += String(caps); j += ",\""; j += pinUser(pin, -1); j += "\"]"; };
+    { const int list[] = GPIO_LIST; for (int g : list) add(g, gpio_caps(g)); }
+    for (int n = 0; n < 32; n++) if (s_mcpAddr[n / 16]) add(PIN_MCP_BASE + n, CAP_IN | CAP_OUT | CAP_PULLUP);
+    for (int n = 0; n < 16; n++) if (s_adsAddr[n / 4]) add(PIN_ADS_BASE + n, CAP_ADC);
+    j += "],\"ecu\":{\"id\":"; j += String((int)s_ecuMap.id); j += ",\"count\":"; j += String((int)s_ecuMap.count); j += ",\"cur\":"; j += String((int)s_ecuMap.cur);
+    j += ",\"used\":"; j += s_ecuMapUsed ? "true" : "false"; j += ",\"names\":[";
+    for (int m = 0; m < ECU_MAPS; m++) { if (m) j += ","; j += "\""; j += s_ecuMap.names[m]; j += "\""; }
+    server.send(200, "application/json", j + "]}}");
   });
   server.on("/buttons/set", HTTP_GET, []() {
-    int i = server.arg("in").toInt(), l = server.arg("lv").toInt(), a = server.arg("a").toInt(), p = server.arg("p").toInt();
-    if (i < 0 || i >= BTN_INPUTS || l < 0 || l >= BTN_LEVELS || a < 0 || a >= BA_COUNT || p < 0 || p > 255) { server.send(400, "text/plain", "Bad setting"); return; }
-    if ((a == BA_GOTO_PAGE || a == BA_RACE) && (p < 1 || p > 8)) { server.send(400, "text/plain", "Page must be 1 to 8"); return; }
-    if (a == BA_COLOR && p >= COLOR_PRESET_COUNT && p != COLOR_PRESET_CYCLE) { server.send(400, "text/plain", "Pick a color scheme"); return; }
-    s_bind[i][l].action = (uint8_t)a; s_bind[i][l].param = (uint8_t)p;
-    bindSave();
-    server.send(200, "text/plain", "Saved");
+    int i = server.arg("i").toInt(), kind = server.arg("kind").toInt(), pin = server.arg("pin").toInt();
+    int a = server.arg("a").toInt(), prm = server.arg("p").toInt(), tg = server.arg("t").toInt(), mv = server.arg("mv").toInt();
+    if (i < 0 || i >= HUB_BUTTONS || kind < HB_DIGITAL || kind > HB_LADDER || a < 0 || a >= BA_COUNT || prm < 0 || prm > 255 || tg < 0 || tg >= HBT_COUNT) { server.send(400, "text/plain", "Bad setting"); return; }
+    if (!hb_pin_fits(kind, pin)) { server.send(400, "text/plain", kind == HB_LADDER ? "A button ladder needs an analog pin: GPIO 32-36, 39 or an ADS1115 channel" : "That pin cannot read a button"); return; }
+    if (pin_is_mcp(pin) && !s_mcpAddr[(pin - PIN_MCP_BASE) / 16]) { server.send(400, "text/plain", "That expander was not found"); return; }
+    if (pin_is_ads(pin) && !adsFound(pin)) { server.send(400, "text/plain", "That ADS1115 was not found"); return; }
+    String user = pinUser(pin, -1, -1, i, kind == HB_LADDER);
+    if (user.length()) { server.send(400, "text/plain", "That pin is already used by " + user); return; }
+    if (kind == HB_LADDER) {
+      if (mv < 1 || mv > 3300) { server.send(400, "text/plain", "Learn the button's voltage first (hold it and press Learn)"); return; }
+      int c = hb_ladder_clash(s_btns, HUB_BUTTONS, pin, mv, i);
+      if (c >= 0) { server.send(400, "text/plain", String("Too close to button ") + (c + 1) + " (" + s_btns[c].name + ", " + s_btns[c].mv + " mV): the two must differ by " + LADDER_MIN_GAP_MV + " mV or more. Use another resistor."); return; }
+    }
+    if ((a == BA_GOTO_PAGE || a == BA_RACE) && (prm < 1 || prm > 8)) { server.send(400, "text/plain", "Page must be 1 to 8"); return; }
+    if (a == BA_COLOR && prm >= COLOR_PRESET_COUNT && prm != COLOR_PRESET_CYCLE) { server.send(400, "text/plain", "Pick a color scheme"); return; }
+    if (a == BA_OUT_TOGGLE && (prm < 1 || prm > HUB_OUTPUTS)) { server.send(400, "text/plain", "Output number must be 1 to 16"); return; }
+    String nm = server.arg("name"); nm.trim();
+    if (!nm.length()) { server.send(400, "text/plain", "Give the button a name"); return; }
+    HubButton b; hb_defaults(&b);
+    b.kind = kind; b.pin = pin; b.active_high = server.arg("high") == "1"; b.action = a; b.param = prm; b.target = tg; b.mv = kind == HB_LADDER ? mv : 0;
+    int w = 0; for (unsigned c = 0; c < nm.length() && w < 15; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') b.name[w++] = ch; } b.name[w] = 0;
+    s_btns[i] = b; buttonsSave(); buttonsReset();
+    server.send(200, "text/plain", String("Button ") + (i + 1) + " saved");
   });
-  server.on("/buttons/defaults", HTTP_GET, []() { btn_defaults(s_bind); bindSave(); server.send(200, "text/plain", "Back to the defaults"); });
+  server.on("/buttons/clear", HTTP_GET, []() {
+    int i = server.arg("i").toInt();
+    if (i < 0 || i >= HUB_BUTTONS) { server.send(400, "text/plain", "Bad button"); return; }
+    hb_defaults(&s_btns[i]); buttonsSave(); buttonsReset();
+    server.send(200, "text/plain", String("Button ") + (i + 1) + " removed");
+  });
+  server.on("/buttons/read", HTTP_GET, []() {   // a ladder pin's voltage now (for Learn): 8 reads averaged
+    int pin = server.arg("pin").toInt();
+    if (!hb_pin_fits(HB_LADDER, pin) || (pin_is_ads(pin) && !adsFound(pin))) { server.send(400, "text/plain", "Not an analog pin"); return; }
+    uint32_t sum = 0;
+    for (int k = 0; k < 8; k++) { sum += adcMilliVolts(pin); delay(pin_is_ads(pin) ? 25 : 2); }
+    server.send(200, "text/plain", String((sum + 4) / 8));
+  });
+  server.on("/buttons/ecu", HTTP_GET, []() {   // the ECU maps: CAN id, how many, names
+    int id = (int)strtol(server.arg("id").c_str(), NULL, 0), n = server.arg("count").toInt();
+    if (id < 1 || id > 0x7FF) { server.send(400, "text/plain", "CAN id must be 0x001 to 0x7FF"); return; }
+    if (n < 1 || n > ECU_MAPS) { server.send(400, "text/plain", "1 to 8 maps"); return; }
+    s_ecuMap.id = id; s_ecuMap.count = n; if (s_ecuMap.cur >= n) s_ecuMap.cur = 0;
+    for (int m = 0; m < ECU_MAPS; m++) {
+      String nm = server.arg(String("n") + m); nm.trim(); int w = 0;
+      for (unsigned c = 0; c < nm.length() && w < ECU_MAP_NAME - 1; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') s_ecuMap.names[m][w++] = ch; }
+      s_ecuMap.names[m][w] = 0;
+    }
+    ecuMapSave(); s_ecuMapSendNow = true;
+    server.send(200, "text/plain", "ECU maps saved");
+  });
   // ---- clock from the GPS (/time.json, /time/set) ----
   server.on("/time.json", HTTP_GET, []() {
     uint32_t u = gpsUtcNow(); char t[24] = "";
@@ -974,7 +1121,13 @@ static void setupWeb() {
   server.on("/oled.json", HTTP_GET, []() {
     String j = "{\"found\":"; j += s_oledOk ? "true" : "false";
     j += ",\"mcp\":["; j += String((int)s_mcpAddr[0]); j += ","; j += String((int)s_mcpAddr[1]); j += "]";   // addresses, 0 = none
-    j += ",\"layout\":"; j += String((int)s_oled.layout); j += ",\"lamps\":[";
+    j += ",\"layout\":"; j += String((int)s_oled.layout);
+    j += ",\"inusers\":{";   // what uses each input-wire pin (the shared pin list), only the used ones
+    { bool first = true;
+      auto add = [&](int code) { String u = pinUser(lampPin(code), -1); if (!u.length()) return; if (!first) j += ","; first = false; j += "\""; j += String(code); j += "\":\""; j += u; j += "\""; };
+      const int list[] = GPIO_LIST; for (int g : list) add(OLED_IN_GPIO_BASE + g);
+      for (int n = 0; n < 32; n++) add(OLED_IN_MCP0 + n); }
+    j += "},\"lamps\":[";
     for (int i = 0; i < OLED_LAMPS; i++) {
       const OledLamp &l = s_oled.lamp[i];
       char b[220]; snprintf(b, sizeof b, "%s{\"icon\":%u,\"sig\":%u,\"op\":%u,\"blink\":%u,\"level\":%g,\"danger\":%g,\"has_danger\":%u,\"input\":%u,\"input_low\":%u,\"state\":%u,\"in_low\":%s}",
@@ -988,6 +1141,7 @@ static void setupWeb() {
     int i = server.arg("i").toInt(), icon = server.arg("icon").toInt(), sig = server.arg("sig").toInt(), op = server.arg("op").toInt(), in = server.arg("input").toInt();
     if (i < 0 || i >= OLED_LAMPS || icon < 0 || icon > OLED_ICON_COUNT || sig < 0 || sig >= SIG_COUNT || op < 0 || op > OLED_INPUT) { server.send(400, "text/plain", "Bad setting"); return; }
     if (op == OLED_INPUT && !oled_input_valid(in)) { server.send(400, "text/plain", "Pick an input"); return; }
+    if (op == OLED_INPUT && icon) { String u = pinUser(lampPin(in), -1, -1, -1, false, i); if (u.length()) { server.send(400, "text/plain", "That pin is already used by " + u); return; } }
     OledLamp &l = s_oled.lamp[i];
     l.icon = icon; l.sig = sig; l.op = op; l.blink = server.arg("blink") == "1"; l.level = server.arg("level").toFloat();
     l.danger = server.arg("danger").toFloat(); l.has_danger = server.arg("has_danger") == "1"; l.input = op == OLED_INPUT ? in : 0; l.input_low = server.arg("input_low") != "0";
@@ -1135,22 +1289,18 @@ static void setupWeb() {
   });
   server.on("/inputs/set", HTTP_GET, []() {
     int i = server.arg("i").toInt(), type = server.arg("type").toInt(), pin = server.arg("pin").toInt(), slot = server.arg("slot").toInt();
-    if (i < 0 || i >= HUB_INPUTS || type < IN_BUTTON || type > IN_ANALOG) { server.send(400, "text/plain", "Bad input"); return; }
+    if (i < 0 || i >= HUB_INPUTS || type < IN_SWITCH || type > IN_ANALOG) { server.send(400, "text/plain", type == IN_BUTTON ? "Buttons are set up on the Buttons page" : "Bad input"); return; }
     if (!input_pin_fits(type, pin)) { server.send(400, "text/plain", type == IN_ANALOG ? "An analog sensor needs an analog pin: GPIO 32-36, 39 or an ADS1115 channel" : "That pin cannot be an input"); return; }
     if (pin_is_ads(pin) && !adsFound(pin)) { server.send(400, "text/plain", "That ADS1115 was not found"); return; }
     String user = pinUser(pin, i);
     if (user.length()) { server.send(400, "text/plain", "That pin is already used by " + user); return; }
-    if (type != IN_BUTTON) {
-      if (slot < 0 || slot >= CUSTOM_SLOTS) { server.send(400, "text/plain", "Pick a sensor slot"); return; }
-      bool mine = s_inputs[i].type != IN_NONE && s_inputs[i].type != IN_BUTTON && s_inputs[i].slot == slot;
-      if (!mine && s_slots[slot].info.name[0]) { server.send(400, "text/plain", String("Sensor slot ") + (slot + 1) + " is in use (" + s_slots[slot].info.name + ")"); return; }
-    }
+    if (slot < 0 || slot >= CUSTOM_SLOTS) { server.send(400, "text/plain", "Pick a sensor slot"); return; }
+    bool mine = s_inputs[i].type != IN_NONE && s_inputs[i].type != IN_BUTTON && s_inputs[i].slot == slot;
+    if (!mine && s_slots[slot].info.name[0]) { server.send(400, "text/plain", String("Sensor slot ") + (slot + 1) + " is in use (" + s_slots[slot].info.name + ")"); return; }
     String nm = server.arg("name"); nm.trim();
     if (!nm.length()) { server.send(400, "text/plain", "Give the input a name"); return; }
     HubInput in; input_defaults(&in);
-    in.type = type; in.pin = pin; in.contact = server.arg("contact") == "1" ? CONTACT_NC : CONTACT_NO; in.slot = type == IN_BUTTON ? 0 : slot;
-    in.act_press = server.arg("ap").toInt(); in.prm_press = server.arg("pp").toInt(); in.act_hold = server.arg("ah").toInt(); in.prm_hold = server.arg("ph").toInt();
-    if (in.act_press >= BA_COUNT) in.act_press = 0; if (in.act_hold >= BA_COUNT) in.act_hold = 0;
+    in.type = type; in.pin = pin; in.contact = server.arg("contact") == "1" ? CONTACT_NC : CONTACT_NO; in.slot = slot;
     int pre = server.arg("preset").toInt(); in.preset = pre >= 0 && pre < PRE_COUNT ? pre : 0;
     if (server.hasArg("mult")) in.mult = server.arg("mult").toFloat();
     if (server.hasArg("v1")) { in.v1 = server.arg("v1").toFloat(); in.val1 = server.arg("val1").toFloat(); in.v2 = server.arg("v2").toFloat(); in.val2 = server.arg("val2").toFloat(); }
@@ -1159,8 +1309,8 @@ static void setupWeb() {
     int w = 0; for (unsigned c = 0; c < nm.length() && w < 15; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') in.name[w++] = ch; } in.name[w] = 0;
     // the old slot (if it moved) goes back to free; the new one is named after the input
     const HubInput &old = s_inputs[i];
-    if (old.type == IN_SWITCH || old.type == IN_ANALOG) if (type == IN_BUTTON || old.slot != in.slot) { memset(&s_slots[old.slot], 0, sizeof s_slots[old.slot]); g_custom_has[old.slot] = false; }
-    if (type != IN_BUTTON) {
+    if (old.type == IN_SWITCH || old.type == IN_ANALOG) if (old.slot != in.slot) { memset(&s_slots[old.slot], 0, sizeof s_slots[old.slot]); g_custom_has[old.slot] = false; }
+    {
       CustomSlotConfig &c = s_slots[in.slot]; memset(&c, 0, sizeof c);
       custom_copy_text(c.info.name, CUSTOM_NAME_LEN, in.name);
       if (type == IN_SWITCH) { c.info.decimals = 0; c.info.min = 0; c.info.max = 1; }
@@ -1169,7 +1319,7 @@ static void setupWeb() {
         c.info.decimals = p.dec; c.info.min = in.preset == PRE_CUSTOM ? fminf(in.val1, in.val2) : p.min; c.info.max = in.preset == PRE_CUSTOM ? fmaxf(in.val1, in.val2) : p.max; }
       c.src = CUSTOM_SRC_INPUT; g_custom_has[in.slot] = false;
     }
-    s_inputs[i] = in; memset(&s_inBtn[i], 0, sizeof s_inBtn[i]); s_inValue[i] = 0;
+    s_inputs[i] = in; s_inValue[i] = 0;
     inputPinSetup(in); inputsSave(); slotsSave();
     server.send(200, "text/plain", String("Input ") + (i + 1) + " saved");
   });
@@ -1327,8 +1477,6 @@ static void dataTask(void *) {
 void setup() {
   Serial.begin(115200);
   pinsLoad();   // first: every pin below comes from the map
-  if (!pin_is_mcp(BTN_NEXT)) pinMode(BTN_NEXT, INPUT_PULLUP);   // on the expander, its pull-ups do it
-  if (!pin_is_mcp(BTN_PREV)) pinMode(BTN_PREV, INPUT_PULLUP);
   s_adcLock = xSemaphoreCreateMutex();   // before any task reads the ADC
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);   // about 0 - 3.1 V at the pins
@@ -1365,10 +1513,10 @@ void setup() {
   esp_now_register_recv_cb(onEspNowRecv);   // screen hellos, for the status lights
 
   slotsLoad();   // custom sensor slots, before CAN starts decoding them
-  bindLoad();    // button actions (/buttons)
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   inputsLoad();  // configurable inputs
+  buttonsLoad(); // buttons (after the inputs: the first start on hub 53 moves button inputs over)
   outputsLoad(); // configurable outputs
   for (int i = 0; i < HUB_OUTPUTS; i++) outputPinSetup(s_outputs[i]);
   for (int i = 0; i < HUB_INPUTS; i++) inputPinSetup(s_inputs[i]);
@@ -1394,7 +1542,7 @@ void setup() {
 }
 
 void loop() {
-  handleButtons();
+  { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
   { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); outputsStep(); } }
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }

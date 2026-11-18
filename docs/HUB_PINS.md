@@ -1,6 +1,7 @@
 # Hub pins (ESP32 DevKitC on the Freenove terminal board)
 
-**Every GPIO the hub uses.** The code lists every role with its default GPIO in `esp32-input/hub_pins.h`; the table
+**Every GPIO the hub uses.** Every page that picks a pin shows the pins in use greyed out, with what uses them, and the
+hub refuses to give one pin to two things. The code lists every role with its default GPIO in `esp32-input/hub_pins.h`; the table
 below must match it. `tests/host/test_hub_pins.js` checks that the two agree, that no default GPIO is used twice, and
 that no hub file uses a pin number outside `hub_pins.h`. When a role is added or its default changes: change both.
 
@@ -10,7 +11,7 @@ Terminals: L = left row, R = right row of the Freenove board.
 
 Every function ("role") has a default GPIO, listed here with the Freenove terminal it is wired to. A role can be moved to
 another GPIO on the hub's **Inputs and pins** page (saved, applied when the hub restarts); the page then shows the GPIO in
-use. Every other GPIO is free for the configurable inputs (buttons, switches, analog sensors) and the OLED lamps.
+use. Every other GPIO is free for buttons, inputs (switches, analog sensors), outputs and the OLED lamps.
 
 | Terminal (default) | Default GPIO | Role | Function | Notes |
 |---|---|---|---|---|
@@ -20,8 +21,6 @@ use. Every other GPIO is free for the configurable inputs (buttons, switches, an
 | L11 | 35 | lights | Lights-on wire (divider) | analog, 47k / 10k divider, input-only |
 | L12 | 32 | dimmer | Dash dimmer (divider) | analog, 47k / 10k divider |
 | L13 | 33 | rf_gdo0 | CC1101 GDO0 (data) |  |
-| L14 | 25 | btn_next | Right (next) button | to ground, pull-up |
-| L15 | 26 | btn_prev | Left (previous) button | to ground, pull-up |
 | L16 | 27 | rf_cs | CC1101 CSN |  |
 | L17 | 14 | rf_sck | CC1101 SCK |  |
 | L20 | 13 | rf_mosi | CC1101 MOSI |  |
@@ -36,7 +35,23 @@ use. Every other GPIO is free for the configurable inputs (buttons, switches, an
 | R18 | 4 | dht | DHT22 cabin temp/humidity |  |
 | R21 | 15 | i2c_scl | I2C SCL (OLED, MPU6050, MCP23017) | shared bus |
 
-Free GPIOs with the defaults: 0 (R19, the BOOT button: not LOW at power-up), 2 (R20), 12 (L18, not HIGH at power-up).
+Free GPIOs with the defaults: 0 (R19, the BOOT button: not LOW at power-up), 2 (R20), 12 (L18, not HIGH at power-up),
+25 and 26 (unless the page buttons below are on them).
+
+## Default buttons (Buttons page)
+
+Since hub 53 the two page buttons are ordinary buttons on the **Buttons** page, not fixed functions: any button can sit on
+any free pin, and several can share one analog pin through resistors (a ladder). On a hub with no button settings yet,
+the first start sets up these two (or the pins they were moved to before hub 53):
+
+| Terminal | GPIO | Button | Wiring |
+|---|---|---|---|
+| L15 | 26 | Left: previous page | to ground, pull-up |
+| L14 | 25 | Right: next page | to ground, pull-up |
+
+Button ladder (steering wheel buttons): 10k from the analog pin to 3.3 V, each button from the pin to ground through its
+own resistor (0, 1k, 2.2k, 4.7k, 10k, 22k give about 0, 0.30, 0.60, 1.05, 1.65, 2.27 V). GPIO 32-36, 39 or an ADS1115
+channel. Each button's voltage is learned on the page.
 Analog-capable GPIOs (ADC1): 32-36 and 39 (all taken by default; move a role to free one).
 
 ## Not GPIO
@@ -64,7 +79,7 @@ Every module has its own pull-ups; past about 5 modules remove all but one set.
 
 ## Free
 
-GPIO 0, 2 and 12 (power-up limits above), plus 16 pins on each MCP23017 expander and 4 analog channels on each ADS1115.
+GPIO 0, 2 and 12 (power-up limits above), 25 and 26 when no button is on them, plus 16 pins on each MCP23017 expander and 4 analog channels on each ADS1115.
 
 ## Elsewhere
 

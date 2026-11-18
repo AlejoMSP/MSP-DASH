@@ -350,36 +350,102 @@ poll();setInterval(poll,1000);
 </script></body></html>)HTML";
 // /buttons: what each button does, for a press and for holds of 1, 2, 3, 5 and 10 s (button_actions.h).
 static const char BUTTONS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Buttons</title>
-<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
-table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;vertical-align:top}th{color:#4dd0e1;text-align:left}
-select{width:100%;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;margin:2px 0}
-.note{color:#888;font-size:13px}#msg{color:#4dd0e1;min-height:1.2em}#msg.bad{color:#ff6b6b}button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px})HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:980px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}
+.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}table{width:100%;border-collapse:collapse}
+td,th{padding:5px 6px;border-bottom:1px solid #222;text-align:left;vertical-align:middle;font-size:14px}th{color:#4dd0e1;font-weight:normal}
+select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;max-width:100%}button{padding:6px 11px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
+button.sec{background:#1d2b2e;color:#4dd0e1}option:disabled{color:#666}.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 12px;margin:8px 0}
+.form label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:#aaa}#msg{color:#4dd0e1;min-height:1.3em}#msg.bad{color:#ff6b6b}.on{color:#7bd88f;font-weight:bold}
+.live{font-family:monospace;font-size:18px;color:#4dd0e1}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Buttons</h2>
-<p class="note">Left = GPIO 26 (L15), right = GPIO 25 (L14). Hold a button and let go: the action for the longest time you reached runs
-(if nothing is set at that time, the last one you passed). While you hold, the screens show what letting go will do.
-Page actions go to the screen chosen with "Next gauge" (all screens until you choose one; back to all after a minute).</p>
-<div id="state" class="note"></div>
-<table><thead><tr><th>Hold</th><th>Left</th><th>Right</th><th>Both</th></tr></thead><tbody id="grid"></tbody></table>
 <div id="msg"></div>
-<p><button onclick="defaults()">Back to the defaults</button></p>
-
+<div class="card"><h3>Buttons</h3><div id="list"></div>
+<p><button onclick="edit(-1,1)">Add a button</button> <button onclick="edit(-1,2)">Add a ladder button</button></p>
+<div id="editor"></div>
+<p class="note">Each button does one thing when pressed. Page actions (next, previous, go to page) go to the screen you pick; the others are for every screen.
+Single button: a switch to ground on any free pin (active when LOW), or a 12 V signal through a divider (active when HIGH).
+Ladder: several buttons on one analog pin, each through its own resistor (steering wheel buttons). Add one ladder button at a time: hold it, press Learn, save.</p>
+<p class="note">Ladder wiring: 10k from the pin to 3.3 V, and each button from the pin to ground through its own resistor. With 0, 1k, 2.2k, 4.7k, 10k and 22k the pin reads about 0, 0.30, 0.60, 1.05, 1.65 and 2.27 V. Two buttons must be at least 0.12 V apart. GPIO 32-36, 39 or an ADS1115 channel (0 to 3.3 V only).</p></div>
+<div class="card"><h3>ECU maps</h3><div id="ecu"></div>
+<p class="note">For a button set to "ECU map (next)": each press moves to the next map, back to the first after the last. The hub sends the map number on this CAN id (byte 0 = map 1, 2, ...; byte 1 = how many maps) 4 times a second while it hears the ECU, and remembers the map after a restart. Every screen shows the map's name. A rusEFI Lua script applies it: docs/RUSEFI_LUA.md.</p></div>
 <script>
-const LEVELS=["Press","1 s","2 s","3 s","5 s","10 s"];const GOTO=4,COLOR=7,RACE=8,CYCLE=255;
-let cfg=null;const $=id=>document.getElementById(id);
-function paramHtml(i,l,a,p){
-  if(a==GOTO||a==RACE){let o="";for(let n=1;n<=8;n++)o+='<option value="'+n+'"'+(n==p?" selected":"")+'>'+(a==RACE?"Race page ":"Page ")+n+'</option>';return '<select onchange="setB('+i+','+l+','+a+',+this.value)">'+o+'</select>';}
-  if(a==COLOR){let o='<option value="255"'+(p==CYCLE?" selected":"")+'>Next scheme each time</option>';cfg.colors.forEach((n,k)=>o+='<option value="'+k+'"'+(k==p?" selected":"")+'>'+(k+1)+'. '+n+'</option>');return '<select onchange="setB('+i+','+l+','+a+',+this.value)">'+o+'</select>';}
-  return "";}
-function render(){let h="";for(let l=0;l<6;l++){h+="<tr><th>"+LEVELS[l]+"</th>";for(let i=0;i<3;i++){const b=cfg.bind[i][l];
-  const opts=cfg.actions.map((n,k)=>'<option value="'+k+'"'+(k==b[0]?" selected":"")+'>'+n+'</option>').join("");
-  h+='<td><select onchange="pickA('+i+','+l+',+this.value)">'+opts+'</select>'+paramHtml(i,l,b[0],b[1])+'</td>';}h+="</tr>";}
-  $("grid").innerHTML=h;$("state").textContent="Race mode: "+(cfg.race?"ON":"off")+" | buttons control: "+(cfg.target||"all screens");}
-function pickA(i,l,a){const p=(a==GOTO||a==RACE)?1:(a==COLOR?CYCLE:0);setB(i,l,a,p);}
-async function setB(i,l,a,p){const r=await fetch("/buttons/set?"+new URLSearchParams({in:i,lv:l,a:a,p:p}));const t=await r.text();
-  $("msg").textContent=r.ok?(LEVELS[l]+" "+["left","right","both"][i]+": "+cfg.actions[a]+" - saved"):t;$("msg").className=r.ok?"":"bad";if(r.ok){cfg.bind[i][l]=[a,p];render();}}
-async function defaults(){const r=await fetch("/buttons/defaults");$("msg").textContent=await r.text();load();}
-async function load(){try{cfg=await (await fetch("/buttons.json")).json();render();}catch(e){$("msg").textContent="Could not reach the hub";}}
-load();
+const $=id=>document.getElementById(id);let D=null,ed=null,liveT=null;
+const GOTO=4,COLOR=7,RACE=8,OUT=13,ECU=14,CYCLE=255,PAGE_ACTS=[1,2,4];
+const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+const opt=(v,t,sel,dis)=>'<option value="'+v+'"'+(sel?" selected":"")+(dis?" disabled":"")+'>'+t+'</option>';
+const pinName=p=>p>=140?"ADS1115 #"+(Math.floor((p-140)/4)+1)+" A"+((p-140)%4):p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+((p-100)%8):"GPIO "+p;
+function msg(t,bad){$("msg").textContent=t;$("msg").className=bad?"bad":"";}
+async function load(){try{D=await (await fetch("/buttons.json")).json();render();}catch(e){msg("Could not reach the hub",true);}}
+function what(b){let t=D.actions[b.a]||"?";
+ if(b.a===GOTO)t+=" "+b.p;if(b.a===RACE)t+=", page "+b.p;if(b.a===OUT)t+=" "+b.p;
+ if(b.a===COLOR)t+=b.p===CYCLE?" (next each time)":": "+(D.colors[b.p]||"");
+ if(PAGE_ACTS.includes(b.a))t+=" on "+(b.t?D.targets[b.t]:"all screens");
+ return esc(t);}
+function render(){
+ const used=D.buttons.map((b,i)=>[b,i]).filter(a=>a[0].kind);
+ $("list").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Pin</th><th>Now</th><th>On a press</th><th></th></tr></thead><tbody>'+used.map(([b,i])=>
+  '<tr><td>'+(i+1)+'</td><td>'+esc(b.name)+'</td><td>'+pinName(b.pin)+(b.kind===2?' (ladder, '+(b.mv/1000).toFixed(2)+' V)':(b.high?' (active HIGH)':''))+'</td><td>'+
+  (b.down?'<span class="on">PRESSED</span>':(b.kind===2?(b.now/1000).toFixed(2)+' V':'-'))+'</td><td>'+what(b)+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearB('+i+')">Remove</button></td></tr>').join("")+
+  '</tbody></table>':'<p class="note">No buttons set up yet.</p>';
+ if(ed===null&&ecuDraft===null)renderEcu();}
+// Pins for a kind: every pin that can do it; the ones in use are shown but cannot be picked (a ladder pin can take more ladder buttons).
+function pinList(kind,i){const cur=D.buttons[i]||{};
+ return D.pins.filter(([p,c])=>kind===1?((p>=100&&p<140)||(p<100&&(c&1))):(p>=140||(p<100&&(c&4)))).map(([p,c,u])=>{
+  const mine=cur.kind&&cur.pin===p,share=kind===2&&/^Button ladder/.test(u),free=!u||mine||share;
+  return {p:p,free:free,label:pinName(p)+(u&&!mine?(share?" - "+u:" - used by "+u):"")};});}
+function edit(i,kind){if(i<0){i=D.buttons.findIndex(b=>!b.kind);if(i<0){msg("All 24 buttons are in use",true);return;}}
+ const b=D.buttons[i];ed={i:i,kind:b.kind||kind||1,pin:b.pin,high:b.high,a:b.kind?b.a:1,p:b.p,t:b.t,mv:b.mv,name:b.name||"",now:null};
+ if(!b.kind&&ed.kind===2){const lad=D.buttons.find(x=>x.kind===2);if(lad)ed.pin=lad.pin;}   // the next ladder button: on the same pin as the last
+ draw();setTimeout(()=>{const e=$("editor");if(e&&e.scrollIntoView)e.scrollIntoView({behavior:"smooth"});},0);}
+function val(id,d){const x=$(id);return x&&x.value!==undefined&&x.value!==""?x.value:d;}
+function keep(){if(!ed)return;ed.name=val("b_name",ed.name);ed.pin=+val("b_pin",ed.pin);ed.high=+val("b_high",ed.high);ed.p=+val("b_p",ed.p);ed.t=+val("b_t",ed.t);ed.mv=+val("b_mv",ed.mv);}
+function paramHtml(){const a=ed.a,p=ed.p;let o="";
+ if(a===GOTO||a===RACE){for(let n=1;n<=8;n++)o+=opt(n,(a===RACE?"Race page ":"Page ")+n,n===p);return '<label>Which page<select id="b_p">'+o+'</select></label>';}
+ if(a===COLOR){o=opt(CYCLE,"Next scheme each time",p===CYCLE);D.colors.forEach((n,k)=>o+=opt(k,(k+1)+". "+esc(n),k===p));return '<label>Color scheme<select id="b_p">'+o+'</select></label>';}
+ if(a===OUT){for(let n=1;n<=16;n++)o+=opt(n,"Output "+n,n===p);return '<label>Which output<select id="b_p">'+o+'</select></label>';}
+ return "";}
+function draw(){if(liveT){clearInterval(liveT);liveT=null;}
+ if(!ed){$("editor").innerHTML="";renderEcu();return;}
+ const e=ed,pins=pinList(e.kind,e.i);if(!pins.some(x=>x.p===e.pin&&x.free)){const f=pins.find(x=>x.free);e.pin=f?f.p:-1;}
+ let h='<div class="card" style="background:#0b1a1d"><h3>Button '+(e.i+1)+'</h3><div class="form">'+
+  '<label>Name<input id="b_name" maxlength="15" value="'+esc(e.name)+'"></label>'+
+  '<label>Kind<select onchange="keep();ed.kind=+this.value;draw()">'+opt(1,"Single button",e.kind===1)+opt(2,"On a resistor ladder",e.kind===2)+'</select></label>'+
+  '<label>Pin<select id="b_pin" onchange="keep();ed.now=null;draw()">'+(pins.some(x=>x.free)?pins.map(x=>opt(x.p,esc(x.label),x.p===e.pin,!x.free)).join(""):'<option value="">(no free pin)</option>')+'</select></label>';
+ if(e.kind===1)h+='<label>Active when<select id="b_high">'+opt(0,"LOW (switch to ground, optocoupler)",!e.high)+opt(1,"HIGH (12 V through a divider)",!!e.high)+'</select></label>';
+ else h+='<label>Pin now<span class="live" id="b_now">'+(e.now===null?"...":(e.now/1000).toFixed(3)+" V")+'</span></label>'+
+  '<label>Learned (mV)<input id="b_mv" type="number" min="1" max="3300" value="'+(e.mv||"")+'"></label>'+
+  '<label>&nbsp;<button class="sec" onclick="learn()">Learn (hold the button)</button></label>';
+ h+='<label>On a press<select onchange="keep();ed.a=+this.value;ed.p=(ed.a===GOTO||ed.a===RACE||ed.a===OUT)?1:(ed.a===COLOR?CYCLE:0);draw()">'+D.actions.map((n,k)=>opt(k,esc(n),k===e.a)).join("")+'</select></label>'+paramHtml();
+ if(PAGE_ACTS.includes(e.a))h+='<label>On which screen<select id="b_t">'+D.targets.map((n,k)=>opt(k,esc(n),k===e.t)).join("")+'</select></label>';
+ h+='</div>';
+ if(e.a===ECU)h+='<p class="note">Set up the maps under ECU maps below.</p>';
+ if(e.a===1&&e.t===4||e.a===3)h+='<p class="note">"Next gauge" picks a screen; buttons set to "Chosen screen" then control it (all screens until one is picked, back to all after a minute).</p>';
+ h+='<button onclick="saveB()">Save button '+(e.i+1)+'</button> <button class="sec" onclick="ed=null;draw()">Cancel</button></div>';
+ $("editor").innerHTML=h;
+ if(e.kind===2&&e.pin>=0){readPin();liveT=setInterval(readPin,800);}}
+async function readPin(){if(!ed||ed.kind!==2)return;try{const r=await fetch("/buttons/read?pin="+ed.pin);if(!r.ok)return;ed.now=+(await r.text());const x=$("b_now");if(x)x.textContent=(ed.now/1000).toFixed(3)+" V";}catch(e){}}
+async function learn(){keep();await readPin();if(ed.now===null){msg("Could not read the pin",true);return;}
+ const near=D.buttons.map((b,k)=>[b,k]).find(([b,k])=>k!==ed.i&&b.kind===2&&b.pin===ed.pin&&Math.abs(b.mv-ed.now)<120);
+ ed.mv=ed.now;$("b_mv").value=ed.mv;
+ msg(near?"Learned "+ed.mv+" mV, but that is button "+(near[1]+1)+" ("+near[0].name+"). Hold the new button and Learn again.":"Learned "+ed.mv+" mV. Save to keep it.",!!near);}
+async function saveB(){keep();const e=ed;
+ const q={i:e.i,kind:e.kind,pin:e.pin,high:e.kind===1?e.high:0,a:e.a,p:e.p,t:PAGE_ACTS.includes(e.a)?e.t:0,mv:e.kind===2?e.mv:0,name:e.name};
+ const r=await fetch("/buttons/set?"+new URLSearchParams(q));msg(await r.text(),!r.ok);if(r.ok){ed=null;draw();load();}}
+async function clearB(i){if(!confirm("Remove button "+(i+1)+"?"))return;const r=await fetch("/buttons/clear?i="+i);msg(await r.text(),!r.ok);load();}
+// ---- ECU maps ----
+let ecuDraft=null;
+function renderEcu(){const c=ecuDraft||D.ecu;
+ let h='<div class="form"><label>CAN id (hex)<input id="m_id" oninput="keepEcu()" value="0x'+c.id.toString(16).toUpperCase()+'"></label>'+
+  '<label>Maps<select onchange="keepEcu();ecuDraft.count=+this.value;renderEcu()">'+[1,2,3,4,5,6,7,8].map(n=>opt(n,n,n===c.count)).join("")+'</select></label>';
+ for(let m=0;m<c.count;m++)h+='<label>Map '+(m+1)+' name'+(m===D.ecu.cur?' (in use)':'')+'<input id="m_n'+m+'" maxlength="12" oninput="keepEcu()" value="'+esc(c.names[m]||"")+'"></label>';
+ h+='</div><button onclick="saveEcu()">Save the maps</button>'+(D.ecu.used?'':' <span class="note">No button is set to "ECU map (next)" yet, so nothing is sent.</span>');
+ $("ecu").innerHTML=h;}
+function keepEcu(){const c=ecuDraft||JSON.parse(JSON.stringify(D.ecu));c.id=parseInt(val("m_id","0x"+c.id.toString(16)))||c.id;
+ for(let m=0;m<c.count;m++)c.names[m]=val("m_n"+m,"");ecuDraft=c;}
+async function saveEcu(){keepEcu();const c=ecuDraft,q={id:"0x"+c.id.toString(16),count:c.count};for(let m=0;m<8;m++)q["n"+m]=m<c.count?c.names[m]:"";
+ const r=await fetch("/buttons/ecu?"+new URLSearchParams(q));msg(await r.text(),!r.ok);if(r.ok){ecuDraft=null;load();}}
+load();setInterval(()=>{if(ed===null)load();},1500);
 </script></body></html>)HTML";
 // /oled: the warning-light panel on the 0.96" OLED - a live copy of the display and the 8 lamps.
 static const char OLED_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH OLED</title>
@@ -402,7 +468,7 @@ select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;
 <p>Layout <select id="layout" onchange="opts()"><option value="0">Each lamp in its own spot</option><option value="1">Lit lamps packed together</option></select>
  <button onclick="defaults()">Back to the defaults</button></p>
 <p class="note">The OLED shows one colour, so the two levels look different instead: WARNING = the icon (it flashes if Blink is ticked); DANGER = a white box with the icon cut out, flashing. Spots go left to right, top row first.</p>
-<p class="note">Input wires: any free hub GPIO or MCP23017 pin (the Inputs and pins page shows what is free). Inputs have pull-ups: wire a switch to ground and pick "lit when LOW" (GPIO 34-39 need an outside 10 k pull-up).</p></div>
+<p class="note">Input wires: any free hub GPIO or MCP23017 pin (pins in use are greyed out with what uses them). Inputs have pull-ups: wire a switch to ground and pick "lit when LOW" (GPIO 34-39 need an outside 10 k pull-up).</p></div>
 <script>
 )HTML" OLED_ICONS_JS R"HTML(
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",20:"EGT",21:"Intake Air Temp",22:"Ambient Temp",23:"Humidity",24:"Fuel Level",25:"Speed",26:"GPS Speed",27:"GPS Satellites",45:"Lateral G",46:"Accel/Brake G",47:"Vertical G",48:"Yaw Rate"};
@@ -410,14 +476,16 @@ const $=id=>document.getElementById(id);let cfg=null;
 const OPS=["Is on","Above","Below","Input wire"],STATE=["off","WARNING","DANGER"];
 const INPUTS=[0,2,4,5,12,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33,34,35,36,39].map(g=>[64+g,"GPIO "+g]);   // see the Inputs page for what is free
 for(let e=0;e<2;e++)for(let b=0;b<16;b++)INPUTS.push([16+e*16+b,"MCP23017 #"+(e+1)+" "+(b<8?"PA":"PB")+(b%8)]);
-const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
+const opt=(v,t,sel,dis)=>'<option value="'+v+'"'+(sel?" selected":"")+(dis?" disabled":"")+'>'+t+'</option>';
+// What else uses an input wire's pin ("" = free, or this lamp's own): from the hub's shared pin list.
+const inUser=(code,i)=>{const u=(cfg.inusers||{})[code]||"";return u==="OLED lamp "+(i+1)?"":u;};
 function svg(i){const ic=ICONS[i];return ic&&ic[1]?'<svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align:middle;fill:#4dd0e1"><path d="'+ic[1]+'"/></svg>':"";}
 function rowHtml(l,i){
  const st=STATE[l.state]||"off",lvl=l.op===1||l.op===2;
  let h='<div class="lamp" id="lamp'+i+'"><div class="l1"><span class="n">'+(i+1)+'</span>'+svg(l.icon)+
   ' <select id="ic'+i+'">'+ICONS.map((c,k)=>opt(k,k?c[0]:"(unused)",k===l.icon)).join("")+'</select>'+
   ' <select id="op'+i+'" onchange="chOp('+i+',+this.value)">'+OPS.map((o,k)=>opt(k,o,k===l.op)).join("")+'</select>';
- if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>opt(x[0],x[1]+(x[0]>=16&&x[0]<48&&!(cfg.mcp||[])[x[0]>=32?1:0]?" (not found)":""),x[0]===l.input)).join("")+'</select>'+
+ if(l.op===3){h+=' <select id="in'+i+'">'+INPUTS.map(x=>{const u=inUser(x[0],i);return opt(x[0],x[1]+(x[0]>=16&&x[0]<48&&!(cfg.mcp||[])[x[0]>=32?1:0]?" (not found)":"")+(u?" - used by "+u:""),x[0]===l.input,!!u&&x[0]!==l.input);}).join("")+'</select>'+
    ' <select id="lo'+i+'">'+opt(1,"lit when LOW",l.input_low)+opt(0,"lit when HIGH",!l.input_low)+'</select>';}
  else h+=' <select id="sg'+i+'">'+Object.keys(NAME).map(k=>opt(k,NAME[k],+k===l.sig)).join("")+'</select>';
  h+=' <span class="st '+st+'">'+st+(l.op===3?" | input "+(l.in_low?"LOW":"HIGH"):"")+'</span></div><div class="l2"><span class="n"></span>';
@@ -579,13 +647,13 @@ button.sec{background:#1d2b2e;color:#4dd0e1}.free{color:#666}.cap{font-size:11px
 <div id="msg"></div>
 <div class="card"><h3>Inputs</h3><div id="inputs"></div><p><button onclick="edit(-1)">Add an input</button></p>
 <div id="editor"></div>
-<p class="note">Button: an action on a press and another on a 1 s hold (like the two page buttons). Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. Active when LOW: a switch to ground (closed = active), or a 12 V signal through a PC817 optocoupler board. Active when HIGH: a switch that opens when active, or a 12 V signal through a 47k / 10k divider with a clamp. Never 12 V straight to a pin (3.3 V at most). Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
+<p class="note">Buttons are set up on the <a href="/buttons" style="color:#4dd0e1">Buttons</a> page. Switch: an on/off sensor (1 / 0) for gauges, OLED lamps and logging. Analog sensor: a reading in a custom sensor slot. Active when LOW: a switch to ground (closed = active), or a 12 V signal through a PC817 optocoupler board. Active when HIGH: a switch that opens when active, or a 12 V signal through a 47k / 10k divider with a clamp. Never 12 V straight to a pin (3.3 V at most). Hub pins and MCP23017 pins have pull-ups (GPIO 34-39 do not: add 10 k to 3.3 V).</p></div>
 <div class="card"><h3>Outputs</h3><div id="outputs"></div><p><button onclick="editOut(-1)">Add an output</button></p>
 <div id="oeditor"></div>
 <p class="note">An output switches on when a signal crosses a level (with hysteresis so it does not chatter), when an input is active, or when you toggle it (here, or with the "Toggle output" button action and its number). A pin gives 3.3 V and a few mA: drive a relay module, a transistor or an LED, never a motor or a lamp directly. Most relay modules switch on with LOW.</p></div>
 <div class="card"><h3>Pins</h3><table><thead><tr><th>Pin</th><th>Can do</th><th>Used by</th><th></th></tr></thead><tbody id="pins"></tbody></table>
 <p><button class="sec" onclick="pinsDefaults()">Every function back on its default GPIO</button></p>
-<p class="note">ADS1115 channels (if fitted, ADDR to GND = 0x48) are analog pins: sensors and the analog functions can use them; 0 to 3.3 V only. Free pin: "Set up an input" makes it a button, switch or sensor. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
+<p class="note">ADS1115 channels (if fitted, ADDR to GND = 0x48) are analog pins: sensors and the analog functions can use them; 0 to 3.3 V only. Free pin: "Set up an input" makes it a switch or sensor, "Set up a button" opens the Buttons page. Moving a function: pick the new GPIO, move the wire, the hub restarts with it. Only GPIOs that can do the job are offered. Analog functions need GPIO 32-39 (ADC1).</p></div>
 <script>
 const NAME={1:"RPM",2:"Coolant Temp",3:"MAP/Boost",4:"AFR",5:"Oil Pressure",6:"Oil Temp",7:"Fuel Pressure",8:"Ethanol",9:"Throttle Position",10:"Battery Voltage",
 11:"Rev Limiter",12:"Main Relay",13:"Fuel Pump",14:"Check Engine",15:"O2 Heater",16:"Lambda Protection",17:"Fan 1",18:"Fan 2",19:"Brake Pedal",
@@ -594,7 +662,9 @@ const $=id=>document.getElementById(id);let D=null,editing=null,oedit=null;
 const TYPES=["","Button","Switch","Analog sensor"],CAPS={1:"in",2:"out",4:"analog",8:"pull-up"};
 const PARAM_ACTIONS={4:"page",7:"scheme",8:"race page"};
 const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
-const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+'>'+t+'</option>';
+const opt=(v,t,sel,dis)=>'<option value="'+v+'"'+(sel?" selected":"")+(dis?" disabled":"")+'>'+t+'</option>';
+// A pin list for a picker: every pin that fits, the ones in use shown but not pickable ([pin, user] -> options).
+const pinOpts=(list,cur)=>list.map(([p,u])=>opt(p,pinName(p)+(u?" - used by "+esc(u):""),p===cur,!!u)).join("");
 const pinName=p=>p>=140?"ADS1115 #"+(Math.floor((p-140)/4)+1)+" A"+((p-140)%4):p>=100?"MCP23017 #"+(p>=116?2:1)+" "+((p-100)%16<8?"PA":"PB")+((p-100)%8):"GPIO "+p;
 // ADS1115 channels found, free or not: [pin, user]
 function adsPins(){const out=[];(D.ads||[]).forEach((a,b)=>{if(a)for(let c=0;c<4;c++)out.push([140+b*4+c,(D.adsusers||[])[b*4+c]||""]);});return out;}
@@ -606,7 +676,8 @@ function render(){renderOutputs();
   let mv="";if(role){const fits=D.gpios.filter(x=>(x.caps&role.need)===role.need&&(!x.user||x.g===g.g));
    const mcpFree=[];if(role.mcp)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++)if(!D.mcpusers[e*16+n])mcpFree.push(100+e*16+n);
    if(role.need===4)adsPins().forEach(([p,u])=>{if(!u)mcpFree.push(p);});   // analog-only roles: an ADS1115 channel
-   mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+mcpFree.map(p=>opt(p,pinName(p))).join("")+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
+   const usedG=D.gpios.filter(x=>(x.caps&role.need)===role.need&&x.user&&x.g!==g.g).map(x=>[x.g,x.user]);
+   mv='<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+fits.filter(x=>x.g!==g.g).map(x=>opt(x.g,"GPIO "+x.g)).join("")+mcpFree.map(p=>opt(p,pinName(p))).join("")+pinOpts(usedG,-1)+'</select>'+(role.gpio!==role.def?' <span class="note">(default GPIO '+role.def+')</span>':'');}
   if(!role)mv=pinAction(g.g,g.user,g.caps);
   return '<tr><td>GPIO '+g.g+'</td><td>'+caps(g.caps)+(g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</td><td'+(g.user?'':' class="free"')+'>'+(g.user?esc(g.user):"free")+'</td><td>'+mv+'</td></tr>';});
  for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const u=D.mcpusers[e*16+n];const rl=D.roles.find(r=>r.gpio===100+e*16+n);rows.push('<tr><td>'+pinName(100+e*16+n)+'</td><td><span class="cap">in</span><span class="cap">out</span><span class="cap">pull-up</span><div class="note">expander at 0x'+D.mcp[e].toString(16).toUpperCase()+'</div></td><td'+(u?'':' class="free"')+'>'+(u?esc(u):"free")+'</td><td>'+(rl?moveList(rl,100+e*16+n):pinAction(100+e*16+n,u,11))+'</td></tr>');}
@@ -617,7 +688,7 @@ function render(){renderOutputs();
  const used=D.inputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("inputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>Type</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
   const now=x.type===3?(x.active?x.value.toFixed(2)+" "+esc((D.presets[x.preset]||{}).unit||""):"--"):(x.active?'<span class="on">ACTIVE</span>':"off");
-  const lvl=x.contact?"active HIGH":"active LOW";const what=x.type===1?"Button ("+lvl+")":x.type===2?"Switch ("+lvl+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
+  const lvl=x.contact?"active HIGH":"active LOW";const what=x.type===2?"Switch ("+lvl+") to sensor "+(x.slot+1):esc(D.presets[x.preset].name)+", sensor "+(x.slot+1);
   return '<tr><td>'+(i+1)+'</td><td>'+esc(x.name)+'</td><td>'+what+'</td><td>'+pinName(x.pin)+'</td><td>'+now+'</td><td><button class="sec" onclick="edit('+i+')">Edit</button> <button class="sec" onclick="clearIn('+i+')">Remove</button></td></tr>';}).join("")+'</tbody></table>':'<p class="note">No inputs set up yet.</p>';
  if(editing!==null)drawEditor();}
 // The button beside a pin: set up an input on a free pin, edit the input already on it, or open the OLED lamps.
@@ -627,33 +698,32 @@ function moveList(role,at){   // a fixed function on an expander or ADS pin: mov
  if(role.need===4)adsPins().forEach(([p,u])=>{if(!u)m.push(p);});
  return '<select onchange="if(this.value!==\'\')movePin(\''+role.key+'\',+this.value)"><option value="">Move to...</option>'+g.concat(m).filter(p=>p!==at).map(p=>opt(p,pinName(p))).join("")+'</select>';}
 function pinAction(pin,user,c){
- if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>'+((c&2)?' <button class="sec" onclick="assignOut('+pin+')">Set up an output</button>':'');
+ if(!user)return '<button class="sec" onclick="assignPin('+pin+','+c+')">Set up an input</button>'+((c&2)?' <button class="sec" onclick="assignOut('+pin+')">Set up an output</button>':'')+' <a href="/buttons" style="color:#4dd0e1">Set up a button</a>';
+ if(/^Button/.test(user))return '<a href="/buttons" style="color:#4dd0e1">Buttons</a>';
  const m=/^Input (\d+)/.exec(user);if(m)return '<button class="sec" onclick="edit('+(m[1]-1)+')">Edit input</button>';
  const o=/^Output (\d+)/.exec(user);if(o)return '<button class="sec" onclick="editOut('+(o[1]-1)+')">Edit output</button>';
  if(/^OLED lamp/.test(user))return '<a href="/oled" style="color:#4dd0e1">OLED lamps</a>';
  return "";}
 function assignPin(pin,c){const i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}
  edit(i);editing.pin=pin;editing.type=(c&4)&&!(c&8)?3:2;drawEditor();}   // analog-only pins start as a sensor, others as a switch
-function freePins(type,i){const cur=D.inputs[i]||{};const out=[];
- D.gpios.forEach(g=>{const ok=type===3?(g.caps&4):(g.caps&1);if(ok&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
- if(type!==3)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
- if(type===3)adsPins().forEach(([p,u])=>{if(!u||(cur.type&&cur.pin===p))out.push(p);});
+// Every pin that fits the type: [pin, user] ("" = free, or this input's own pin).
+function freePins(type,i){const cur=D.inputs[i]||{};const out=[],mine=p=>cur.type&&cur.pin===p;
+ D.gpios.forEach(g=>{const ok=type===3?(g.caps&4):(g.caps&1);if(ok)out.push([g.g,mine(g.g)?"":g.user]);});
+ if(type!==3)for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;out.push([p,mine(p)?"":D.mcpusers[e*16+n]]);}
+ if(type===3)adsPins().forEach(([p,u])=>out.push([p,mine(p)?"":u]));
  return out;}
 function edit(i){if(i<0){i=D.inputs.findIndex(x=>!x.type);if(i<0){msg("All 16 inputs are in use");return;}}
  setTimeout(()=>{const ed=$("editor");if(ed&&ed.scrollIntoView)ed.scrollIntoView({behavior:"smooth"});},0);
- const x=D.inputs[i];editing={i:i,type:x.type||1,pin:x.pin,contact:x.contact,slot:x.slot,ap:x.ap,pp:x.pp,ah:x.ah,ph:x.ph,preset:x.preset,mult:x.mult||1,v1:x.v1,val1:x.val1,v2:x.v2||3.3,val2:x.val2||100,pullup:x.pullup||2490,name:x.name||"",unit:""};drawEditor();}
+ const x=D.inputs[i];editing={i:i,type:x.type>1?x.type:2,pin:x.pin,contact:x.contact,slot:x.slot,ap:x.ap,pp:x.pp,ah:x.ah,ph:x.ph,preset:x.preset,mult:x.mult||1,v1:x.v1,val1:x.val1,v2:x.v2||3.3,val2:x.val2||100,pullup:x.pullup||2490,name:x.name||"",unit:""};drawEditor();}
 function freeSlots(e){return D.slots.map((s,k)=>[s,k]).filter(([s,k])=>!s.name||(D.inputs[e.i].type>1&&D.inputs[e.i].slot===k)).map(a=>a[1]);}
 function drawEditor(){if(!editing){$("editor").innerHTML="";return;}   // Cancel
- const e=editing,pins=freePins(e.type,e.i);if(!pins.includes(e.pin))e.pin=pins[0];
+ const e=editing,all=freePins(e.type,e.i),pins=all.filter(x=>!x[1]).map(x=>x[0]);if(!pins.includes(e.pin))e.pin=pins[0];
  let h='<div class="card" style="background:#0b1a1d"><h3>Input '+(e.i+1)+'</h3><div class="form">'+
   '<label>Name<input id="e_name" maxlength="15" value="'+esc(e.name)+'"></label>'+
-  '<label>Type<select onchange="editing.type=+this.value;keep();drawEditor()">'+[1,2,3].map(t=>opt(t,TYPES[t],t===e.type)).join("")+'</select></label>'+
-  '<label>Pin<select id="e_pin">'+pins.map(p=>opt(p,pinName(p),p===e.pin)).join("")+'</select></label>';
+  '<label>Type<select onchange="editing.type=+this.value;keep();drawEditor()">'+[2,3].map(t=>opt(t,TYPES[t],t===e.type)).join("")+'</select></label>'+
+  '<label>Pin<select id="e_pin">'+pinOpts(all,e.pin)+'</select></label>';
  if(e.type!==3)h+='<label>Active when<select id="e_contact">'+opt(0,"Active when LOW (switch to ground, optocoupler)",!e.contact)+opt(1,"Active when HIGH (12 V through a divider)",!!e.contact)+'</select></label>';
- if(e.type===1){const act=(id,v)=>'<select id="'+id+'">'+D.actions.map((n,k)=>opt(k,n,k===v)).join("")+'</select>';
-  h+='<label>On a press'+act("e_ap",e.ap)+'</label><label>Its number (page / scheme)<input id="e_pp" type="number" min="0" max="255" value="'+e.pp+'"></label>'+
-     '<label>On a 1 s hold'+act("e_ah",e.ah)+'</label><label>Its number<input id="e_ph" type="number" min="0" max="255" value="'+e.ph+'"></label>';}
- else{const sl=freeSlots(e);if(!sl.includes(e.slot))e.slot=sl[0];
+ {const sl=freeSlots(e);if(!sl.includes(e.slot))e.slot=sl[0];
   h+='<label>Custom sensor slot<select id="e_slot">'+sl.map(k=>opt(k,"Sensor "+(k+1)+(D.slots[k].name?" ("+esc(D.slots[k].name)+")":" (free)"),k===e.slot)).join("")+'</select></label>';}
  if(e.type===3){h+='<label>Sensor<select onchange="keep();editing.preset=+this.value;drawEditor()">'+D.presets.map((p,k)=>opt(k,esc(p.name),k===e.preset)).join("")+'</select></label>';
   if(e.preset===0)h+='<label>Divider multiplier<input id="e_mult" type="number" step="any" value="'+e.mult+'"></label><label>Unit<input id="e_unit" maxlength="7" value="'+esc(e.unit)+'"></label>'+
@@ -666,7 +736,7 @@ function drawEditor(){if(!editing){$("editor").innerHTML="";return;}   // Cancel
 function val(id,d){const x=$(id);return x&&x.value!==undefined&&x.value!==""?x.value:d;}
 function keep(){const e=editing;if(!e)return;e.name=val("e_name",e.name);e.pin=+val("e_pin",e.pin);e.contact=+val("e_contact",e.contact);}
 async function saveIn(){const e=editing;keep();
- const q={i:e.i,type:e.type,pin:e.pin,contact:e.contact,name:e.name,slot:val("e_slot",e.slot),ap:val("e_ap",e.ap),pp:val("e_pp",e.pp),ah:val("e_ah",e.ah),ph:val("e_ph",e.ph),preset:e.preset};
+ const q={i:e.i,type:e.type,pin:e.pin,contact:e.contact,name:e.name,slot:val("e_slot",e.slot),preset:e.preset};
  if(e.type===3&&e.preset===0){Object.assign(q,{mult:val("e_mult",1),v1:val("e_v1",0),val1:val("e_val1",0),v2:val("e_v2",3.3),val2:val("e_val2",100),unit:val("e_unit","")});}
  if(e.type===3&&(e.preset===6||e.preset===7))q.pullup=val("e_pullup",2490);
  const r=await fetch("/inputs/set?"+new URLSearchParams(q));msg(await r.text());if(r.ok){editing=null;$("editor").innerHTML="";load();}}
@@ -676,9 +746,9 @@ async function movePin(key,g){const role=D.roles.find(r=>r.key===key);if(!confir
 async function pinsDefaults(){if(!confirm("Put every function back on its default GPIO? The hub restarts."))return;msg(await (await fetch("/pins/defaults")).text());setTimeout(load,6000);}
 // ---- outputs ----
 const OTYPES=["","A signal","An input is active","Toggled (button action or this page)"],OCOND=["is on","above","below"];
-function outPins(i){const cur=D.outputs[i]||{},out=[];
- D.gpios.forEach(g=>{if((g.caps&2)&&(!g.user||(cur.type&&cur.pin===g.g)))out.push(g.g);});
- for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;if(!D.mcpusers[e*16+n]||(cur.type&&cur.pin===p))out.push(p);}
+function outPins(i){const cur=D.outputs[i]||{},out=[],mine=p=>cur.type&&cur.pin===p;   // [pin, user]
+ D.gpios.forEach(g=>{if(g.caps&2)out.push([g.g,mine(g.g)?"":g.user]);});
+ for(let e=0;e<2;e++)if(D.mcp[e])for(let n=0;n<16;n++){const p=100+e*16+n;out.push([p,mine(p)?"":D.mcpusers[e*16+n]]);}
  return out;}
 function renderOutputs(){const used=D.outputs.map((x,i)=>[x,i]).filter(a=>a[0].type);
  $("outputs").innerHTML=used.length?'<table><thead><tr><th>#</th><th>Name</th><th>On when</th><th>Pin</th><th>Now</th><th></th></tr></thead><tbody>'+used.map(([x,i])=>{
@@ -692,10 +762,10 @@ function assignOut(pin){editOut(-1);if(!oedit)return;oedit.pin=pin;drawOut();}
 function okeep(){const o=oedit;if(!o)return;o.name=val("o_name",o.name);o.pin=+val("o_pin",o.pin);o.low=+val("o_low",o.low);o.sig=+val("o_sig",o.sig);o.cond=+val("o_cond",o.cond);
  o.level=val("o_level",o.level);o.hyst=val("o_hyst",o.hyst);o.input=+val("o_input",o.input);const b=$("o_blink");if(b&&b.checked!==undefined)o.blink=b.checked?1:0;}
 function drawOut(){if(!oedit){$("oeditor").innerHTML="";return;}
- const o=oedit,pins=outPins(o.i);if(!pins.includes(o.pin))o.pin=pins[0];
+ const o=oedit,all=outPins(o.i),pins=all.filter(x=>!x[1]).map(x=>x[0]);if(!pins.includes(o.pin))o.pin=pins[0];
  let h='<div class="card" style="background:#0b1a1d"><h3>Output '+(o.i+1)+'</h3><div class="form">'+
   '<label>Name<input id="o_name" maxlength="15" value="'+esc(o.name)+'"></label>'+
-  '<label>Pin<select id="o_pin">'+pins.map(p=>opt(p,pinName(p),p===o.pin)).join("")+'</select></label>'+
+  '<label>Pin<select id="o_pin">'+pinOpts(all,o.pin)+'</select></label>'+
   '<label>On means<select id="o_low">'+opt(0,"HIGH (LED, transistor)",!o.low)+opt(1,"LOW (most relay modules)",!!o.low)+'</select></label>'+
   '<label>Switch on when<select onchange="okeep();oedit.type=+this.value;drawOut()">'+[1,2,3].map(t=>opt(t,OTYPES[t],t===o.type)).join("")+'</select></label>';
  if(o.type===1)h+='<label>Signal<select id="o_sig">'+Object.keys(NAME).map(k=>opt(k,esc(NAME[k]),+k===o.sig)).join("")+'</select></label>'+

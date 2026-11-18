@@ -30,15 +30,16 @@ static inline const char *gpio_note(int g) {
 #define GPIO_LIST { 0, 2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39 }
 
 // ---- the hub's fixed functions ----
+// Hub 53 took the two page buttons out of this list (they are ordinary buttons on the Buttons page now). A map saved
+// before that has 21 entries: PIN_MAP_OLD_COUNT, buttons first (next, previous), then the rest in this order.
+#define PIN_MAP_OLD_COUNT 21
 enum HubPinRole {
-  PR_BTN_NEXT, PR_BTN_PREV, PR_FUEL, PR_POT, PR_LIGHTS, PR_DIMMER, PR_CAN_TX, PR_CAN_RX, PR_EGT_SCK, PR_EGT_SO, PR_EGT_CS,
+  PR_FUEL, PR_POT, PR_LIGHTS, PR_DIMMER, PR_CAN_TX, PR_CAN_RX, PR_EGT_SCK, PR_EGT_SO, PR_EGT_CS,
   PR_GPS_RX, PR_GPS_TX, PR_DHT, PR_RF_GDO0, PR_RF_CS, PR_RF_SCK, PR_RF_MOSI, PR_RF_MISO, PR_I2C_SDA, PR_I2C_SCL, PR_COUNT
 };
 typedef struct { const char *key; const char *name; uint8_t def; uint8_t need; const char *term; } HubPinRoleInfo;
 // key: short id for the web page and NVS; def: default GPIO; need: CAP_ bits the pin must have; term: default terminal.
 static const HubPinRoleInfo HUB_PIN_ROLES[PR_COUNT] = {
-  { "btn_next", "Right (next) button",          25, CAP_IN | CAP_PULLUP, "L14" },
-  { "btn_prev", "Left (previous) button",       26, CAP_IN | CAP_PULLUP, "L15" },
   { "fuel",     "Fuel level sender",            36, CAP_ADC,             "L8"  },
   { "pot",      "Brightness knob",              34, CAP_ADC,             "L10" },
   { "lights",   "Lights-on wire (divider)",     35, CAP_ADC,             "L11" },
@@ -59,15 +60,15 @@ static const HubPinRoleInfo HUB_PIN_ROLES[PR_COUNT] = {
   { "i2c_sda",  "I2C SDA (OLED, MPU6050, MCP23017)", 5, CAP_IN | CAP_OUT, "R15" },
   { "i2c_scl",  "I2C SCL (OLED, MPU6050, MCP23017)", 15, CAP_IN | CAP_OUT, "R21" },
 };
-// Pins 100.. are MCP23017 expander pins: board 1 PA0..PB7 = 100..115, board 2 = 116..131 (used by inputs, outputs and
-// the two page buttons; nothing else can run through the expander).
+// Pins 100.. are MCP23017 expander pins: board 1 PA0..PB7 = 100..115, board 2 = 116..131 (used by buttons, inputs and
+// outputs; none of the fixed functions can run through the expander).
 #define PIN_MCP_BASE 100
 static inline bool pin_is_mcp(int p) { return p >= PIN_MCP_BASE && p < PIN_MCP_BASE + 32; }
 // Pins 140.. are ADS1115 analog channels: board 1 (0x48) A0..A3 = 140..143, 0x49 = 144..147, 0x4A, 0x4B (up to 16).
 #define PIN_ADS_BASE 140
 static inline bool pin_is_ads(int p) { return p >= PIN_ADS_BASE && p < PIN_ADS_BASE + 16; }
-// Roles that may sit on an expander pin: slow on/off inputs only.
-static inline bool pin_role_mcp_ok(int role) { return role == PR_BTN_NEXT || role == PR_BTN_PREV; }
+// Roles that may sit on an expander pin: none since hub 53 (the two page buttons moved to the Buttons page).
+static inline bool pin_role_mcp_ok(int role) { (void)role; return false; }
 // Can this role sit on that GPIO (or expander pin)?
 static inline bool pin_role_fits(int role, int g) {
   if (role < 0 || role >= PR_COUNT) return false;
@@ -85,13 +86,18 @@ static inline bool pin_map_valid(const uint8_t map[PR_COUNT]) {
   return true;
 }
 static inline void pin_map_defaults(uint8_t map[PR_COUNT]) { for (int r = 0; r < PR_COUNT; r++) map[r] = HUB_PIN_ROLES[r].def; }
+// A map saved before hub 53: the two button pins out (for the Buttons page), the rest in the new order.
+static inline void pin_map_upgrade(const uint8_t old[PIN_MAP_OLD_COUNT], uint8_t map[PR_COUNT], uint8_t *btnNext, uint8_t *btnPrev) {
+  *btnNext = old[0]; *btnPrev = old[1];
+  for (int r = 0; r < PR_COUNT; r++) map[r] = old[r + 2];
+}
+#define PIN_BTN_NEXT_DEF 25   // the default page buttons (Buttons page): right / next on GPIO 25 (L14)
+#define PIN_BTN_PREV_DEF 26   //                                          left / previous on GPIO 26 (L15)
 // The role on a GPIO, or -1.
 static inline int pin_map_role_at(const uint8_t map[PR_COUNT], int g) { for (int r = 0; r < PR_COUNT; r++) if (map[r] == g) return r; return -1; }
 
 // The map in use (filled at the start of setup() from NVS "pins", defaults if none or invalid).
 extern uint8_t g_pins[PR_COUNT];
-#define BTN_NEXT   (g_pins[PR_BTN_NEXT])
-#define BTN_PREV   (g_pins[PR_BTN_PREV])
 #define FUEL_PIN   (g_pins[PR_FUEL])
 #define POT_PIN    (g_pins[PR_POT])
 #define LIGHTS_PIN (g_pins[PR_LIGHTS])

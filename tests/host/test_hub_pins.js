@@ -21,10 +21,14 @@ const CAPS = {};   // gpio_caps() from the header: cases collect until their ret
     if (r && pend.length) { const v = r[1].split('|').map(x => CAP[x.trim()]).reduce((a, b) => a | b, 0); pend.forEach(x => CAPS[x] = v); pend = []; } } }
 const caps = g => CAPS[g] || 0;
 console.log("1. hub_pins.h and docs/HUB_PINS.md");
-check(Object.keys(code).length === 21 && enumN === 21, "21 roles, one per enum entry (" + Object.keys(code).length + " / " + enumN + ")");
+check(Object.keys(code).length === 19 && enumN === 19, "19 roles, one per enum entry (" + Object.keys(code).length + " / " + enumN + ")");
 for (const n of Object.keys(code)) check(doc[n] && doc[n].gpio === code[n].gpio && doc[n].term === code[n].term,
   n + ": GPIO " + code[n].gpio + " at " + code[n].term + " in the code; doc says " + (doc[n] ? "GPIO " + doc[n].gpio + " at " + doc[n].term : "nothing"));
 for (const n of Object.keys(doc)) check(code[n], n + " is in the doc table but not in hub_pins.h");
+{ const nx = +(H.match(/#define PIN_BTN_NEXT_DEF (\d+)/) || [])[1], pv = +(H.match(/#define PIN_BTN_PREV_DEF (\d+)/) || [])[1];
+  const btn = DOC.split('## Default buttons')[1] || "";
+  check(new RegExp("\\| L14 \\| " + nx + " \\| Right").test(btn) && new RegExp("\\| L15 \\| " + pv + " \\| Left").test(btn), "default page buttons in the doc: right GPIO " + nx + ", left GPIO " + pv);
+  check(!Object.values(code).some(v => v.gpio === nx || v.gpio === pv), "no fixed function on the default button pins"); }
 console.log("2. defaults: each GPIO and terminal once, and able to do the job");
 const g = Object.values(code).map(v => v.gpio), t = Object.values(code).map(v => v.term);
 check(new Set(g).size === g.length, "no default GPIO used twice: " + g.slice().sort((a, b) => a - b).join(","));

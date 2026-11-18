@@ -31,7 +31,8 @@ enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3,
        LINK_CMD_COLOR = 8,       // every gauge to colour preset `value` (color_presets.h), saved
        LINK_CMD_RACE = 9,        // race mode on (value 1: remember the page, force logging) / off (0: back, logging normal)
        LINK_CMD_HINT = 10,       // button held: pop-up "Release: <action>"; value = action << 8 | parameter
-       LINK_CMD_SHOW_IP = 11 };  // each screen shows its name and IP address for 5 s (value = the hub's IP, last byte)
+       LINK_CMD_SHOW_IP = 11,    // each screen shows its name and IP address for 5 s (value = the hub's IP, last byte)
+       LINK_CMD_POPUP = 12 };    // every screen shows a pop-up; the text is in `target` (not a screen name here)
 typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
 
 // "MSH1": a screen in remote role says hello every 2 s (its IP, build and name); the hub uses it for the online lights

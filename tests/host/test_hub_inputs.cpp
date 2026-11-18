@@ -1,5 +1,5 @@
 // The hub's pin map and configurable inputs (esp32-input/hub_pins.h, hub_inputs.h): what each GPIO can do, moving a
-// function, button / switch / analog inputs, the sensor presets. Build: g++ -std=c++17 -I../../esp32-input test_hub_inputs.cpp
+// function, switch / analog inputs, the sensor presets, outputs. Build: g++ -std=c++17 -I../../esp32-input test_hub_inputs.cpp
 #include "hub_inputs.h"
 #include <stdio.h>
 uint8_t g_pins[PR_COUNT];
@@ -14,15 +14,15 @@ int main() {
   printf("2. the pin map\n");
   uint8_t m[PR_COUNT]; pin_map_defaults(m);
   CHECK(pin_map_valid(m), "the defaults are a valid map");
-  CHECK(m[PR_BTN_NEXT] == 25 && m[PR_CAN_TX] == 21 && m[PR_I2C_SDA] == 5 && m[PR_FUEL] == 36, "defaults: buttons 25, CAN TX 21, SDA 5, fuel 36");
+  CHECK(m[PR_CAN_TX] == 21 && m[PR_I2C_SDA] == 5 && m[PR_FUEL] == 36 && pin_map_role_at(m, 25) == -1 && pin_map_role_at(m, 26) == -1, "defaults: CAN TX 21, SDA 5, fuel 36; 25 / 26 free (buttons page)");
   CHECK(pin_role_fits(PR_FUEL, 33) && !pin_role_fits(PR_FUEL, 25), "fuel needs an analog pin");
-  CHECK(!pin_role_fits(PR_CAN_TX, 34) && !pin_role_fits(PR_BTN_NEXT, 39), "CAN TX cannot go on an input-only pin; a button needs a pull-up");
-  m[PR_BTN_NEXT] = 2; CHECK(pin_map_valid(m), "moving the right button to GPIO 2 is fine");
-  m[PR_BTN_NEXT] = 26; CHECK(!pin_map_valid(m), "onto the left button's pin: refused (used twice)");
+  CHECK(!pin_role_fits(PR_CAN_TX, 34), "CAN TX cannot go on an input-only pin");
+  m[PR_DHT] = 2; CHECK(pin_map_valid(m), "moving the DHT22 to GPIO 2 is fine");
+  m[PR_DHT] = 22; CHECK(!pin_map_valid(m), "onto CAN RX: refused (used twice)");
   pin_map_defaults(m); CHECK(pin_map_role_at(m, 22) == PR_CAN_RX && pin_map_role_at(m, 2) == -1, "who is on a pin");
   printf("3. inputs on pins\n");
   CHECK(input_pin_fits(IN_ANALOG, 33) && !input_pin_fits(IN_ANALOG, 2) && !input_pin_fits(IN_ANALOG, INPUT_MCP_BASE + 3), "analog only on ADC1 pins, not on the expander");
-  CHECK(input_pin_fits(IN_BUTTON, 2) && input_pin_fits(IN_SWITCH, INPUT_MCP_BASE + 20) && input_pin_fits(IN_BUTTON, 36), "buttons / switches on GPIOs or expander pins (34-39 with an outside pull-up)");
+  CHECK(input_pin_fits(IN_SWITCH, 2) && input_pin_fits(IN_SWITCH, INPUT_MCP_BASE + 20) && input_pin_fits(IN_SWITCH, 36), "switches on GPIOs or expander pins (34-39 with an outside pull-up)");
   HubInput in; input_defaults(&in);
   in.contact = CONTACT_NO; CHECK(input_active(&in, true) && !input_active(&in, false), "NO: active when the pin is pulled LOW (contact closed)");
   in.contact = CONTACT_NC; CHECK(!input_active(&in, true) && input_active(&in, false), "NC: active when the contact opens (pin HIGH)");
@@ -38,18 +38,11 @@ int main() {
   in.preset = PRE_CUSTOM; in.mult = 2; in.v1 = 1; in.val1 = 10; in.v2 = 3; in.val2 = 30;
   CHECK(near(input_convert(&in, 1.0f), 20, 0.01f), "custom: 1 V at the pin x2 = 2 V on the line from (1 V, 10) to (3 V, 30) = 20");
   in.v2 = 1; CHECK(isnan(input_convert(&in, 1.0f)), "custom with the same two voltages: no reading");
-  printf("5. button presses and holds\n");
-  InputBtn b = {}; uint32_t t = 1000; int ev = 0;
-  auto run = [&](bool on, int ms) { int got = 0; for (int k = 0; k < ms; k += 10) { t += 10; int e = input_btn_step(&b, t, on); if (e) got = e; } return got; };
-  run(false, 100); CHECK(run(true, 200) == 0 && run(false, 100) == IBTN_PRESS, "a short press fires on release");
-  CHECK(run(true, 1200) == IBTN_HOLD && run(false, 100) == 0, "a 1 s hold fires once while held, and no press on release");
-  { InputBtn c = {}; uint32_t tt = 0; int got = 0; for (int k = 0; k < 6; k++) { tt += 5; if (input_btn_step(&c, tt, k % 2 == 0)) got = 1; } CHECK(!got, "chatter under 30 ms is ignored"); }
-  (void)ev;
+  printf("5. saved layout\n");
   CHECK(sizeof(HubInput) == 52, "saved input: 52 bytes");
   printf("6. expander pins and outputs\n");
   { uint8_t mm[PR_COUNT]; pin_map_defaults(mm);
-    mm[PR_BTN_NEXT] = PIN_MCP_BASE + 4; CHECK(pin_map_valid(mm), "a page button can move onto an expander pin");
-    mm[PR_BTN_NEXT] = 25; mm[PR_FUEL] = PIN_MCP_BASE + 5; CHECK(!pin_map_valid(mm), "the fuel sender cannot (no analog on the expander)");
+    mm[PR_FUEL] = PIN_MCP_BASE + 5; CHECK(!pin_map_valid(mm), "the fuel sender cannot (no analog on the expander)");
     pin_map_defaults(mm); mm[PR_CAN_TX] = PIN_MCP_BASE + 6; CHECK(!pin_map_valid(mm), "nor can CAN"); }
   CHECK(output_pin_fits(13) && output_pin_fits(PIN_MCP_BASE + 9) && !output_pin_fits(34) && !output_pin_fits(6), "outputs: GPIOs that drive and expander pins, not 34-39 or the flash");
   HubOutput o; output_defaults(&o); o.type = OUT_SIGNAL; o.sig = 2; o.cond = OUTC_ABOVE; o.level = 200; o.hyst = 5;
@@ -65,7 +58,13 @@ int main() {
   o.active_low = 0; o.blink = 1; CHECK(output_pin_high(&o, true, 100) && !output_pin_high(&o, true, 300) && !output_pin_high(&o, false, 100), "blinking: on/off every 250 ms while on, steady off");
   CHECK(sizeof(HubOutput) == 32, "saved output: 32 bytes");
   { uint8_t mm[PR_COUNT]; pin_map_defaults(mm); mm[PR_FUEL] = PIN_ADS_BASE + 2; CHECK(pin_map_valid(mm), "the fuel sender can move onto an ADS1115 channel");
-    pin_map_defaults(mm); mm[PR_BTN_NEXT] = PIN_ADS_BASE; CHECK(!pin_map_valid(mm), "a button cannot (analog only)"); }
+    pin_map_defaults(mm); mm[PR_DHT] = PIN_ADS_BASE; CHECK(!pin_map_valid(mm), "the DHT22 cannot (analog only)"); }
+  printf("7. a pin map saved before hub 53\n");
+  { uint8_t old[PIN_MAP_OLD_COUNT], mm[PR_COUNT], nx = 0, pv = 0; old[0] = PIN_MCP_BASE + 2; old[1] = 26;
+    uint8_t d[PR_COUNT]; pin_map_defaults(d); for (int r = 0; r < PR_COUNT; r++) old[r + 2] = d[r]; old[2 + PR_DHT] = 2;
+    pin_map_upgrade(old, mm, &nx, &pv);
+    CHECK(PR_COUNT + 2 == PIN_MAP_OLD_COUNT, "the old map had the two buttons on top of today's 19");
+    CHECK(nx == PIN_MCP_BASE + 2 && pv == 26 && mm[PR_DHT] == 2 && mm[PR_CAN_TX] == 21 && pin_map_valid(mm), "buttons taken out (next on the expander kept), the rest in order, moves kept"); }
   CHECK(input_pin_fits(IN_ANALOG, PIN_ADS_BASE + 7) && !input_pin_fits(IN_SWITCH, PIN_ADS_BASE) && !output_pin_fits(PIN_ADS_BASE), "ADS channels: analog sensors only, not switches or outputs");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;

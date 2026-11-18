@@ -72,6 +72,7 @@ static bool handleCmd(const uint8_t *data, int len) {
   LinkCmdPacket c; memset(&c, 0, sizeof(c)); memcpy(&c, data, len < (int)sizeof(c) ? len : sizeof(c)); c.target[20] = 0;
   if (c.seq == s_lastCmdSeq) return true;
   s_lastCmdSeq = c.seq;
+  if (c.cmd == LINK_CMD_POPUP) { gauge_app_popup(c.target); return true; }   // text for every screen (ECU map name)
   if (c.target[0]) { char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); if (strcasecmp(nm, c.target)) return true; }
   if (c.cmd == LINK_CMD_PAGE_NEXT) g_page_nav_delta = 1;
   else if (c.cmd == LINK_CMD_PAGE_PREV) g_page_nav_delta = -1;

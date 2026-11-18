@@ -76,7 +76,7 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_custom_page.js`: the hub's /custom page: list, editor, live preview (its decoder matches the firmware's), Save, refusals, "Make a sensor".
 - `test_icons.c`: every gauge icon is really drawn at 14/20/28/36/48 px. Build: `gcc -DLV_CONF_INCLUDE_SIMPLE -I<lv_conf dir> -I<lvgl> -I<sketch> test_icons.c <sketch>/font_icons_*.c <lvgl>/src/font/lv_font.c <lvgl>/src/font/lv_font_fmt_txt.c <lvgl>/src/misc/lv_utils.c <lvgl>/src/misc/lv_mem.c <lvgl>/src/misc/lv_log.c <lvgl>/src/misc/lv_tlsf.c <lvgl>/src/misc/lv_gc.c`
 - `test_gps_time.cpp`: GPS dates, US daylight saving (Eastern, Pacific), log-name text, RMC time fields, the hub keeping the time. Build: `g++ -std=c++17 -I../../esp32s3-amoled-bsp-base -I../../esp32-input test_gps_time.cpp`
-- `test_hub_inputs.cpp`: what each GPIO can do, the pin map (defaults valid, moves, duplicates), inputs on pins, NO/NC, sensor presets (pressure, voltage, NTC, custom), button press / hold, expander rules, outputs (levels, hysteresis, relays, blink). Build: `g++ -std=c++17 -I../../esp32-input test_hub_inputs.cpp`
+- `test_hub_inputs.cpp`: what each GPIO can do, the pin map (defaults valid, moves, duplicates), inputs on pins, NO/NC, sensor presets (pressure, voltage, NTC, custom), expander rules, upgrading a pin map saved before hub 53, outputs (levels, hysteresis, relays, blink). Build: `g++ -std=c++17 -I../../esp32-input test_hub_inputs.cpp`
 - `test_hub_inputs_page.js`: the Inputs and pins page: pin table, moving a function, inputs list, editor for buttons / switches / sensors.
 - `test_hub_pins.js`: hub_pins.h vs docs/HUB_PINS.md (same pins and terminals), no GPIO or terminal twice, no raw pin numbers in hub files.
 - `hub_typecheck.sh`: compile check of the whole hub sketch against stubs (stubs_hub/ + stubs/), with the shared headers copied in as the flash command does.
@@ -87,10 +87,11 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_oled_page.js`: the hub /oled page.
 - `test_oled_pages.cpp`: OLED pages drawn (big number, values, G-meter, clock), lamp takeover, defaults. Build: `g++ -std=c++17 -I../../esp32-input test_oled_pages.cpp`
 - `test_imu_math.cpp`: accelerometer mounting axes, signs, zero, smoothing. Build: `g++ -std=c++17 -I../../esp32-input test_imu_math.cpp`
-- `test_btn_logic.cpp`: hub button events (press, holds of 1-10 s, both, bounce), which binding runs, the defaults and the screen order. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_btn_logic.cpp`
+- `test_hub_buttons.cpp`: hub buttons (hub_buttons.h): which pins fit, the resistor ladder match and too-close check, debounce, screen targets, the ECU maps and their pop-up label, moving the old two-button setup over. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_hub_buttons.cpp`
+- `test_btn_logic.cpp`: the old button defaults (read once on hub 53) and the "Next gauge" screen order. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_btn_logic.cpp`
 - `hub_page.js`: helper that rebuilds a hub page from its raw-string pieces and the HUB_NAV macros.
 - `test_hub_home_page.js`: the hub home page: screens in Left/Center/Right order with links to their pages, status grid, nav bar on every hub page.
-- `test_hub_buttons_page.js`: the hub's /buttons page: the 6 x 3 grid, page and colour choices, saving, refusals.
+- `test_hub_buttons_page.js`: the hub's /buttons page: the list, single and ladder editors (used pins greyed out, Learn and its too-close warning), screen choice for page actions, action boxes, refusals, the ECU maps card.
 - `test_rf_decode.cpp`: the hub's 433 MHz decoding: half-bit time, Manchester bits and bytes, jitter, both polarities, junk, and a real U912 tire sensor capture (fixtures/u912_burst1.txt; run from tests/host). Build: `g++ -std=c++17 -I../../esp32-input test_rf_decode.cpp`
 - `test_hub_ecu.cpp`: the hub names the ECU from the CAN IDs it hears (rusEFI, MegaSquirt / Link, both, none). Build: `g++ -std=c++17 -Istubs -I../../esp32-input test_hub_ecu.cpp`
 - `test_can_vss.cpp`: speed from rusEFI BASE1 byte 6, kph to mph, through the real `can_parsing.h`. Build: `g++ -std=c++17 -Istubs -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_can_vss.cpp`

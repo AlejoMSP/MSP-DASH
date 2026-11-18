@@ -1,6 +1,6 @@
-// hub_inputs.h - the hub's configurable inputs (Inputs page): up to 16, each on a hub GPIO or an MCP23017 pin, set up
-// as a button (an action on press and on hold), a switch (an on/off sensor) or an analog sensor (a preset or your own
-// calibration). Switches and sensors fill a custom sensor slot (SIG_C1..C16), so gauges, OLED lamps and logging can use
+// hub_inputs.h - the hub's configurable inputs (Inputs page): up to 16, each on a hub GPIO, an MCP23017 pin or an
+// ADS1115 channel, set up as a switch (an on/off sensor) or an analog sensor (a preset or your own calibration).
+// Buttons live on the Buttons page since hub 53 (hub_buttons.h); an IN_BUTTON input saved before that moves there. Switches and sensors fill a custom sensor slot (SIG_C1..C16), so gauges, OLED lamps and logging can use
 // them. Pure C: host-tested (tests/host/test_hub_inputs.cpp).
 #pragma once
 #include <stdint.h>
@@ -14,7 +14,7 @@
 #define INPUT_MCP_BASE PIN_MCP_BASE
 static inline bool input_is_mcp(int pin) { return pin_is_mcp(pin); }
 
-enum { IN_NONE = 0, IN_BUTTON = 1, IN_SWITCH = 2, IN_ANALOG = 3 };
+enum { IN_NONE = 0, IN_BUTTON = 1, IN_SWITCH = 2, IN_ANALOG = 3 };   // IN_BUTTON: only in configs from before hub 53
 // When an input counts as active (the page says "Active when LOW / HIGH"):
 //   CONTACT_NO: LOW  - a switch to ground that closes when active, or a 12 V signal through a PC817 optocoupler board
 //   CONTACT_NC: HIGH - a switch that opens when active, or a 12 V signal through a 47k / 10k divider (with a clamp)
@@ -45,7 +45,7 @@ typedef struct __attribute__((packed)) {
   uint8_t pin;           // GPIO (0..39) or INPUT_MCP_BASE + n
   uint8_t contact;       // buttons / switches: CONTACT_NO / NC
   uint8_t slot;          // switches / sensors: custom slot 0..15 it fills
-  uint8_t act_press, prm_press, act_hold, prm_hold;   // buttons: button_actions.h action + parameter
+  uint8_t act_press, prm_press, act_hold, prm_hold;   // IN_BUTTON (before hub 53): action + parameter
   uint8_t preset;        // sensors: PRE_*
   uint8_t spare[3];
   float mult;            // sensors: divider multiplier (custom; presets use their own)
@@ -84,22 +84,6 @@ static inline float input_convert(const HubInput *in, float pinV) {
   if (in->preset == PRE_VOLT_12 || in->preset == PRE_VOLT_5) return sv;   // voltage presets: the sensor volts themselves
   if (v2 == v1) return NAN;
   return a1 + (sv - v1) * (a2 - a1) / (v2 - v1);
-}
-
-// Button presses and holds (debounced), for button inputs. One state per input.
-typedef struct { bool raw, stable, held; uint32_t rawMs, downMs; } InputBtn;
-enum { IBTN_NONE = 0, IBTN_PRESS = 1, IBTN_HOLD = 2 };
-#define INPUT_HOLD_MS 1000
-// Press fires on release if it was shorter than a hold; hold fires once the hold time is reached (the press is then skipped).
-static inline int input_btn_step(InputBtn *b, uint32_t now, bool active) {
-  if (active != b->raw) { b->raw = active; b->rawMs = now; }
-  if (now - b->rawMs < 30 || b->raw == b->stable) {
-    if (b->stable && !b->held && now - b->downMs >= INPUT_HOLD_MS) { b->held = true; return IBTN_HOLD; }
-    return IBTN_NONE;
-  }
-  b->stable = b->raw;
-  if (b->stable) { b->downMs = now; b->held = false; return IBTN_NONE; }
-  return b->held ? IBTN_NONE : IBTN_PRESS;
 }
 
 static inline void input_defaults(HubInput *in) {
