@@ -50,7 +50,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 54
+#define INPUT_BUILD 55
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -1075,6 +1075,17 @@ static void setupWeb() {
     int w = 0; for (unsigned c = 0; c < nm.length() && w < 15; c++) { char ch = nm[c]; if (ch >= 32 && ch < 127 && ch != '"' && ch != '\\') b.name[w++] = ch; } b.name[w] = 0;
     s_btns[i] = b; buttonsSave(); buttonsReset();
     server.send(200, "text/plain", String("Button ") + (i + 1) + " saved");
+  });
+  server.on("/action", HTTP_GET, []() {   // run a button action from a page (the Dashboard's quick controls)
+    int a = server.arg("a").toInt(), prm = server.arg("p").toInt(), tg = server.arg("t").toInt();
+    if (a < 1 || a >= BA_COUNT || tg < 0 || tg >= HBT_COUNT) { server.send(400, "text/plain", "Bad action"); return; }
+    if ((a == BA_GOTO_PAGE || a == BA_RACE) && (prm < 1 || prm > 8)) prm = 1;
+    if (a == BA_OUT_TOGGLE && (prm < 1 || prm > HUB_OUTPUTS)) { server.send(400, "text/plain", "Output number must be 1 to 16"); return; }
+    runAction(a, prm, tg);
+    String r = BA_NAMES[a];
+    if (a == BA_ECU_MAP) { char lb[LINK_NAME_LEN + 1]; ecu_map_label(&s_ecuMap, lb, sizeof lb); r = lb; }
+    if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
+    server.send(200, "text/plain", r);
   });
   server.on("/buttons/clear", HTTP_GET, []() {
     int i = server.arg("i").toInt();

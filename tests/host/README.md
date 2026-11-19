@@ -91,6 +91,7 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_btn_logic.cpp`: the old button defaults (read once on hub 53) and the "Next gauge" screen order. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_btn_logic.cpp`
 - `hub_page.js`: helper that rebuilds a hub page from its raw-string pieces and the HUB_NAV macros.
 - `test_hub_home_page.js`: the hub home page: screens in Left/Center/Right order with links to their pages, status grid, nav bar on every hub page.
+- `test_site_design.js`: one design for the whole site: every hub page and screen page has the side menu, menu button, shared base look and iPhone-safe viewport, no iPhone bezel; screen pages hide their menu inside the hub; the Dashboard's quick controls and Add to Home Screen.
 - `test_hub_buttons_page.js`: the hub's /buttons page: the list, single and ladder editors (used pins greyed out, Learn and its too-close warning), screen choice for page actions, action boxes, refusals, the ECU maps card.
 - `test_rf_decode.cpp`: the hub's 433 MHz decoding: half-bit time, Manchester bits and bytes, jitter, both polarities, junk, and a real U912 tire sensor capture (fixtures/u912_burst1.txt; run from tests/host). Build: `g++ -std=c++17 -I../../esp32-input test_rf_decode.cpp`
 - `test_hub_ecu.cpp`: the hub names the ECU from the CAN IDs it hears (rusEFI, MegaSquirt / Link, both, none). Build: `g++ -std=c++17 -Istubs -I../../esp32-input test_hub_ecu.cpp`

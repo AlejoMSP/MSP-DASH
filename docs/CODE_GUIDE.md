@@ -139,3 +139,12 @@ How the code fits together. Plain words, no history (see TIMELINE.md for that).
 - Hub flash settings: `FlashFreq=40,FlashMode=dio` or it boot-loops.
 - Use `curl.exe -H "Expect:"` for OTA uploads.
 - Do not name anything `F` in a sketch (Arduino macro).
+
+## Web design (hub 55 on)
+
+One look for every page on the hub and the screens: black page, cyan headings, dark cards (#111), cyan buttons, dark
+form fields, a menu down the left (behind a menu button under 800 px), content up to 1000 px wide. Hub pages get it from
+`HUB_NAV_STYLE` / `HUB_NAV` (hub_pages.h; the base body rule there comes after each page's style, so it wins); screen
+pages from `PH_STYLE` / `PH_OPEN` (web_theme.h), which hide their menu when shown inside the hub's Screens page. Fields
+are 16 px so iPhone Safari does not zoom. The Dashboard is the page for the phone (Add to Home Screen, Quick controls
+through `/action`). `tests/host/test_site_design.js` checks every page against this.

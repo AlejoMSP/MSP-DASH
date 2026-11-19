@@ -8,10 +8,12 @@
 // The side menu on every hub page (HUB_NAV, styled by HUB_NAV_STYLE inside each page's <style>): grouped by task, a
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
-#define HUB_NAV_STYLE "*{box-sizing:border-box}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:8px;left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:48px!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
+#define HUB_NAV_STYLE "*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{background:#000;color:#ddd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:1000px;margin:0 auto;padding:12px 16px calc(24px + env(safe-area-inset-bottom))}body.wide{max-width:none}\ninput,select,textarea{font-size:16px}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:calc(52px + env(safe-area-inset-top))!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
 #define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
-static const char HOME_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH</title>
+static const char HOME_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH</title>
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="MSP-DASH">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#000000">
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:900px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
 h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0 0 12px}
@@ -25,8 +27,20 @@ canvas{image-rendering:pixelated;width:100%;max-width:384px;border:1px solid #33
 .scr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 0;border-top:1px solid #222}.scr:first-child{border-top:0}.scr .who{flex:1 1 180px}
 .scr a{background:#1d2b2e;color:#4dd0e1;text-decoration:none;padding:5px 10px;border-radius:5px;font-size:13px}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}.dot.on{background:#2e7d32}.dot.off{background:#e53935}
+.qhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}.qhead h3{margin:0}
+.qhead select{background:#000;color:#ddd;border:1px solid #333;border-radius:6px;padding:6px}
+.btns{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.btns button{padding:16px 8px;font-size:16px;border:0;border-radius:10px;background:#1d3b40;color:#4dd0e1;-webkit-tap-highlight-color:transparent}
+.btns button.big{background:#4dd0e1;color:#000;font-weight:bold}.btns button:active{filter:brightness(1.4)}
+#qmsg{min-height:1.3em;margin-top:8px;color:#4dd0e1}
+@media(max-width:600px){.tiles{grid-template-columns:repeat(2,1fr)}.read span{font-size:20px}}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Dashboard</h2>
+<div class="card"><div class="qhead"><h3>Quick controls</h3><label class="note">Pages on <select id="qt"><option value="0">All screens</option><option value="1">Left</option><option value="2">Center</option><option value="3">Right</option></select></label></div>
+<div class="btns"><button class="big" onclick="act(2)">&#9664; Previous page</button><button class="big" onclick="act(1)">Next page &#9654;</button>
+<button id="qecu" onclick="act(14)" style="display:none">ECU map</button><button onclick="act(8,1)">Race mode</button><button onclick="act(10)">Log marker</button>
+<button onclick="act(9)">Clear warning</button><button onclick="act(11)">Show IPs</button><button onclick="act(12)">OLED next page</button></div>
+<div class="note" id="qmsg"></div></div>
 <div class="tiles" id="tiles"></div>
 <div class="two">
 <div class="card"><h3>Warning panel</h3><canvas id="cv" width="128" height="64"></canvas><div class="note" id="lit"></div></div>
@@ -74,11 +88,16 @@ async function tick(){
 }
 async function pic(){try{const b=new Uint8Array(await (await fetch("/oled.bin")).arrayBuffer());const cx=$("cv").getContext("2d"),img=cx.createImageData(128,64);
  for(let y=0;y<64;y++)for(let x=0;x<128;x++){const v=b[(y>>3)*128+x]>>(y&7)&1,p=(y*128+x)*4;img.data[p]=img.data[p+1]=img.data[p+2]=v?255:0;img.data[p+3]=255;}cx.putImageData(img,0,0);}catch(e){}}
-tick();pic();setInterval(tick,1000);setInterval(pic,700);
+// Quick controls: run a button action from the phone (the same actions as the Buttons page; page actions go to the
+// screen picked above). The ECU map button shows only when the maps are in use, named after the map in use.
+async function act(a,p){try{const r=await fetch("/action?a="+a+"&p="+(p||0)+"&t="+$("qt").value);const t=await r.text();$("qmsg").textContent=t;
+ if(a===14&&r.ok)$("qecu").textContent="ECU map: "+t;}catch(e){$("qmsg").textContent="Could not reach the hub";}}
+async function ecu(){try{const b=await j("/buttons.json");if(b.ecu&&b.ecu.used){const q=$("qecu");q.style.display="";q.textContent="ECU map: "+(b.ecu.names[b.ecu.cur]||("Map "+(b.ecu.cur+1)));}}catch(e){}}
+tick();pic();ecu();setInterval(tick,1000);setInterval(pic,700);
 </script></body></html>)HTML";
 
 // /setup: brightness, clock, accelerometer, I2C devices, hub sensors and the speed check, hub details.
-static const char SETUP_HTML[] PROGMEM = R"HTML(<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Setup</title>
+static const char SETUP_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Setup</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1;margin:6px 0 10px}
 h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
 label{display:block;margin:10px 0 4px}input,select{width:100%;padding:6px;box-sizing:border-box;background:#000;color:#ddd;border:1px solid #333;border-radius:4px}
@@ -155,7 +174,7 @@ $("i2c").innerHTML=h;}catch(e){}}
 poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
 </script></body></html>)HTML";
 
-static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Sensors</title>
+static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Sensors</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:640px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #222}th{color:#999;font-weight:normal}
 .v{font-family:monospace;text-align:right}.tag{padding:1px 6px;border-radius:4px;font-size:12px}.hub{background:#1b5e20}.sim{background:#e65100}.can{background:#0d47a1}
@@ -190,7 +209,7 @@ document.getElementById("u").innerHTML=l.map(x=>'<tr class="'+(x.age>2000?'stale
 (async()=>{try{for(const c of await (await fetch("/custom.json")).json())if(c.name)NAME[28+c.i]=c.name;}catch(x){}u();})();setInterval(u,500);und();setInterval(und,1000);
 </script></body></html>)HTML";
 
-static const char SIM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Simulator</title>
+static const char SIM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Simulator</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:480px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 .warnbox{background:#2a1f00;border:1px solid #f5a623;border-radius:8px;padding:10px;font-size:.85em;color:#f5c26b}
 .statebox{margin:12px 0;padding:10px;border-radius:8px;background:#111;text-align:center}.statebox.on{background:#f5a623;color:#000;font-weight:bold}
@@ -228,7 +247,7 @@ setInterval(refresh,1000);refresh();
 </script></body></html>)HTML";
 
 // /custom: the 16 custom sensor slots (custom_slots.h). Stage 1: each reads a field of a CAN frame.
-static const char CUSTOM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Custom Sensors</title>
+static const char CUSTOM_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Custom Sensors</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:640px;margin:auto;padding:12px}h2,h3{color:#4dd0e1}a{color:#4dd0e1}
 table{width:100%;border-collapse:collapse}td,th{padding:5px 8px;text-align:left;border-bottom:1px solid #222}th{color:#999;font-weight:normal}
 .v{font-family:monospace;text-align:right}.note{color:#888;font-size:13px}.stale{color:#666}
@@ -299,7 +318,7 @@ async function tick(){try{can=await (await fetch("/can.json")).json();if(cur>=0)
 setInterval(tick,1000);
 </script></body></html>)HTML";
 // /rf: CC1101 433 MHz listen mode - every burst it hears, as pulses, bits and Manchester bytes.
-static const char RF_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH 433 MHz</title>
+static const char RF_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH 433 MHz</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:720px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 .box{background:#111;border-radius:8px;padding:10px;margin:10px 0}.note{color:#888;font-size:13px}.bad{color:#ff6b6b}
 .mono{font-family:monospace;font-size:12px;word-break:break-all}.b{border-top:1px solid #222;padding:8px 0}.hex{color:#4dd0e1;font-size:14px}
@@ -349,7 +368,7 @@ chart(j);draw();
 poll();setInterval(poll,1000);
 </script></body></html>)HTML";
 // /buttons: what each button does, for a press and for holds of 1, 2, 3, 5 and 10 s (button_actions.h).
-static const char BUTTONS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Buttons</title>
+static const char BUTTONS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Buttons</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:980px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}
 .card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}table{width:100%;border-collapse:collapse}
 td,th{padding:5px 6px;border-bottom:1px solid #222;text-align:left;vertical-align:middle;font-size:14px}th{color:#4dd0e1;font-weight:normal}
@@ -448,7 +467,7 @@ async function saveEcu(){keepEcu();const c=ecuDraft,q={id:"0x"+c.id.toString(16)
 load();setInterval(()=>{if(ed===null)load();},1500);
 </script></body></html>)HTML";
 // /oled: the warning-light panel on the 0.96" OLED - a live copy of the display and the 8 lamps.
-static const char OLED_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH OLED</title>
+static const char OLED_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH OLED</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;margin:auto;padding:12px}h2{color:#4dd0e1}a{color:#4dd0e1}
 .card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}canvas{image-rendering:pixelated;width:100%;max-width:512px;border:1px solid #333;border-radius:4px;background:#000}
 select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;max-width:100%}button{padding:7px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px}
@@ -533,12 +552,12 @@ load();loadPages();live();setInterval(live,700);
 </script></body></html>)HTML";
 // /screen: one screen's own pages (live view, gauge editor, logging, SD card, settings) inside the hub's site, with a
 // Left / Center / Right picker, so no screen address has to be typed. ?s=<screen name>&p=<page>.
-static const char SCREEN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Screens</title>
+static const char SCREEN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Screens</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;margin:0;padding:12px}h2{color:#4dd0e1;margin:4px 0 10px}
 .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}.bar button{background:#1d2b2e;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;padding:7px 12px;font-size:14px}
 .bar button.on{background:#4dd0e1;color:#000;font-weight:bold}.bar button:disabled{opacity:.4}.sep{width:12px}
 iframe{width:100%;height:calc(100vh - 130px);border:1px solid #222;border-radius:8px;background:#000}.note{color:#888;font-size:13px}
-)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body class="wide">)HTML" HUB_NAV R"HTML(
 <h2>Screens</h2>
 <div class="bar" id="who"></div>
 <div class="bar" id="tabs"></div>
@@ -560,7 +579,7 @@ load();
 </script></body></html>)HTML";
 
 // /can: every CAN frame the hub hears, live.
-static const char CAN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Raw CAN</title>
+static const char CAN_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Raw CAN</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:900px;padding:12px}h2{color:#4dd0e1}td,th{padding:3px 10px;font-family:monospace}th{text-align:left;color:#4dd0e1}.old{color:#666}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Raw CAN</h2><div id="s"></div><table><thead><tr><th>ID</th><th>Bytes</th><th>Count</th><th>Age ms</th></tr></thead><tbody id="t"></tbody></table>
@@ -573,7 +592,7 @@ setInterval(u,500);u();
 </script></body></html>)HTML";
 
 // /firmware: every board's build in one table; the hub's own update form; each screen's update page.
-static const char FIRMWARE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Firmware</title>
+static const char FIRMWARE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Firmware</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:760px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
 table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;text-align:left}th{color:#4dd0e1;font-weight:normal}a{color:#4dd0e1}.note{color:#888;font-size:13px}
 input,button{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:6px}button{background:#4dd0e1;color:#000;border:0}button:disabled{opacity:.4}
@@ -634,7 +653,7 @@ load();setInterval(()=>{if(!busy)load();},3000);
 </script></body></html>)HTML";
 // /inputs: every GPIO (and MCP23017 pin) with what uses it; move a fixed function; set up configurable inputs
 // (buttons, switches, analog sensors) on any free pin.
-static const char INPUTS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>MSP-DASH Inputs</title>
+static const char INPUTS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Inputs</title>
 <style>body{background:#000;color:#ddd;font-family:sans-serif;max-width:980px;padding:12px}h2{color:#4dd0e1}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}
 .card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}table{width:100%;border-collapse:collapse}
 td,th{padding:5px 6px;border-bottom:1px solid #222;text-align:left;vertical-align:middle;font-size:14px}th{color:#4dd0e1;font-weight:normal}

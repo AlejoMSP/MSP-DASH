@@ -146,8 +146,11 @@ R"rawliteral(<style>
     .srow .vv.off { color:#777; }
     .simbar { display:none; background:#f5a623; color:#000; font-weight:bold; text-align:center; padding:6px; margin:0 3px 6px; border-radius:6px; font-size:0.85em; }
     .simbar.on { display:block; }
+    #cellgrid { max-width:560px; }
+    .statusline { padding:0 0 8px; }
   </style>)rawliteral" PH_OPEN
 R"rawliteral(
+    <h1>Monitor</h1>
     <div class="statusline"><span id="dot"></span><span id="stext">Connecting...</span></div>
     <div class="simbar" id="simbar">SIMULATED DATA from the hub - not from the ECU</div>
     <div id="cellgrid"></div>
