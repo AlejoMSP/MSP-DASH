@@ -73,6 +73,12 @@ static bool handleCmd(const uint8_t *data, int len) {
   if (c.seq == s_lastCmdSeq) return true;
   s_lastCmdSeq = c.seq;
   if (c.cmd == LINK_CMD_POPUP) { gauge_app_popup(c.target); return true; }   // text for every screen (ECU map name)
+  if (c.cmd == LINK_CMD_SHIFT) {   // shift light: find this screen in the hub's left-to-right list
+    char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
+    int n = 0, idx = link_shift_index(c.target, nm, &n);
+    gauge_app_shift(link_shift_color(c.value, idx, n));
+    return true;
+  }
   if (c.target[0]) { char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); if (strcasecmp(nm, c.target)) return true; }
   if (c.cmd == LINK_CMD_PAGE_NEXT) g_page_nav_delta = 1;
   else if (c.cmd == LINK_CMD_PAGE_PREV) g_page_nav_delta = -1;

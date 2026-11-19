@@ -97,6 +97,37 @@ static uint32_t s_popupShownSeq = 0, s_popupUntil = 0;
 static volatile uint32_t s_popupMs = POPUP_MS;
 static lv_obj_t *s_popup = NULL, *s_popupLabel = NULL;
 void gauge_app_popup(const char *text) { gauge_app_popup_ms(text, POPUP_MS); }
+
+// ---- shift light (hub 56): a ring round the edge of the screen, on top of everything ----
+#define SHIFT_RING_W 18
+#define SHIFT_TIMEOUT_MS 1000   // the hub repeats the level every 300 ms while it is lit
+static volatile int s_shiftColor = 0;
+static volatile uint32_t s_shiftMs = 0;
+static lv_obj_t *s_shiftRing = NULL;
+void gauge_app_shift(int color) { s_shiftColor = color; s_shiftMs = lv_tick_get(); }
+static void shift_ring_create(void) {
+  s_shiftRing = lv_obj_create(lv_layer_sys());
+  lv_obj_remove_style_all(s_shiftRing);
+  lv_obj_set_size(s_shiftRing, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(s_shiftRing);
+  lv_obj_set_style_radius(s_shiftRing, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(s_shiftRing, SHIFT_RING_W, 0);
+  lv_obj_set_style_border_opa(s_shiftRing, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(s_shiftRing, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(s_shiftRing, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(s_shiftRing, LV_OBJ_FLAG_HIDDEN);
+}
+static void shift_ring_update(uint32_t now) {
+  if (!s_shiftRing) return;
+  int c = s_shiftColor;
+  if (c && now - s_shiftMs > SHIFT_TIMEOUT_MS) c = 0;   // the hub went quiet: off
+  bool show = c == 1 || c == 2 || (c == 3 && (now / 125) % 2 == 0);   // red flashes 4 times a second
+  if (show) {
+    lv_color_t col = c == 1 ? lv_color_hex(0xFFC400) : c == 2 ? lv_color_hex(0x00E676) : lv_color_hex(0xFF1744);
+    lv_obj_set_style_border_color(s_shiftRing, col, 0);
+    if (lv_obj_has_flag(s_shiftRing, LV_OBJ_FLAG_HIDDEN)) lv_obj_clear_flag(s_shiftRing, LV_OBJ_FLAG_HIDDEN);
+  } else if (!lv_obj_has_flag(s_shiftRing, LV_OBJ_FLAG_HIDDEN)) lv_obj_add_flag(s_shiftRing, LV_OBJ_FLAG_HIDDEN);
+}
 void gauge_app_popup_ms(const char *text, uint32_t ms) {
   s_popupMs = ms;
   strncpy(s_popupStaged, text, sizeof(s_popupStaged) - 1);
@@ -1288,6 +1319,7 @@ static void gauge_update_timer_cb(lv_timer_t *timer) {
     if (s_alertShown) { alert_dismiss(now); gauge_app_popup("Warning hidden 30 s"); }
     else gauge_app_popup("No warning showing");
   }
+  shift_ring_update(now);
   if (s_popup) {
     uint32_t seq = s_popupSeq;
     if (seq != s_popupShownSeq) {
@@ -1456,6 +1488,7 @@ void build_gauge_app(void) {
 
   build_alert_overlay(); // created before the logging dot so the dot stays on top of it
   // pop-up for the hub buttons: on the system layer, above the warning overlay
+  shift_ring_create();   // under the pop-up (created first)
   s_popup = lv_obj_create(lv_layer_sys());
   lv_obj_set_size(s_popup, 340, LV_SIZE_CONTENT);
   lv_obj_set_style_pad_ver(s_popup, 14, 0);

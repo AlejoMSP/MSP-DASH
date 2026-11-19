@@ -2,6 +2,7 @@
 // The hub build copies this file from here (see PREREQUISITES.md), so both sides always use the same layout.
 #pragma once
 #include <stdint.h>
+#include <string.h>
 #include "gauge_config.h"
 #include "custom_slots.h"   // "MSN1" custom slot names (SlotsPacket)
 
@@ -32,7 +33,8 @@ enum { LINK_CMD_PAGE_NEXT = 1, LINK_CMD_PAGE_PREV = 2, LINK_CMD_BRIGHTNESS = 3,
        LINK_CMD_RACE = 9,        // race mode on (value 1: remember the page, force logging) / off (0: back, logging normal)
        LINK_CMD_HINT = 10,       // button held: pop-up "Release: <action>"; value = action << 8 | parameter
        LINK_CMD_SHOW_IP = 11,    // each screen shows its name and IP address for 5 s (value = the hub's IP, last byte)
-       LINK_CMD_POPUP = 12 };    // every screen shows a pop-up; the text is in `target` (not a screen name here)
+       LINK_CMD_POPUP = 12,      // every screen shows a pop-up; the text is in `target` (not a screen name here)
+       LINK_CMD_SHIFT = 13 };    // shift light (hub 56): value = level, `target` = the screen names left to right, comma-separated
 typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t cmd; int16_t value; char target[21]; } LinkCmdPacket;
 
 // "MSH1": a screen in remote role says hello every 2 s (its IP, build and name); the hub uses it for the online lights
@@ -42,3 +44,29 @@ typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t c
 // uptime_s (build 195): seconds since the screen started; lets the hub's Firmware page see that an update restarted it.
 // Older screens send the packet without it (the hub reads what arrived; a missing uptime reads 0 = unknown).
 typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; uint32_t uptime_s; } HelloPacket;
+
+// Shift light (LINK_CMD_SHIFT): where is this screen in the hub's left-to-right list ("Left,Center,Right")? -1 = not in it.
+// The value is the level: 0 off, 1..n that many screens yellow from the left, n+1 all green, n+2 all red (flashing).
+static inline int link_shift_index(const char *list, const char *name, int *count) {
+  int idx = -1, n = 0; const char *p = list;
+  while (*p) {
+    const char *e = p; while (*e && *e != ',') e++;
+    size_t len = (size_t)(e - p);
+    if (len && strlen(name) == len) {   // same name, any case (the hub's name match is case-blind too)
+      size_t k = 0;
+      for (; k < len; k++) { char a = p[k], b = name[k]; if (a >= 'A' && a <= 'Z') a += 32; if (b >= 'A' && b <= 'Z') b += 32; if (a != b) break; }
+      if (k == len) idx = n;
+    }
+    if (len) n++;
+    p = *e ? e + 1 : e;
+  }
+  if (count) *count = n;
+  return idx;
+}
+// What this screen shows: 0 off, 1 yellow, 2 green, 3 red.
+static inline int link_shift_color(int level, int idx, int n) {
+  if (level <= 0 || idx < 0 || n < 1) return 0;
+  if (level >= n + 2) return 3;
+  if (level == n + 1) return 2;
+  return idx < level ? 1 : 0;
+}

@@ -111,7 +111,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .card{scroll-margin-top:56px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Setup</h2>
-<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#speed">Speed check</a><a href="#hub">Hub</a></div>
+<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#shift">Shift light</a><a href="#speed">Speed check</a><a href="#hub">Hub</a></div>
 <div class="card" id="brightness"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
@@ -136,6 +136,14 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <span id="imsg" class="note"></span></details></div>
 <div class="card" id="i2c"><h3>I2C bus</h3><div class="grid" id="i2c"></div>
 <p class="note">Found at power-up on SDA GPIO 5 (R15) / SCL GPIO 15 (R21). Plug a device in with the hub powered off, then restart it.</p></div>
+<div class="card" id="shift"><details open><summary><b>Shift light</b> <span class="note" id="shsum"></span></summary>
+<p class="note">A ring round each screen: they light yellow one at a time from left to right as RPM climbs from the start, all turn green at the shift point, and flash red past the over-rev point.</p>
+<label><input type="checkbox" id="shon" style="width:auto"> On</label>
+<div class="row"><label>Start (RPM)<input type="number" id="shstart" min="500" max="12000" step="100"></label>
+<label>Shift (RPM)<input type="number" id="shshift" min="500" max="12000" step="100"></label>
+<label>Over-rev, 0 = off (RPM)<input type="number" id="shover" min="0" max="13000" step="100"></label></div>
+<div class="row"><button type="button" onclick="shSave()">Save</button><button type="button" onclick="shTest()">Test (4 s sweep)</button></div>
+<span id="shmsg" class="note"></span><p class="note" id="shorder"></p></details></div>
 <div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
 <div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div></div>
@@ -155,6 +163,14 @@ const ecu=g.ecuok?g.ecumph.toFixed(1)+" mph":"no data";
 const cmp=g.ecuok&&g.fix&&g.gpsmph>10&&g.ecumph>1?((g.ecumph-g.gpsmph)/g.gpsmph*100).toFixed(1)+" % (factor "+(g.gpsmph/g.ecumph).toFixed(3)+")":"--";
 $("sens").innerHTML=kv("Ambient",st.dht||"--")+kv("Fuel",(st.fuel!=null?st.fuel+" %":"--"))+kv("EGT",(st.egt||"--")+"<br><span class=note>"+(st.egtsent||0)+" frames to CAN</span>")+
 kv("Speed (rusEFI)",ecu)+kv("GPS",gps)+kv("Speed difference",cmp);}catch(e){}}
+// shift light
+async function sh(){try{const c=await (await fetch("/shift.json")).json();
+ $("shsum").textContent="| "+(c.on?"on":"off")+(c.test?", testing":"")+" | "+c.rpm+" RPM";
+ $("shorder").textContent=c.order?"Order, left to right: "+c.order.split(",").join(", ")+".":"No screens online.";
+ if(!sh.done){$("shon").checked=c.on;$("shstart").value=c.start;$("shshift").value=c.shift;$("shover").value=c.over;sh.done=1;}}catch(e){}}
+async function shSave(){const q="on="+($("shon").checked?1:0)+"&start="+$("shstart").value+"&shift="+$("shshift").value+"&over="+$("shover").value;
+ const r=await fetch("/shift/set?"+q);$("shmsg").textContent=await r.text();}
+async function shTest(){$("shmsg").textContent=await (await fetch("/shift/test")).text();}
 async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
 if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
 async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
@@ -171,7 +187,7 @@ const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x48:"ADS11
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 $("i2c").innerHTML=h;}catch(e){}}
-poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);
+poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);sh();setInterval(sh,1000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Sensors</title>

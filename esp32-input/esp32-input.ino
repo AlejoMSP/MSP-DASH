@@ -12,6 +12,7 @@
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
 #include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "shift_light.h"      // staged shift light across the screens (Setup page)
 #include "hub_buttons.h"      // every button: digital or on a resistor ladder, one action each (Buttons page)
 #include <WiFi.h>
 #include <WebServer.h>
@@ -50,7 +51,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 55
+#define INPUT_BUILD 56
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -218,6 +219,62 @@ static void sendCmd(uint8_t cmd, int16_t value, const char *target) {
   RT_LOG("sent: %s\n", s_last);   // runtime: off unless SERIAL_STREAM (can_parsing.h defines RT_LOG)
 }
 
+
+// ---- shift light (shift_light.h, Setup page): the screens light up left to right with RPM ----
+static ShiftCfg s_shift;
+static int s_shiftLevel = 0;
+static char s_shiftOrder[LINK_NAME_LEN + 1] = "";   // online screens, left to right: "Left,Center,Right"
+static uint32_t s_shiftSentMs = 0, s_shiftTestMs = 0;
+#define SHIFT_TEST_MS 4000
+static void shiftLoad() {
+  Preferences p; p.begin("shift", true);
+  bool got = p.getBytes("cfg", &s_shift, sizeof s_shift) == sizeof s_shift;
+  p.end();
+  if (!got || !shift_valid(&s_shift)) shift_defaults(&s_shift);
+}
+static void shiftSave() { Preferences p; p.begin("shift", false); p.putBytes("cfg", &s_shift, sizeof s_shift); p.end(); }
+// The online screens in order (Left, Center, Right by name), as one comma list. Returns how many.
+static int shiftOrder(char *out) {
+  char names[SCREEN_MAX][LINK_NAME_LEN + 1]; int n = 0;
+  portENTER_CRITICAL(&s_scrMux);
+  for (int i = 0; i < SCREEN_MAX; i++)
+    if (s_screens[i].used && millis() - s_screens[i].lastMs < SCREEN_OFFLINE_MS && s_screens[i].name[0]) strcpy(names[n++], s_screens[i].name);
+  portEXIT_CRITICAL(&s_scrMux);
+  for (int i = 1; i < n; i++) for (int k = i; k > 0 && btn_name_cmp(names[k - 1], names[k]) > 0; k--) { char t[LINK_NAME_LEN + 1]; strcpy(t, names[k]); strcpy(names[k], names[k - 1]); strcpy(names[k - 1], t); }
+  out[0] = 0; int used = 0;
+  for (int i = 0; i < n; i++) {
+    size_t need = strlen(out) + strlen(names[i]) + (used ? 1 : 0);
+    if (need > LINK_NAME_LEN) break;   // the list must fit the packet's 20 characters
+    if (used++) strcat(out, ",");
+    strcat(out, names[i]);
+  }
+  return used;
+}
+static void sendShift(int level, int copies) {
+  LinkCmdPacket p = {};
+  p.magic = LINK_CMD_MAGIC; p.cmd = LINK_CMD_SHIFT; p.value = level;
+  strncpy(p.target, s_shiftOrder, sizeof(p.target) - 1);
+  for (int i = 0; i < copies; i++) { p.seq = ++s_seq; esp_now_send(BCAST, (const uint8_t *)&p, sizeof(p)); }
+  s_shiftSentMs = millis();
+}
+// Every 20 ms: the level from RPM (or the test sweep); sent at once when it changes, repeated while lit.
+static void shiftStep() {
+  uint32_t now = millis();
+  char order[LINK_NAME_LEN + 1]; int n = shiftOrder(order);
+  float rpm = g_rpm;
+  if (s_shiftTestMs) {   // test: a sweep from below the start to past the top
+    uint32_t t = now - s_shiftTestMs;
+    if (t > SHIFT_TEST_MS) s_shiftTestMs = 0;
+    float top = s_shift.over ? s_shift.over + 200 : s_shift.shift + 300, lo = s_shift.start - 300;
+    rpm = lo + (top - lo) * (t < SHIFT_TEST_MS / 2 ? t : SHIFT_TEST_MS - t) / (SHIFT_TEST_MS / 2.0f);
+  }
+  ShiftCfg c = s_shift; if (s_shiftTestMs) c.on = 1;
+  int lvl = shift_level(&c, n, rpm, s_shiftLevel);
+  bool changed = lvl != s_shiftLevel || strcmp(order, s_shiftOrder);
+  s_shiftLevel = lvl; strcpy(s_shiftOrder, order);
+  if (changed) sendShift(lvl, 2);
+  else if (lvl > 0 && now - s_shiftSentMs >= SHIFT_KEEPALIVE_MS) sendShift(lvl, 1);
+}
 
 // ---- brightness settings (saved; edited on this board's web page) ----
 // Mode auto: lights off = day %. Lights on = night min % at the dimmer's lowest, rising to night max % at its highest.
@@ -1087,6 +1144,20 @@ static void setupWeb() {
     if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
     server.send(200, "text/plain", r);
   });
+  server.on("/shift.json", HTTP_GET, []() {
+    char t[200];
+    snprintf(t, sizeof t, "{\"on\":%s,\"start\":%u,\"shift\":%u,\"over\":%u,\"order\":\"%s\",\"level\":%d,\"rpm\":%d,\"test\":%s}", s_shift.on ? "true" : "false",
+             s_shift.start, s_shift.shift, s_shift.over, s_shiftOrder, s_shiftLevel, (int)g_rpm, s_shiftTestMs ? "true" : "false");
+    server.send(200, "application/json", t);
+  });
+  server.on("/shift/set", HTTP_GET, []() {
+    ShiftCfg c; shift_defaults(&c);
+    c.on = server.arg("on") == "1"; c.start = server.arg("start").toInt(); c.shift = server.arg("shift").toInt(); c.over = server.arg("over").toInt();
+    if (!shift_valid(&c)) { server.send(400, "text/plain", "Start must be below shift (500 to 12000 RPM), and over-rev above shift or 0 for off"); return; }
+    s_shift = c; shiftSave();
+    server.send(200, "text/plain", c.on ? "Shift light saved" : "Saved, shift light off");
+  });
+  server.on("/shift/test", HTTP_GET, []() { s_shiftTestMs = millis(); server.send(200, "text/plain", "Testing: watch the screens for 4 s"); });
   server.on("/buttons/clear", HTTP_GET, []() {
     int i = server.arg("i").toInt();
     if (i < 0 || i >= HUB_BUTTONS) { server.send(400, "text/plain", "Bad button"); return; }
@@ -1528,6 +1599,7 @@ void setup() {
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   inputsLoad();  // configurable inputs
+  shiftLoad();   // shift light
   buttonsLoad(); // buttons (after the inputs: the first start on hub 53 moves button inputs over)
   outputsLoad(); // configurable outputs
   for (int i = 0; i < HUB_OUTPUTS; i++) outputPinSetup(s_outputs[i]);
@@ -1555,6 +1627,7 @@ void setup() {
 
 void loop() {
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
+  { static uint32_t lastShift = 0; if (millis() - lastShift >= 20) { lastShift = millis(); shiftStep(); } }
   { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); outputsStep(); } }
   static uint32_t lastKnob = 0;
   if (millis() - lastKnob >= 50) { lastKnob = millis(); readKnob(); }

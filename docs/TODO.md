@@ -46,3 +46,12 @@ once against a multimeter.
 ## PDM (parked)
 
 - Power distribution module: notes in [pdm/README.md](../pdm/README.md). Pick the board approach (carrier first or fully integrated), then the CAN layout.
+
+## Ideas from M-Gauge (hub 56 on)
+
+- Done: staged shift light across the screens.
+- Peak markers on needles and bars (fading or held).
+- Per-signal smoothing time (fuel level).
+- Text for values (gear 0 = N, map names).
+- 0-60 and 1/8, 1/4 mile timer from GPS + MPU6050.
+- Screens accept ESP-NOW data from the paired hub only (MAC filter).

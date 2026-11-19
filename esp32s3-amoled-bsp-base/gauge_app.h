@@ -95,6 +95,7 @@ extern volatile int g_alert_ack_req;
 extern volatile int g_color_preset_req;   // recolour every gauge to this preset (color_presets.h)
 extern volatile int g_race_req;           // race mode: 1 on (remember the page), 0 off (go back)
 void gauge_app_popup(const char *text);   // safe to call from any task
+void gauge_app_shift(int color);   // shift light ring: 0 off, 1 yellow, 2 green, 3 red flashing; off by itself after 1 s of silence
 void gauge_app_popup_ms(const char *text, uint32_t ms);   // same, shown for ms instead of 1.5 s
 
 #ifdef __cplusplus
