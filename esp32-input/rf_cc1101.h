@@ -53,9 +53,9 @@ static int8_t s_rfHistPeak[RF_HIST], s_rfHistFloor[RF_HIST];
 static volatile int s_rfHistHead = 0, s_rfHistCount = 0;
 static volatile int s_rfRssi = -120;
 static volatile bool s_rfReconfig = false;
-static RfBurst s_rfBursts[RF_BURSTS];
+static RfBurst *s_rfBursts = nullptr;   // RF_BURSTS of them, on the heap (rfBegin): static RAM is full
 #define RF_TOP 5                              // the strongest bursts are also kept here, so noise cannot push them out
-static RfBurst s_rfTop[RF_TOP];
+static RfBurst *s_rfTop = nullptr;      // RF_TOP of them, on the heap too
 static volatile int s_rfTopCount = 0;
 static volatile int s_rfBurstHead = 0, s_rfBurstCount = 0;
 static volatile uint32_t s_rfBurstTotal = 0;
@@ -246,6 +246,9 @@ static void rfTask(void *) {
 
 // Starts the receiver. False if the CC1101 does not answer (not wired, or wired wrong): the hub carries on without it.
 static bool rfBegin() {
+  s_rfBursts = (RfBurst *)calloc(RF_BURSTS, sizeof(RfBurst));
+  s_rfTop = (RfBurst *)calloc(RF_TOP, sizeof(RfBurst));
+  if (!s_rfBursts || !s_rfTop) { Serial.println("CC1101: no memory for the burst list"); return false; }
   rfLoadSettings();
   pinMode(RF_CS, OUTPUT); digitalWrite(RF_CS, HIGH);
   pinMode(RF_GDO0, INPUT);

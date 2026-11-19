@@ -50,7 +50,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 53
+#define INPUT_BUILD 54
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -977,7 +977,8 @@ static void setupWeb() {
     }
     j += "],\"bursts\":[";
     // newest bursts, then the strongest ones; only the first 48 pulses here (/rf/burst gives all of them)
-    static RfBurst copy[RF_BURSTS + RF_TOP];
+    static RfBurst *copy = (RfBurst *)calloc(RF_BURSTS + RF_TOP, sizeof(RfBurst));   // heap: static RAM is full
+    if (!copy || !s_rfBursts) { server.send(200, "application/json", j + "],\"top\":[]}"); return; }
     portENTER_CRITICAL(&s_rfMux);
     int count = s_rfBurstCount, head = s_rfBurstHead, top = s_rfTopCount;
     for (int k = 0; k < count; k++) copy[k] = s_rfBursts[(head - 1 - k + RF_BURSTS) % RF_BURSTS];
