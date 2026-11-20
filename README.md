@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-Current builds: **screens 220**, **hub 58**.
+Current builds: **screens 221**, **hub 59**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 

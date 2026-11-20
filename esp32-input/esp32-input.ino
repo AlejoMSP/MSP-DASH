@@ -12,6 +12,7 @@
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
 #include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "obd_poll.h"         // asks OBD-II ECUs (Speeduino) for their values (Setup page)
 #include "cpu_load.h"         // busy % per core (Board status page)
 #include "hub_wifi.h"         // the hub's own Wi-Fi network for the car (Setup page)
 #include "shift_light.h"      // staged shift light across the screens (Setup page)
@@ -54,7 +55,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 58
+#define INPUT_BUILD 59
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -367,6 +368,27 @@ static int finalPct() {
 }
 
 #include "can_parsing.h"   // copied in at compile time; uses the values and functions above
+
+// ---- OBD-II questions (obd_poll.h; can_parsing.h reads the answers) ----
+static uint8_t s_obdMode = OBD_AUTO;
+static ObdPoll s_obd;
+static volatile uint32_t s_obdAsked = 0;
+static void obdLoad() { Preferences p; p.begin("obd", true); s_obdMode = p.getUChar("mode", OBD_AUTO); p.end(); if (s_obdMode >= OBD_MODES) s_obdMode = OBD_AUTO; obd_init(&s_obd); }
+static bool obdSupported(uint8_t pid);
+// Every loop: the next question, if one is due. Single-shot frames: nobody there = one failed frame, no retries.
+static void obdStep() {
+  if (!obd_should_poll(s_obdMode, hub_broadcast_ecu_heard())) return;
+  uint32_t now = millis(), ans = g_obd_answers;
+  bool alive = g_obd_last_ms && now - g_obd_last_ms < OBD_ALIVE_MS;
+  int pid = obd_next(&s_obd, now, alive, ans, obdSupported);
+  if (pid < 0) return;
+  twai_message_t m = {};
+  m.identifier = OBD_REQ_ID; m.data_length_code = 8; m.ss = 1;
+  obd_request((uint8_t)pid, m.data);
+  twai_transmit(&m, 0);
+  obd_sent(&s_obd, now, ans); s_obdAsked++;
+}
+
 
 // ---- EGT: MAX6675 + K-type thermocouple, read by hand (bit-banged SPI) ----
 // Wiring: SCK GPIO18, SO GPIO19, CS GPIO23, VCC 3V3. The chip needs ~220 ms per reading, so read every 250 ms.
@@ -1172,6 +1194,22 @@ static void setupWeb() {
     if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
     server.send(200, "text/plain", r);
   });
+  server.on("/obd.json", HTTP_GET, []() {
+    uint32_t now = millis(); bool bc = hub_broadcast_ecu_heard();
+    char t[400];
+    snprintf(t, sizeof t, "{\"mode\":%u,\"asking\":%s,\"broadcast\":%s,\"alive\":%s,\"asked\":%lu,\"answers\":%lu,\"sup\":[\"%08lX\",\"%08lX\",\"%08lX\"],\"supKnown\":%u,\"ecu\":\"%s\",\"modes\":[\"%s\",\"%s\",\"%s\"]}",
+             s_obdMode, obd_should_poll(s_obdMode, bc) ? "true" : "false", bc ? "true" : "false", g_obd_last_ms && now - g_obd_last_ms < OBD_ALIVE_MS ? "true" : "false",
+             (unsigned long)s_obdAsked, (unsigned long)g_obd_answers, (unsigned long)g_obd_sup[0], (unsigned long)g_obd_sup[1], (unsigned long)g_obd_sup[2], g_obd_sup_known,
+             hub_ecu_detected(), OBD_MODE_NAMES[0], OBD_MODE_NAMES[1], OBD_MODE_NAMES[2]);
+    server.send(200, "application/json", t);
+  });
+  server.on("/obd/set", HTTP_GET, []() {
+    int m = server.arg("mode").toInt();
+    if (m < 0 || m >= OBD_MODES) { server.send(400, "text/plain", "Bad setting"); return; }
+    s_obdMode = m; obd_init(&s_obd);
+    Preferences p; p.begin("obd", false); p.putUChar("mode", m); p.end();
+    server.send(200, "text/plain", String("OBD-II questions: ") + OBD_MODE_NAMES[m]);
+  });
   server.on("/boards", HTTP_GET, []() { server.send_P(200, "text/html", BOARDS_HTML, strlen_P(BOARDS_HTML)); });
   server.on("/boards.json", HTTP_GET, []() {   // every board's numbers: the hub's own, then each screen from its hello
     uint8_t cpu[2]; cpu_load_pct(cpu);
@@ -1693,6 +1731,7 @@ void setup() {
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   inputsLoad();  // configurable inputs
+  obdLoad();          // OBD-II questions (Speeduino)
   cpu_load_begin();   // idle counters per core (Board status page)
   shiftLoad();   // shift light
   buttonsLoad(); // buttons (after the inputs: the first start on hub 53 moves button inputs over)
@@ -1720,8 +1759,10 @@ void setup() {
   if (s_wifiUp) setupWeb();
 }
 
+static bool obdSupported(uint8_t pid) { return obd_pid_supported(pid); }
 void loop() {
   rateStep();
+  obdStep();
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
   { static uint8_t told = 0;   // own network on: say so on the screens, once they are up
     if (s_apOn && told < 2 && millis() > 15000u + told * 2500u) {
