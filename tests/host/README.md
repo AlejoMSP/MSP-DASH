@@ -99,7 +99,6 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_buttons_page.js`: the hub's /buttons page: the list, single and ladder editors (used pins greyed out, Learn and its too-close warning), screen choice for page actions, action boxes, refusals, the ECU maps card.
 - `test_rf_decode.cpp`: the hub's 433 MHz decoding: half-bit time, Manchester bits and bytes, jitter, both polarities, junk, and a real U912 tire sensor capture (fixtures/u912_burst1.txt; run from tests/host). Build: `g++ -std=c++17 -I../../esp32-input test_rf_decode.cpp`
 - `test_hub_ecu.cpp`: the hub names the ECU from the CAN IDs it hears (rusEFI, MegaSquirt / Link, both, none). Build: `g++ -std=c++17 -Istubs -I../../esp32-input test_hub_ecu.cpp`
-- `test_obd.cpp`: OBD-II (Speeduino): answers through the real can_parsing.h into each value, refusals and questions ignored, the supported-PID list (the Speeduino page's example), the hub's question order, probing, timeouts, skipping PIDs the ECU lacks. Build: `g++ -std=c++17 -Istubs -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_obd.cpp`
 - `test_can_vss.cpp`: speed from rusEFI BASE1 byte 6, kph to mph, through the real `can_parsing.h`. Build: `g++ -std=c++17 -Istubs -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_can_vss.cpp`
 - `test_hub_sensors_page.js`: the hub's /sensors page: alphabetical, and CAN frames no sensor reads listed by themselves.
 - `test_sim_page.js`: the /simulator page's script - modes, countdown, one slider request at

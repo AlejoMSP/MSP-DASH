@@ -111,7 +111,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .card{scroll-margin-top:56px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Setup</h2>
-<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#shift">Shift light</a><a href="#speed">Speed check</a><a href="#ecu">ECU</a><a href="#wifi">Wi-Fi</a><a href="#hub">Hub</a></div>
+<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#shift">Shift light</a><a href="#speed">Speed check</a><a href="#wifi">Wi-Fi</a><a href="#hub">Hub</a></div>
 <div class="card" id="brightness"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
@@ -146,10 +146,6 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <span id="shmsg" class="note"></span><p class="note" id="shorder"></p></details></div>
 <div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
-<div class="card" id="ecu"><details open><summary><b>ECU</b> <span class="note" id="obsum"></span></summary>
-<p class="note">rusEFI, MegaSquirt and Link send their values by themselves. Speeduino's OBD CAN port (and factory ECUs) only answer questions: the hub asks for RPM, MAP, TPS, speed, lambda, temperatures, battery, fuel pressure and ethanol, skipping what the ECU says it does not have.</p>
-<div class="grid" id="obstat"></div>
-<label>Ask OBD-II questions<select id="obmode" onchange="obSave()"></select></label> <span id="obmsg" class="note"></span></details></div>
 <div class="card" id="wifi"><details open><summary><b>Hub Wi-Fi</b> <span class="note" id="wfsum"></span></summary>
 <p class="note">Its own network for the car, where your home Wi-Fi is not around: join it from the phone and open the address shown here. The screens keep getting data either way.</p>
 <div class="grid" id="wfstat"></div>
@@ -192,16 +188,6 @@ async function wf(){try{const w=await (await fetch("/wifi.json")).json();
 async function wfSave(rs){if(rs&&!confirm("Restart the hub now? The screens lose data for about 20 s."))return;
  const q="mode="+$("wfmode").value+"&ssid="+encodeURIComponent($("wfssid").value)+"&pass="+encodeURIComponent($("wfpass").value)+"&restart="+rs;
  const r=await fetch("/wifi/set?"+q);$("wfmsg").textContent=await r.text();if(r.ok)$("wfpass").value="";}
-// ECU / OBD-II
-const OBN={0x0C:"RPM",0x0B:"MAP",0x11:"TPS",0x0D:"speed",0x34:"lambda",0x24:"lambda",0x05:"coolant",0x0F:"intake air",0x42:"battery",0x5C:"oil temp",0x0A:"fuel pressure",0x52:"ethanol"};
-function obHas(o,pid){const k=Math.floor((pid-1)/32);if(!(o.supKnown&(1<<k)))return null;return (parseInt(o.sup[k],16)>>>(31-(pid-1)%32))&1;}
-async function ob(){try{const o=await (await fetch("/obd.json")).json();
- $("obsum").textContent="| "+o.ecu+(o.asking?(o.alive?", asking":", listening for an OBD-II ECU"):"");
- let has=o.supKnown?Object.keys(OBN).map(Number).filter((p,i,a)=>obHas(o,p)&&a.findIndex(q=>OBN[q]===OBN[p]&&obHas(o,q))===i).map(p=>OBN[p]):[];
- $("obstat").innerHTML=kv("ECU heard",o.ecu)+kv("OBD-II",o.asking?(o.alive?"answering":"no answer yet"):(o.broadcast?"not needed":"off"))+kv("Questions / answers",o.asked+" / "+o.answers)+
-  (o.supKnown?kv("It has",has.length?has.join(", "):"none of ours"):"");
- if(!ob.done){$("obmode").innerHTML=o.modes.map((m,k)=>'<option value="'+k+'"'+(k===o.mode?" selected":"")+'>'+m+'</option>').join("");ob.done=1;}}catch(e){}}
-async function obSave(){const r=await fetch("/obd/set?mode="+$("obmode").value);$("obmsg").textContent=await r.text();}
 async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
 if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
 async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
@@ -218,7 +204,7 @@ const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x48:"ADS11
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 $("i2c").innerHTML=h;}catch(e){}}
-poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);sh();setInterval(sh,1000);wf();setInterval(wf,3000);ob();setInterval(ob,2000);
+poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);sh();setInterval(sh,1000);wf();setInterval(wf,3000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Sensors</title>

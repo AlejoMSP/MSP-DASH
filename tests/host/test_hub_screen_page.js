@@ -57,8 +57,7 @@ function page(search) {
   console.log("4. Setup page sections");
   { const h = require('./hub_page.js').hubPage('SETUP_HTML');
     const ids = [...h.matchAll(/<div class="card" id="(\w+)"/g)].map(m => m[1]);
-    check(ids.join(",") === "brightness,clock,accel,i2c,shift,speed,ecu,wifi,hub", "cards in order: brightness, clock, accelerometer, I2C, shift light, speed check, ECU, Wi-Fi, hub");
-    check(/href="#ecu">ECU/.test(h) && /id="obmode" onchange="obSave\(\)"/.test(h) && /Speeduino/.test(h), "ECU card: OBD-II question setting, explains Speeduino");
+    check(ids.join(",") === "brightness,clock,accel,i2c,shift,speed,wifi,hub", "cards in order: brightness, clock, accelerometer, I2C, shift light, speed check, Wi-Fi, hub");
     check(/href="#wifi">Wi-Fi/.test(h) && /id="wfmode"/.test(h) && /id="wfssid"/.test(h) && /id="wfpass" type="password"/.test(h) && /wfSave\(1\)">Save and restart/.test(h), "Wi-Fi card: when it is on, name, hidden password, save and restart");
     check(/href="#shift">Shift light/.test(h) && /id="shstart"/.test(h) && /id="shshift"/.test(h) && /id="shover"/.test(h) && /shTest\(\)/.test(h), "shift light card: on, start, shift, over-rev, test");
     check(["brightness", "clock", "accel", "i2c", "speed", "hub"].every(a => h.includes('href="#' + a + '"')), "a jump link to each"); }

@@ -14,7 +14,7 @@ typedef struct { uint32_t brp; uint8_t tseg_1, tseg_2, sjw; bool triple_sampling
 #define TWAI_TIMING_CONFIG_500KBITS() { 8, 15, 4, 3, false }
 typedef struct { uint32_t acceptance_code, acceptance_mask; bool single_filter; } twai_filter_config_t;
 #define TWAI_FILTER_CONFIG_ACCEPT_ALL() { 0, 0xFFFFFFFF, true }
-typedef struct { union { struct { uint32_t extd: 1, rtr: 1, ss: 1, self: 1, dlc_non_comp: 1, reserved: 27; }; uint32_t flags; }; uint32_t identifier; uint8_t data_length_code; uint8_t data[8]; } twai_message_t;
+typedef struct { uint32_t flags; uint32_t identifier; uint8_t data_length_code; uint8_t data[8]; } twai_message_t;
 esp_err_t twai_driver_install(const twai_general_config_t *, const twai_timing_config_t *, const twai_filter_config_t *);
 esp_err_t twai_start(void); esp_err_t twai_receive(twai_message_t *, int); esp_err_t twai_initiate_recovery(void);
 

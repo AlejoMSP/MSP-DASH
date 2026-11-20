@@ -14,9 +14,6 @@
   against the actual rusEFI DBC file).
   MegaSquirt/LinkECU: big-endian, base 0x5F0 - shared parser, ported
   directly from the WROOM board's confirmed handleSecondaryEcuFrame.
-  OBD-II (hub 59): answers on 0x7E8-0x7EF to the hub's mode 01 requests
-  (Speeduino on its OBD CAN port, factory ECUs). The hub asks only when no
-  broadcasting ECU is heard (esp32-input/obd_poll.h).
   Both ID ranges are disjoint, so both parsers always stay active.
   There is no ECU type setting (removed from the screens in build 170);
   the hub's home page shows which ECU it hears.
@@ -219,58 +216,6 @@ static void handleSecondaryEcuFrame(uint32_t id, uint8_t *d) {
   }
 }
 
-// ---- OBD-II answers (Speeduino, factory ECUs; rusEFI answers too) ----
-// The hub asks on 0x7DF (esp32-input/obd_poll.h); ECUs answer on 0x7E8-0x7EF with a single frame:
-// d[0] = bytes that follow, d[1] = 0x41 (mode 01 + 0x40), d[2] = PID, d[3..] = A, B, ...
-// PIDs 0x00 / 0x20 / 0x40 answer which PIDs the ECU has (a bit each, the high bit of A first): kept in g_obd_sup.
-#define OBD_REQ_ID   0x7DF
-#define OBD_RESP_LO  0x7E8
-#define OBD_RESP_HI  0x7EF
-static volatile uint32_t g_obd_sup[3] = { 0, 0, 0 };   // PIDs 0x01-0x20, 0x21-0x40, 0x41-0x60 the ECU has
-static volatile uint8_t g_obd_sup_known = 0;            // bit k: g_obd_sup[k] has been answered
-static volatile uint32_t g_obd_last_ms = 0;             // last answer heard
-static volatile uint32_t g_obd_answers = 0;
-// Is this PID in the supported list? (unknown list: assume yes)
-static inline bool obd_pid_supported(uint8_t pid) {
-  int k = (pid - 1) / 32;
-  if (pid == 0 || k > 2) return true;
-  if (!(g_obd_sup_known & (1 << k))) return true;
-  return (g_obd_sup[k] >> (31 - (pid - 1) % 32)) & 1;
-}
-// One PID's value into the dash's signals. Returns false for a PID the dash does not use.
-static bool obd_apply(uint8_t pid, const uint8_t *v, int n) {
-  if (n < 1) return false;
-  float A = v[0], B = n > 1 ? v[1] : 0;
-  switch (pid) {
-    case 0x0C: if (n < 2) return false; g_rpm = (256 * A + B) / 4; g_rpm_has_data = true; gauge_config_mark_signal_active(SIG_RPM); return true;
-    case 0x05: g_clt_f = cToF(A - 40); g_clt_has_data = true; gauge_config_mark_signal_active(SIG_CLT); return true;
-    case 0x0B: g_boost_psi = mapKpaToBoostPsi(A); g_boost_has_data = true; gauge_config_mark_signal_active(SIG_MAP); return true;   // absolute kPa, 255 max
-    case 0x0F: g_iat_f = cToF(A - 40); g_iat_has_data = true; gauge_config_mark_signal_active(SIG_IAT); return true;
-    case 0x11: g_tps = A * 100.0f / 255.0f; g_tps_has_data = true; gauge_config_mark_signal_active(SIG_TPS); return true;
-    case 0x0D: g_vss_mph = A * 0.621371f; g_vss_has_data = true; gauge_config_mark_signal_active(SIG_VSS); return true;   // km/h
-    case 0x42: if (n < 2) return false; g_battv = (256 * A + B) / 1000.0f; g_battv_has_data = true; gauge_config_mark_signal_active(SIG_BATTV); return true;
-    case 0x24: case 0x34: if (n < 2) return false; g_afr = (256 * A + B) * 2.0f / 65536.0f * 14.7f; g_afr_has_data = true; gauge_config_mark_signal_active(SIG_AFR); return true;   // lambda x 14.7
-    case 0x5C: g_oilt_f = cToF(A - 40); g_oilt_has_data = true; gauge_config_mark_signal_active(SIG_OILT); return true;
-    case 0x0A: g_fuelp_psi = kpaToPsi(3 * A); g_fuelp_has_data = true; gauge_config_mark_signal_active(SIG_FUELP); return true;   // gauge kPa
-    case 0x52: g_flex_pct = A * 100.0f / 255.0f; g_flex_has_data = true; gauge_config_mark_signal_active(SIG_FLEX); return true;
-  }
-  return false;
-}
-static void handleObdFrame(uint32_t id, const uint8_t *d, uint8_t len) {
-  if (id < OBD_RESP_LO || id > OBD_RESP_HI || len < 4 || d[1] != 0x41) return;
-  int n = d[0] - 2;                       // value bytes after the mode and PID
-  if (n < 1 || n > (int)len - 3) n = len - 3;
-  uint8_t pid = d[2];
-  g_obd_last_ms = millis(); g_obd_answers++;
-  if ((pid == 0x00 || pid == 0x20 || pid == 0x40) && n >= 4) {
-    int k = pid / 32;
-    g_obd_sup[k] = ((uint32_t)d[3] << 24) | ((uint32_t)d[4] << 16) | ((uint32_t)d[5] << 8) | d[6];
-    g_obd_sup_known |= (1 << k);
-    return;
-  }
-  obd_apply(pid, d + 3, n);
-}
-
 // ---- Dedicated CAN receive task ----
 #define CAN_TASK_STACK_BYTES 4096
 #define CAN_TASK_PRIORITY    3   // above loop() (1) and the LVGL task (2)
@@ -289,7 +234,6 @@ static void canReceiveTask(void *arg) {
       handleRusefiFrame(message.identifier, message.data);
       can_apply_status_flags(message.identifier, message.data, message.data_length_code);   // fan, check engine ... (see can_flags.h)
       handleSecondaryEcuFrame(message.identifier, message.data);
-      handleObdFrame(message.identifier, message.data, message.data_length_code);   // OBD-II answers (Speeduino ...)
     }
 
     unsigned long now = millis();
