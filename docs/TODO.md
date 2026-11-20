@@ -55,3 +55,5 @@ once against a multimeter.
 - Text for values (gear 0 = N, map names).
 - 0-60 and 1/8, 1/4 mile timer from GPS + MPU6050.
 - Screens accept ESP-NOW data from the paired hub only (MAC filter).
+- Screens join the hub's own network in the car too, so their pages load away from home (hub 57 gives the hub one).
+- rusEFI warning / error code as text on the screens and OLED (idea from ESP32-OBD-Display).

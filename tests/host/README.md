@@ -87,6 +87,7 @@ for each page, and that a failed save shows the board's own explanation.
 - `test_hub_oled_page.js`: the hub /oled page.
 - `test_oled_pages.cpp`: OLED pages drawn (big number, values, G-meter, clock), lamp takeover, defaults. Build: `g++ -std=c++17 -I../../esp32-input test_oled_pages.cpp`
 - `test_imu_math.cpp`: accelerometer mounting axes, signs, zero, smoothing. Build: `g++ -std=c++17 -I../../esp32-input test_imu_math.cpp`
+- `test_hub_wifi.cpp`: the hub's own Wi-Fi network settings: defaults, when it starts in each mode, name and password checks. Build: `g++ -std=c++17 -I../../esp32-input test_hub_wifi.cpp`
 - `test_shift_light.cpp`: the staged shift light: settings, levels for 1 and 3 screens, over-rev, hysteresis, each screen's colour from the level and the left-to-right list. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_shift_light.cpp`
 - `test_hub_buttons.cpp`: hub buttons (hub_buttons.h): which pins fit, the resistor ladder match and too-close check, debounce, screen targets, the ECU maps and their pop-up label, moving the old two-button setup over. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_hub_buttons.cpp`
 - `test_btn_logic.cpp`: the old button defaults (read once on hub 53) and the "Next gauge" screen order. Build: `g++ -std=c++17 -I../../esp32-input -I../../esp32s3-amoled-bsp-base test_btn_logic.cpp`

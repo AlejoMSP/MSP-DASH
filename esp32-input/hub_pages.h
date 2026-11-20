@@ -111,7 +111,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 .card{scroll-margin-top:56px}
 )HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
 <h2>Setup</h2>
-<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#shift">Shift light</a><a href="#speed">Speed check</a><a href="#hub">Hub</a></div>
+<div class="jump"><a href="#brightness">Brightness</a><a href="#clock">Clock</a><a href="#accel">Accelerometer</a><a href="#i2c">I2C bus</a><a href="#shift">Shift light</a><a href="#speed">Speed check</a><a href="#wifi">Wi-Fi</a><a href="#hub">Hub</a></div>
 <div class="card" id="brightness"><details open><summary><b>Brightness</b> <span class="note" id="brisum"></span></summary>
 <label>Brightness mode<select id="mode"><option value="0">Auto: car lights and dimmer</option><option value="1">Knob</option></select></label>
 <label>Day brightness, lights off (%)<input type="number" id="day" min="5" max="100"></label>
@@ -146,6 +146,14 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <span id="shmsg" class="note"></span><p class="note" id="shorder"></p></details></div>
 <div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
+<div class="card" id="wifi"><details open><summary><b>Hub Wi-Fi</b> <span class="note" id="wfsum"></span></summary>
+<p class="note">Its own network for the car, where your home Wi-Fi is not around: join it from the phone and open the address shown here. The screens keep getting data either way.</p>
+<div class="grid" id="wfstat"></div>
+<label>Its own network is on<select id="wfmode"></select></label>
+<div class="row"><label>Network name<input id="wfssid" maxlength="32"></label>
+<label>Password (8 or more, blank = keep)<input id="wfpass" type="password" maxlength="63" autocomplete="new-password"></label></div>
+<div class="row"><button type="button" onclick="wfSave(0)">Save</button><button type="button" onclick="wfSave(1)">Save and restart</button></div>
+<span id="wfmsg" class="note"></span></details></div>
 <div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div></div>
 <script>
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];const $=id=>document.getElementById(id);
@@ -171,6 +179,15 @@ async function sh(){try{const c=await (await fetch("/shift.json")).json();
 async function shSave(){const q="on="+($("shon").checked?1:0)+"&start="+$("shstart").value+"&shift="+$("shshift").value+"&over="+$("shover").value;
  const r=await fetch("/shift/set?"+q);$("shmsg").textContent=await r.text();}
 async function shTest(){$("shmsg").textContent=await (await fetch("/shift/test")).text();}
+// hub Wi-Fi
+async function wf(){try{const w=await (await fetch("/wifi.json")).json();
+ $("wfsum").textContent="| "+(w.home?"home network":"no home network")+(w.apOn?", own network on ("+w.clients+" joined)":"");
+ $("wfstat").innerHTML=kv("Home network",w.home?w.homeSsid+"<br>"+w.ip:"not found")+kv("Own network",w.apOn?w.ssid+"<br>"+w.apIp:"off")+kv("Channel",w.ch);
+ if(!wf.done){$("wfmode").innerHTML=w.modes.map((m,k)=>'<option value="'+k+'"'+(k===w.mode?" selected":"")+'>'+m+'</option>').join("");$("wfssid").value=w.ssid;wf.done=1;
+  if(w.defaultPass)$("wfmsg").textContent="Still the default password (mspdash123): set your own.";}}catch(e){}}
+async function wfSave(rs){if(rs&&!confirm("Restart the hub now? The screens lose data for about 20 s."))return;
+ const q="mode="+$("wfmode").value+"&ssid="+encodeURIComponent($("wfssid").value)+"&pass="+encodeURIComponent($("wfpass").value)+"&restart="+rs;
+ const r=await fetch("/wifi/set?"+q);$("wfmsg").textContent=await r.text();if(r.ok)$("wfpass").value="";}
 async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
 if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
 async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
@@ -187,7 +204,7 @@ const I2CNAME={0x3C:"OLED",0x3D:"OLED",0x68:"MPU6050",0x69:"MPU6050",0x48:"ADS11
 async function i2c(){try{const b=await (await fetch("/i2c.json")).json();
 let h=b.found.length?b.found.map(a=>kv("0x"+a.toString(16).toUpperCase().padStart(2,"0"),I2CNAME[a]||"unknown device")).join(""):kv("Bus","nothing found");
 $("i2c").innerHTML=h;}catch(e){}}
-poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);sh();setInterval(sh,1000);
+poll();setInterval(poll,1000);i2c();setInterval(i2c,1000);imu();setInterval(imu,500);spd();setInterval(spd,1000);clk();setInterval(clk,1000);sh();setInterval(sh,1000);wf();setInterval(wf,3000);
 </script></body></html>)HTML";
 
 static const char SENSORS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Sensors</title>

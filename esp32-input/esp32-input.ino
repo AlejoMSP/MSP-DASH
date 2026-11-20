@@ -12,6 +12,7 @@
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
 #include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "hub_wifi.h"         // the hub's own Wi-Fi network for the car (Setup page)
 #include "shift_light.h"      // staged shift light across the screens (Setup page)
 #include "hub_buttons.h"      // every button: digital or on a resistor ladder, one action each (Buttons page)
 #include <WiFi.h>
@@ -51,7 +52,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 56
+#define INPUT_BUILD 57
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -199,6 +200,16 @@ static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, i
 }
 
 static WebServer server(80);
+// ---- the hub's own Wi-Fi network (hub_wifi.h, Setup page) ----
+static ApCfg s_ap;
+static bool s_apOn = false;
+static void apLoad() {
+  Preferences p; p.begin("ap", true);
+  bool got = p.getBytes("cfg", &s_ap, sizeof s_ap) == sizeof s_ap;
+  p.end();
+  if (!got || !ap_valid(&s_ap)) ap_defaults(&s_ap);
+}
+static void apSave() { Preferences p; p.begin("ap", false); p.putBytes("cfg", &s_ap, sizeof s_ap); p.end(); }
 static char s_last[48] = "none yet";
 static int s_briPct = -1;
 static bool s_wifiUp = false;
@@ -1144,6 +1155,32 @@ static void setupWeb() {
     if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
     server.send(200, "text/plain", r);
   });
+  server.on("/wifi.json", HTTP_GET, []() {   // never sends the password
+    String j = "{\"home\":"; j += s_wifiUp ? "true" : "false";
+    j += ",\"homeSsid\":\""; j += WIFI_SSID; j += "\",\"ip\":\""; j += s_wifiUp ? WiFi.localIP().toString() : String("");
+    j += "\",\"mode\":"; j += String((int)s_ap.mode); j += ",\"ssid\":\""; j += s_ap.ssid;
+    j += "\",\"defaultPass\":"; j += strcmp(s_ap.pass, AP_PASS_DEFAULT) ? "false" : "true";
+    j += ",\"apOn\":"; j += s_apOn ? "true" : "false"; j += ",\"apIp\":\""; j += s_apOn ? WiFi.softAPIP().toString() : String("");
+    j += "\",\"clients\":"; j += String(s_apOn ? WiFi.softAPgetStationNum() : 0); j += ",\"ch\":"; j += String(WiFi.channel());
+    j += ",\"modes\":[";
+    for (int m = 0; m < AP_MODES; m++) { if (m) j += ","; j += "\""; j += AP_MODE_NAMES[m]; j += "\""; }
+    server.send(200, "application/json", j + "]}");
+  });
+  server.on("/wifi/set", HTTP_GET, []() {   // used from the next start (or Save and restart)
+    ApCfg c = s_ap;
+    c.mode = server.arg("mode").toInt();
+    String ss = server.arg("ssid"), pw = server.arg("pass"); ss.trim();
+    if (ss.length() > 32) { server.send(400, "text/plain", "Network name: 1 to 32 characters"); return; }
+    strncpy(c.ssid, ss.c_str(), sizeof c.ssid - 1); c.ssid[sizeof c.ssid - 1] = 0;
+    if (pw.length()) { if (pw.length() > 63) { server.send(400, "text/plain", "Password: 8 to 63 characters"); return; } strncpy(c.pass, pw.c_str(), sizeof c.pass - 1); c.pass[sizeof c.pass - 1] = 0; }
+    if (c.mode >= AP_MODES) { server.send(400, "text/plain", "Pick when it is on"); return; }
+    if (!ap_text_ok(c.ssid, 1, 32)) { server.send(400, "text/plain", "Network name: 1 to 32 plain characters"); return; }
+    if (!ap_text_ok(c.pass, 8, 63)) { server.send(400, "text/plain", "Password: 8 to 63 plain characters"); return; }
+    s_ap = c; apSave();
+    bool restart = server.arg("restart") == "1";
+    server.send(200, "text/plain", restart ? "Saved. The hub restarts now; reconnect in about 20 s." : "Saved. Used from the next start.");
+    if (restart) { delay(300); ESP.restart(); }
+  });
   server.on("/shift.json", HTTP_GET, []() {
     char t[200];
     snprintf(t, sizeof t, "{\"on\":%s,\"start\":%u,\"shift\":%u,\"over\":%u,\"order\":\"%s\",\"level\":%d,\"rpm\":%d,\"test\":%s}", s_shift.on ? "true" : "false",
@@ -1582,6 +1619,15 @@ void setup() {
   if (!s_wifiUp) {
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(false, false);
+  }
+  // Its own network: on the channel the screens use (the home network's at home, CAR_CHANNEL away), so ESP-NOW is unchanged.
+  apLoad();
+  if (ap_should_start(&s_ap, s_wifiUp)) {
+    WiFi.mode(WIFI_AP_STA);
+    s_apOn = WiFi.softAP(s_ap.ssid, s_ap.pass, s_wifiUp ? WiFi.channel() : CAR_CHANNEL, 0, 4);
+    Serial.printf("Own Wi-Fi \"%s\": %s, %s\n", s_ap.ssid, s_apOn ? "on" : "FAILED", WiFi.softAPIP().toString().c_str());
+  }
+  if (!s_wifiUp && !s_apOn) {   // nothing up: park on the car channel by hand
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(CAR_CHANNEL, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
@@ -1627,6 +1673,12 @@ void setup() {
 
 void loop() {
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
+  { static uint8_t told = 0;   // own network on: say so on the screens, once they are up
+    if (s_apOn && told < 2 && millis() > 15000u + told * 2500u) {
+      char t[LINK_NAME_LEN + 1];
+      if (told == 0) snprintf(t, sizeof t, "Wi-Fi: %s", s_ap.ssid); else snprintf(t, sizeof t, "Hub %s", WiFi.softAPIP().toString().c_str());
+      sendCmd(LINK_CMD_POPUP, 0, t); told++;
+    } }
   { static uint32_t lastShift = 0; if (millis() - lastShift >= 20) { lastShift = millis(); shiftStep(); } }
   { static uint32_t lastIn = 0; if (millis() - lastIn >= 20) { lastIn = millis(); inputsStep(); outputsStep(); } }
   static uint32_t lastKnob = 0;
