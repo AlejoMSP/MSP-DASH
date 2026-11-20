@@ -44,7 +44,9 @@ inline String operator+(const char *a, const String &b) { return String(std::str
 struct SerialClass { int available() { return 0; } int read() { return -1; } template <typename... A> int printf(const char *f, A... a) { return ::printf(f, a...); }
   void println(const char *s = "") {} void print(const char *s) {} void print(int) {} void begin(int) {} void println(const String &) {} template <typename T> void println(const T &, int = 0) {} void println(int) {} };
 extern SerialClass Serial;
-struct EspClass { void restart() {} } extern ESP;
+struct EspClass { void restart() {} uint32_t getFreePsram() { return 0; } uint32_t getFreeHeap() { return 0; } uint32_t getMinFreeHeap() { return 0; } } extern ESP;
+inline float temperatureRead() { return 40; }
+inline uint32_t getCpuFrequencyMhz() { return 240; }
 uint32_t millis(); void delay(uint32_t);
 static const int HIGH = 1, LOW = 0;
 

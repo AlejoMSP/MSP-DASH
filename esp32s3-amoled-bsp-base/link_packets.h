@@ -43,7 +43,24 @@ typedef struct __attribute__((packed)) { uint32_t magic; uint16_t seq; uint8_t c
 #define LINK_NAME_LEN 20
 // uptime_s (build 195): seconds since the screen started; lets the hub's Firmware page see that an update restarted it.
 // Older screens send the packet without it (the hub reads what arrived; a missing uptime reads 0 = unknown).
-typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; uint32_t uptime_s; } HelloPacket;
+// stats (build 220 / hub 58): how the screen is doing, for the hub's Board status page. Older screens send the packet
+// without it (stats_ver 0 = none).
+typedef struct __attribute__((packed)) {
+  uint8_t stats_ver;                 // 1
+  uint8_t fps, draw_pct;             // frames sent to the panel last second; share of it LVGL spent drawing
+  uint8_t cpu0, cpu1;                // busy % per core (cpu_load.h, an estimate)
+  uint16_t heap_kb, heap_min_kb;     // internal RAM free now / lowest ever
+  uint16_t heap_big_kb;              // largest free block (fragmentation)
+  uint16_t psram_kb;                 // PSRAM free
+  int8_t temp_c;                     // chip temperature
+  int8_t rssi;                       // Wi-Fi signal, dBm (0 = not on a network)
+  uint16_t rx_pps;                   // data packets from the hub per second
+  uint16_t rx_age_ds;                // tenths of a second since the last one (0xFFFF = never)
+  uint8_t logging;                   // SD logging running
+  uint8_t cpu_mhz_4;                 // CPU clock / 4
+} HelloStats;
+#define HELLO_STATS_VER 1
+typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; uint32_t uptime_s; HelloStats st; } HelloPacket;
 
 // Shift light (LINK_CMD_SHIFT): where is this screen in the hub's left-to-right list ("Left,Center,Right")? -1 = not in it.
 // The value is the level: 0 off, 1..n that many screens yellow from the left, n+1 all green, n+2 all red (flashing).

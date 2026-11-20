@@ -19,6 +19,10 @@
 #include "lcd_perf.h"
 
 #include "link_packets.h"   // HelloPacket, HELLO_MAGIC, HELLO_MS
+#include "cpu_load.h"       // busy % per core, for the hello's stats
+#include "lcd_perf.h"
+#include "sd_logging.h"
+#include "esp_heap_caps.h"
 static_assert(LINK_NAME_LEN == ESPNOW_NAME_LEN, "hello name length must match the board name length");
 
 typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[ESPNOW_NAME_LEN + 1]; uint32_t lastMs; bool used; } BoardSlot;
@@ -210,6 +214,7 @@ static void clearAll(void) {   // back to "--", as when CAN has gone quiet
 
 void espnow_link_init(void) {
   espnow_link_is_remote();   // loads the role
+  cpu_load_begin();          // idle counters per core (hello stats)
   if (WiFi.status() != WL_CONNECTED) {
     // No network (in the car): stop the WiFi search, which hops channels and would break ESP-NOW, and park on one channel.
     WiFi.setAutoReconnect(false);
@@ -263,6 +268,15 @@ void espnow_link_loop(void) {
     s_lastHelloMs = now;
     HelloPacket h = { HELLO_MAGIC, (uint32_t)WiFi.localIP(), (uint16_t)FW_BUILD_NUMBER, {0}, millis() / 1000 + 1 };   // + 1: 0 means "unknown"
     char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); memcpy(h.name, nm, ESPNOW_NAME_LEN);
+    HelloStats &st = h.st; uint8_t cpu[2]; cpu_load_pct(cpu);   // how this screen is doing (hub's Board status page)
+    st.stats_ver = HELLO_STATS_VER; st.fps = (uint8_t)(lcd_perf_fps() > 255 ? 255 : lcd_perf_fps()); st.draw_pct = (uint8_t)lcd_perf_busy_pct();
+    st.cpu0 = cpu[0]; st.cpu1 = cpu[1];
+    st.heap_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024; st.heap_min_kb = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024;
+    st.heap_big_kb = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024; st.psram_kb = ESP.getFreePsram() / 1024;
+    st.temp_c = (int8_t)temperatureRead(); st.rssi = WiFi.status() == WL_CONNECTED ? (int8_t)WiFi.RSSI() : 0;
+    st.rx_pps = (uint16_t)(s_pps > 65535 ? 65535 : s_pps);
+    { uint32_t a = (now - s_lastRxMs) / 100; st.rx_age_ds = s_everRx ? (uint16_t)(a > 65534 ? 65534 : a) : 0xFFFF; }
+    st.logging = sd_logging_is_active(); st.cpu_mhz_4 = getCpuFrequencyMhz() / 4;
     esp_now_send(BCAST, (const uint8_t *)&h, sizeof(h));
   }
 

@@ -9,7 +9,7 @@
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
 #define HUB_NAV_STYLE "*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{background:#000;color:#ddd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:1000px;margin:0 auto;padding:12px 16px calc(24px + env(safe-area-inset-bottom))}body.wide{max-width:none}\ninput,select,textarea{font-size:16px}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:calc(52px + env(safe-area-inset-top))!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
-#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><a href=\"/boards\">Board status</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH</title>
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="MSP-DASH">
@@ -834,4 +834,46 @@ async function saveOut(){okeep();const o=oedit;
 async function clearOut(i){if(!confirm("Remove output "+(i+1)+"?"))return;msg(await (await fetch("/outputs/clear?i="+i)).text());load();}
 async function toggleOut(i){msg("Output "+(i+1)+": "+(await (await fetch("/outputs/toggle?i="+i)).text()));load();}
 load();setInterval(()=>{if(editing===null&&oedit===null)load();},2000);
+</script></body></html>)HTML";
+
+static const char BOARDS_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Board status</title>
+<style>h2{color:#4dd0e1;margin:6px 0 10px}h3{color:#4dd0e1;margin:0;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 8px}.note{color:#888;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}.kv{background:#000;border-radius:6px;padding:8px;border-left:3px solid #2e7d32}
+.kv b{display:block;color:#888;font-weight:normal;font-size:12px;margin-bottom:2px}.kv span{font-size:18px}.kv.warn{border-left-color:#ffb300}.kv.bad{border-left-color:#e53935}.kv.na{border-left-color:#333}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%}.dot.on{background:#2e7d32}.dot.off{background:#e53935}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Board status</h2>
+<div id="boards"><p class="note">Loading...</p></div>
+<p class="note">Refreshed every 2 s. Screens report over ESP-NOW every 2 s, so this works in the car too. Green is fine, amber is worth a look, red needs attention.
+CPU busy is an estimate per core. Free RAM is the ESP32's internal memory; "lowest" is the least it has had since it started, and "largest block" shows fragmentation.</p>
+<script>
+const $=id=>document.getElementById(id);
+const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+// value, label, level: 0 fine, 1 look, 2 attention, -1 no data
+const kv=(k,v,l)=>'<div class="kv'+(l===1?" warn":l===2?" bad":l===-1?" na":"")+'"><b>'+k+'</b><span>'+v+'</span></div>';
+const lvl=(v,warn,bad,low)=>low?(v<=bad?2:v<=warn?1:0):(v>=bad?2:v>=warn?1:0);
+function up(s){if(!s)return"--";const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?d+"d "+h+"h":h?h+"h "+m+"m":m+"m "+(s%60)+"s";}
+function common(b){return kv("CPU busy, core 0",b.cpu0+" %",lvl(b.cpu0,80,95))+kv("CPU busy, core 1",b.cpu1+" %",lvl(b.cpu1,80,95))+
+ kv("Free RAM",b.heap+" KB",lvl(b.heap,30,15,1))+kv("Lowest free RAM",b.heapMin+" KB",lvl(b.heapMin,20,10,1))+kv("Largest block",b.heapBig+" KB",lvl(b.heapBig,16,8,1))+
+ kv("Chip temperature",b.temp+" &deg;C",lvl(b.temp,70,80))+kv("Wi-Fi signal",b.rssi?b.rssi+" dBm":"not on a network",b.rssi?lvl(b.rssi,-75,-85,1):-1)+
+ kv("CPU clock",b.mhz+" MHz",0)+kv("Up for",up(b.uptime),0);}
+function hub(h){return '<div class="card"><div class="head"><span class="dot on"></span><h3>Hub</h3><span class="note">build '+h.build+' | '+esc(h.ip)+'</span></div><div class="grid">'+
+ kv("Main loop",h.loops+" /s",lvl(h.loops,200,50,1))+kv("CAN frames in",h.canFps+" /s",h.canFps?0:1)+kv("CAN bus",h.canState,h.canState==="running"?0:2)+
+ kv("CAN missed / errors",h.canRxMissed+" / "+h.canBusErr,h.canRxMissed||h.canBusErr?1:0)+kv("CAN send failures",h.canTxFail,h.canTxFail?1:0)+
+ kv("Sent to screens",h.sentPs+" /s",h.sentPs?0:1)+kv("Joined its Wi-Fi",h.apClients,0)+common(h)+'</div></div>';}
+function scr(c){const head='<div class="head"><span class="dot '+(c.online?"on":"off")+'"></span><h3>'+esc(c.name||"Screen")+'</h3><span class="note">build '+c.build+' | '+esc(c.ip)+
+ (c.online?' | heard '+(c.age/1000).toFixed(1)+' s ago':' | offline, last heard '+Math.round(c.age/1000)+' s ago')+'</span></div>';
+ if(!c.stats)return '<div class="card">'+head+'<p class="note">This screen runs an older build that does not send its numbers. Update it to see them.</p></div>';
+ const age=c.rxAge<0?"never":(c.rxAge/10).toFixed(1)+" s ago";
+ return '<div class="card'+(c.online?'':'" style="opacity:.6')+'">'+head+'<div class="grid">'+
+  kv("Frames per second",c.fps,lvl(c.fps,20,8,1))+kv("Time spent drawing",c.draw+" %",lvl(c.draw,85,95))+kv("Data from the hub",c.rxPs+" /s",c.rxPs?0:2)+
+  kv("Last data",age,c.rxAge<0?2:lvl(c.rxAge,10,30))+kv("PSRAM free",(c.psram/1024).toFixed(1)+" MB",lvl(c.psram,1024,256,1))+
+  kv("SD logging",c.logging?"running":"not running",c.logging?0:-1)+common(c)+'</div></div>';}
+async function load(){try{const d=await (await fetch("/boards.json")).json();
+ const order=n=>{n=(n||"").toLowerCase();return n==="left"?0:/cent|middle/.test(n)?1:n==="right"?2:3;};
+ d.screens.sort((a,b)=>order(a.name)-order(b.name));
+ $("boards").innerHTML=hub(d.hub)+(d.screens.length?d.screens.map(scr).join(""):'<div class="card"><p class="note">No screens heard yet.</p></div>');}
+ catch(e){$("boards").innerHTML='<p class="note">Could not reach the hub</p>';}}
+load();setInterval(load,2000);
 </script></body></html>)HTML";

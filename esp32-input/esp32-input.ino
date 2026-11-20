@@ -12,6 +12,7 @@
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
 #include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "cpu_load.h"         // busy % per core (Board status page)
 #include "hub_wifi.h"         // the hub's own Wi-Fi network for the car (Setup page)
 #include "shift_light.h"      // staged shift light across the screens (Setup page)
 #include "hub_buttons.h"      // every button: digital or on a resistor ladder, one action each (Buttons page)
@@ -23,6 +24,7 @@
 #include "wifi_config.h"
 #include <Preferences.h>
 #include "driver/twai.h"
+#include "esp_heap_caps.h"
 #include "gauge_config.h"   // copied in at compile time (see PREREQUISITES.md)
 #include "gauge_app.h"
 #include "link_packets.h"   // copied in at compile time: same packets as the screens
@@ -52,7 +54,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 57
+#define INPUT_BUILD 58
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -178,7 +180,7 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
 // ---- screen status: every remote screen sends a hello every 2 s; no hello for 6 s = offline (red) ----
 #define SCREEN_MAX 6
 #define SCREEN_OFFLINE_MS 6000
-typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; uint32_t uptime; bool used; } ScreenSlot;
+typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; uint32_t uptime; HelloStats st; bool used; } ScreenSlot;
 static ScreenSlot s_screens[SCREEN_MAX];
 static portMUX_TYPE s_scrMux = portMUX_INITIALIZER_UNLOCKED;
 static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
@@ -195,11 +197,26 @@ static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, i
   if (!c->used || memcmp(c->mac, info->src_addr, 6)) { memset(c, 0, sizeof *c); memcpy(c->mac, info->src_addr, 6); }
   c->ip = h.ip; c->build = h.build; memcpy(c->name, h.name, LINK_NAME_LEN); c->name[LINK_NAME_LEN] = 0;
   c->uptime = h.uptime_s;   // 0 = an older screen that does not send it
+  c->st = h.st;             // stats_ver 0 = an older screen without stats
   c->lastMs = millis(); c->hellos++; c->used = true;
   portEXIT_CRITICAL(&s_scrMux);
 }
 
 static WebServer server(80);
+// ---- the hub's own numbers for the Board status page, worked out once a second ----
+static uint32_t s_loopN = 0;
+static struct { uint32_t loops, canFps, sentPs; uint32_t canTotal, sent, loopsAt, ms; } s_rate = {};
+static void rateStep() {
+  s_loopN++;
+  uint32_t now = millis();
+  if (now - s_rate.ms < 1000) return;
+  uint32_t dt = now - s_rate.ms; s_rate.ms = now;
+  uint32_t ct = s_canTotal, sn = s_dataSent;
+  s_rate.loops = (s_loopN - s_rate.loopsAt) * 1000 / dt; s_rate.loopsAt = s_loopN;
+  s_rate.canFps = (ct - s_rate.canTotal) * 1000 / dt; s_rate.canTotal = ct;
+  s_rate.sentPs = (sn - s_rate.sent) * 1000 / dt; s_rate.sent = sn;
+}
+
 // ---- the hub's own Wi-Fi network (hub_wifi.h, Setup page) ----
 static ApCfg s_ap;
 static bool s_apOn = false;
@@ -1155,6 +1172,37 @@ static void setupWeb() {
     if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
     server.send(200, "text/plain", r);
   });
+  server.on("/boards", HTTP_GET, []() { server.send_P(200, "text/html", BOARDS_HTML, strlen_P(BOARDS_HTML)); });
+  server.on("/boards.json", HTTP_GET, []() {   // every board's numbers: the hub's own, then each screen from its hello
+    uint8_t cpu[2]; cpu_load_pct(cpu);
+    twai_status_info_t ts; bool canOk = twai_get_status_info(&ts) == ESP_OK;
+    const char *canState = !canOk ? "off" : ts.state == TWAI_STATE_RUNNING ? "running" : ts.state == TWAI_STATE_BUS_OFF ? "bus off" : ts.state == TWAI_STATE_RECOVERING ? "recovering" : "stopped";
+    char t[600];
+    snprintf(t, sizeof t, "{\"hub\":{\"name\":\"Hub\",\"build\":%d,\"ip\":\"%s\",\"uptime\":%lu,\"mhz\":%lu,\"cpu0\":%u,\"cpu1\":%u,\"heap\":%u,\"heapMin\":%u,\"heapBig\":%u,"
+             "\"temp\":%d,\"rssi\":%d,\"loops\":%lu,\"canFps\":%lu,\"canState\":\"%s\",\"canRxMissed\":%lu,\"canBusErr\":%lu,\"canTxFail\":%lu,\"sentPs\":%lu,\"apClients\":%d},\"screens\":[",
+             INPUT_BUILD, (s_wifiUp ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), (unsigned long)(millis() / 1000), (unsigned long)getCpuFrequencyMhz(), cpu[0], cpu[1],
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024), (int)temperatureRead(), s_wifiUp ? (int)WiFi.RSSI() : 0,
+             (unsigned long)s_rate.loops, (unsigned long)s_rate.canFps, canState, canOk ? (unsigned long)ts.rx_missed_count : 0ul, canOk ? (unsigned long)ts.bus_error_count : 0ul,
+             canOk ? (unsigned long)ts.tx_failed_count : 0ul, (unsigned long)s_rate.sentPs, s_apOn ? WiFi.softAPgetStationNum() : 0);
+    String j = t;
+    ScreenSlot copy[SCREEN_MAX];
+    portENTER_CRITICAL(&s_scrMux); memcpy(copy, s_screens, sizeof copy); portEXIT_CRITICAL(&s_scrMux);
+    bool first = true;
+    for (int i = 0; i < SCREEN_MAX; i++) {
+      const ScreenSlot &c = copy[i];
+      if (!c.used) continue;
+      const HelloStats &st = c.st;
+      IPAddress ip(c.ip);
+      snprintf(t, sizeof t, "%s{\"name\":\"%s\",\"build\":%u,\"ip\":\"%s\",\"age\":%lu,\"online\":%s,\"uptime\":%lu,\"stats\":%s,\"fps\":%u,\"draw\":%u,\"cpu0\":%u,\"cpu1\":%u,"
+               "\"heap\":%u,\"heapMin\":%u,\"heapBig\":%u,\"psram\":%u,\"temp\":%d,\"rssi\":%d,\"rxPs\":%u,\"rxAge\":%d,\"logging\":%s,\"mhz\":%u}",
+               first ? "" : ",", c.name, c.build, ip.toString().c_str(), (unsigned long)(millis() - c.lastMs), millis() - c.lastMs < SCREEN_OFFLINE_MS ? "true" : "false",
+               (unsigned long)c.uptime, st.stats_ver ? "true" : "false", st.fps, st.draw_pct, st.cpu0, st.cpu1, st.heap_kb, st.heap_min_kb, st.heap_big_kb, st.psram_kb,
+               st.temp_c, st.rssi, st.rx_pps, st.rx_age_ds == 0xFFFF ? -1 : (int)st.rx_age_ds, st.logging ? "true" : "false", st.cpu_mhz_4 * 4);
+      j += t; first = false;
+    }
+    server.send(200, "application/json", j + "]}");
+  });
   server.on("/wifi.json", HTTP_GET, []() {   // never sends the password
     String j = "{\"home\":"; j += s_wifiUp ? "true" : "false";
     j += ",\"homeSsid\":\""; j += WIFI_SSID; j += "\",\"ip\":\""; j += s_wifiUp ? WiFi.localIP().toString() : String("");
@@ -1645,6 +1693,7 @@ void setup() {
   tzLoad();      // time zone for the GPS clock
   oledLoad();    // OLED warning panel
   inputsLoad();  // configurable inputs
+  cpu_load_begin();   // idle counters per core (Board status page)
   shiftLoad();   // shift light
   buttonsLoad(); // buttons (after the inputs: the first start on hub 53 moves button inputs over)
   outputsLoad(); // configurable outputs
@@ -1672,6 +1721,7 @@ void setup() {
 }
 
 void loop() {
+  rateStep();
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
   { static uint8_t told = 0;   // own network on: say so on the screens, once they are up
     if (s_apOn && told < 2 && millis() > 15000u + told * 2500u) {
