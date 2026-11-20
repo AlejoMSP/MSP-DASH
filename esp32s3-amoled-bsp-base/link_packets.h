@@ -60,6 +60,22 @@ typedef struct __attribute__((packed)) {
   uint8_t cpu_mhz_4;                 // CPU clock / 4
 } HelloStats;
 #define HELLO_STATS_VER 1
+
+// The hub's own Wi-Fi network (hub 61 / build 223): while it runs, the hub tells the screens its name and password
+// every 10 s, so a screen that does not find the home network joins it and its pages load in the car too.
+// Sent in the clear like every ESP-NOW packet: anyone in radio range could read the password.
+#define HUBNET_MAGIC 0x4D535731u   // "MSW1"
+#define HUBNET_MS 10000
+#define HUBNET_CHANNEL 1           // the car channel: the hub's network always runs there away from home
+typedef struct __attribute__((packed)) { uint32_t magic; char ssid[33]; char pass[65]; } HubNetPacket;
+// The screen's address on the hub's network: 192.168.4.<the last number of its home address>, so Left / Center /
+// Right keep their numbers (.201 / .202 / .203). 0 = no home address set: ask the hub (DHCP).
+static inline int hubnet_host(const char *homeIp) {
+  const char *dot = strrchr(homeIp, '.');
+  if (!dot || !dot[1]) return 0;
+  int v = 0; for (const char *q = dot + 1; *q; q++) { if (*q < '0' || *q > '9') return 0; v = v * 10 + (*q - '0'); if (v > 255) return 0; }
+  return v >= 2 && v <= 254 ? v : 0;
+}
 typedef struct __attribute__((packed)) { uint32_t magic; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN]; uint32_t uptime_s; HelloStats st; } HelloPacket;
 
 // Shift light (LINK_CMD_SHIFT): where is this screen in the hub's left-to-right list ("Left,Center,Right")? -1 = not in it.

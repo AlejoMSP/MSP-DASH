@@ -54,7 +54,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 60
+#define INPUT_BUILD 61
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -1672,7 +1672,7 @@ void setup() {
   apLoad();
   if (ap_should_start(&s_ap, s_wifiUp)) {
     WiFi.mode(WIFI_AP_STA);
-    s_apOn = WiFi.softAP(s_ap.ssid, s_ap.pass, s_wifiUp ? WiFi.channel() : CAR_CHANNEL, 0, 4);
+    s_apOn = WiFi.softAP(s_ap.ssid, s_ap.pass, s_wifiUp ? WiFi.channel() : CAR_CHANNEL, 0, 8);   // 3 screens + phones and a laptop
     Serial.printf("Own Wi-Fi \"%s\": %s, %s\n", s_ap.ssid, s_apOn ? "on" : "FAILED", WiFi.softAPIP().toString().c_str());
   }
   if (!s_wifiUp && !s_apOn) {   // nothing up: park on the car channel by hand
@@ -1723,6 +1723,13 @@ void setup() {
 void loop() {
   rateStep();
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
+  { static uint32_t lastNet = 0;   // own network on: tell the screens its name and password, so they join it in the car
+    if (s_apOn && millis() - lastNet >= HUBNET_MS) {
+      lastNet = millis();
+      HubNetPacket h = {}; h.magic = HUBNET_MAGIC;
+      strncpy(h.ssid, s_ap.ssid, sizeof h.ssid - 1); strncpy(h.pass, s_ap.pass, sizeof h.pass - 1);
+      esp_now_send(BCAST, (const uint8_t *)&h, sizeof h);
+    } }
   { static uint8_t told = 0;   // own network on: say so on the screens, once they are up
     if (s_apOn && told < 2 && millis() > 15000u + told * 2500u) {
       char t[LINK_NAME_LEN + 1];

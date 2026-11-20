@@ -11,6 +11,8 @@
 #include "gauge_config.h"
 #include <Arduino.h>
 #include <Preferences.h>
+#include "wifi_config.h"   // WIFI_SSID: the home network
+#include "serial_log.h"    // RT_LOG
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
@@ -145,8 +147,47 @@ static void onHello(const esp_now_recv_info_t *info, const uint8_t *data, int le
   portEXIT_CRITICAL(&s_mux);
 }
 
+// ---- the hub's own network (HubNetPacket): saved, and joined when the home network is not around ----
+static HubNetPacket s_hubNetRx;
+static volatile bool s_hubNetNew = false;
+static char s_hubSsid[33] = "", s_hubPass[65] = "";
+static uint32_t s_hubJoinMs = 0;
+#define HUBNET_RETRY_MS 20000
+static void hubNetLoad() {
+  Preferences p; p.begin("hubnet", true);
+  String a = p.getString("ssid", ""), b = p.getString("pass", "");
+  p.end();
+  strncpy(s_hubSsid, a.c_str(), sizeof s_hubSsid - 1); strncpy(s_hubPass, b.c_str(), sizeof s_hubPass - 1);
+}
+// Not on any network, and the hub has told us its own: try to join it (on its channel only, so ESP-NOW keeps working).
+static void hubNetStep(uint32_t now) {
+  if (s_hubNetNew) {   // from the receive callback: save it here (no flash writes in the callback)
+    HubNetPacket h; portENTER_CRITICAL(&s_mux); h = s_hubNetRx; s_hubNetNew = false; portEXIT_CRITICAL(&s_mux);
+    h.ssid[32] = 0; h.pass[64] = 0;
+    if (strcmp(h.ssid, s_hubSsid) || strcmp(h.pass, s_hubPass)) {
+      strcpy(s_hubSsid, h.ssid); strcpy(s_hubPass, h.pass);
+      Preferences p; p.begin("hubnet", false); p.putString("ssid", s_hubSsid); p.putString("pass", s_hubPass); p.end();
+      s_hubJoinMs = 0;   // new details: try now
+      if (WiFi.status() == WL_CONNECTED && WiFi.SSID() != WIFI_SSID) WiFi.disconnect(false, false);   // on the hub's old one: rejoin
+    }
+  }
+  if (!s_hubSsid[0] || WiFi.status() == WL_CONNECTED) return;
+  if (s_hubJoinMs && now - s_hubJoinMs < HUBNET_RETRY_MS) return;
+  s_hubJoinMs = now ? now : 1;
+  Preferences p; p.begin("net", true); String home = p.getString("ip", ""); p.end();
+  int host = hubnet_host(home.c_str());
+  if (host) WiFi.config(IPAddress(192, 168, 4, host), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0), IPAddress(192, 168, 4, 1));
+  else WiFi.config(IPAddress((uint32_t)0), IPAddress((uint32_t)0), IPAddress((uint32_t)0));   // DHCP from the hub
+  WiFi.begin(s_hubSsid, s_hubPass, HUBNET_CHANNEL);
+  RT_LOG("Joining the hub's network \"%s\" as %s\n", s_hubSsid, host ? ("192.168.4." + String(host)).c_str() : "DHCP");
+}
+
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (handleCmd(data, len)) return;
+  if (len >= (int)sizeof(HubNetPacket) && ((const HubNetPacket *)data)->magic == HUBNET_MAGIC) {   // the hub's own network
+    portENTER_CRITICAL(&s_mux); memcpy(&s_hubNetRx, data, sizeof s_hubNetRx); s_hubNetNew = true; portEXIT_CRITICAL(&s_mux);
+    return;
+  }
   if (custom_slots_on_packet(data, len)) return;   // custom sensor names from the hub
   if (len >= (int)sizeof(TimePacket) && ((const TimePacket *)data)->magic == TIME_MAGIC) {
     const TimePacket *tp = (const TimePacket *)data; screen_clock_set(tp->utc, tp->offset_min); return;
@@ -215,6 +256,7 @@ static void clearAll(void) {   // back to "--", as when CAN has gone quiet
 void espnow_link_init(void) {
   espnow_link_is_remote();   // loads the role
   cpu_load_begin();          // idle counters per core (hello stats)
+  hubNetLoad();              // the hub's own network, if it has told us
   if (WiFi.status() != WL_CONNECTED) {
     // No network (in the car): stop the WiFi search, which hops channels and would break ESP-NOW, and park on one channel.
     WiFi.setAutoReconnect(false);
@@ -263,6 +305,7 @@ void espnow_link_loop(void) {
   }
 
   if (!s_remote) return;   // sending runs in sendTask()
+  hubNetStep(now);
 
   if (now - s_lastHelloMs >= HELLO_MS) {
     s_lastHelloMs = now;

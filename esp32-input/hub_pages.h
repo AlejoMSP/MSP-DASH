@@ -147,7 +147,7 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <div class="card" id="speed"><h3>Hub sensors and speed check</h3><div class="grid" id="sens"></div>
 <p class="note">Speed comes from rusEFI (hall sensor on the ECU). If it disagrees with the GPS at a steady speed, multiply rusEFI's speed calibration by the factor shown.</p></div>
 <div class="card" id="wifi"><details open><summary><b>Hub Wi-Fi</b> <span class="note" id="wfsum"></span></summary>
-<p class="note">Its own network for the car, where your home Wi-Fi is not around: join it from the phone and open the address shown here. The screens keep getting data either way.</p>
+<p class="note">Its own network for the car, where your home Wi-Fi is not around: join it from the phone and open the address shown here. The screens keep getting data either way, and join it too (as 192.168.4.201, .202, .203), so their pages load in the car. The hub sends them the name and password over ESP-NOW, which is not encrypted.</p>
 <div class="grid" id="wfstat"></div>
 <label>Its own network is on<select id="wfmode"></select></label>
 <div class="row"><label>Network name<input id="wfssid" maxlength="32"></label>
