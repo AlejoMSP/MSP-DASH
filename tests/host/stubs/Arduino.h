@@ -23,6 +23,7 @@ public:
   String(long v) : std::string(std::to_string(v)) {}
   String(unsigned long v) : std::string(std::to_string(v)) {}
   String(float v) : std::string(std::to_string(v)) {}
+  String(float v, int) : std::string(std::to_string(v)) {}
   String(double v) : std::string(std::to_string(v)) {}
   void trim() { size_t a = find_first_not_of(" \t\r\n"); if (a == npos) { clear(); return; } erase(0, a); erase(find_last_not_of(" \t\r\n") + 1); }
   long toInt() const { return atol(c_str()); }
@@ -38,6 +39,8 @@ public:
   bool startsWith(const String &p) const { return rfind(p, 0) == 0; }
   void replace(const char *from, const char *to) { size_t n = strlen(from), m = strlen(to), i = 0; if (!n) return; while ((i = find(from, i)) != npos) { std::string::replace(i, n, to); i += m; } }
   int indexOf(char c) const { size_t i = find(c); return i == npos ? -1 : (int)i; }
+  int indexOf(char c, int from) const { size_t i = find(c, from < 0 ? 0 : from); return i == npos ? -1 : (int)i; }
+  void toLowerCase() { for (auto &ch : *this) ch = (char)tolower((unsigned char)ch); }
   String substring(unsigned a, unsigned b = 0xFFFFFFFF) const { return String(substr(a, b == 0xFFFFFFFF ? npos : b - a)); }
 };
 inline String operator+(const char *a, const String &b) { return String(std::string(a) + std::string(b)); }
@@ -46,6 +49,8 @@ struct SerialClass { int available() { return 0; } int read() { return -1; } tem
 extern SerialClass Serial;
 struct EspClass { void restart() {} uint32_t getFreePsram() { return 0; } uint32_t getFreeHeap() { return 0; } uint32_t getMinFreeHeap() { return 0; } } extern ESP;
 inline float temperatureRead() { return 40; }
+inline bool ledcAttach(uint8_t, uint32_t, uint8_t) { return true; }
+inline bool ledcWrite(uint8_t, uint32_t) { return true; }
 inline uint32_t getCpuFrequencyMhz() { return 240; }
 uint32_t millis(); void delay(uint32_t);
 static const int HIGH = 1, LOW = 0;
