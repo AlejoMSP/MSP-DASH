@@ -57,3 +57,10 @@ once against a multimeter.
 - Screens accept ESP-NOW data from the paired hub only (MAC filter).
 - Done (hub 61): screens join the hub's own network in the car.
 - rusEFI warning / error code as text on the screens and OLED (idea from ESP32-OBD-Display).
+
+## Factory setup (planned, see docs/FACTORY_SETUP.md)
+
+1. Automatic roles and the hub flag.
+2. First-boot setup (position, home Wi-Fi; show only what exists).
+3. Factory reset without flashing (BOOT at power-up, Board settings button, serial `factory`).
+4. Settings backup (hub Backup page; per-screen export / restore).
