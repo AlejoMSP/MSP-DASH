@@ -31,7 +31,15 @@
 #include <sys/stat.h>
 #include <Update.h>
 #include <Preferences.h>
-#include "wifi_config.h" // local, git-ignored - see wifi_config.h.example
+#if __has_include("wifi_config.h")
+#include "wifi_config.h" // local, git-ignored - see wifi_config.h.example; only a fallback since the first-boot setup
+#endif
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+#endif
+#include "settings_backup.h"   // export / restore / factory reset (factory setup)
+#include "espnow_link.h"
 #include "esp_heap_caps.h"
 #include "driver/twai.h"
 #include <FFat.h>
@@ -66,6 +74,7 @@ static char *allocPostBuf(size_t n) {
 // (The page used to say "Saved" no matter what happened.)
 #define CONFIG_POST_MAX 32768  // 8 pages x 4 cells is ~16KB of JSON; 8 indicator pages x 12 lamps is ~25KB
 
+static unsigned long s_factoryAtMs = 0;  // a factory reset was asked for over the web (after the answer goes out)
 static unsigned long s_rebootAtMs = 0;   // when the /reboot request asked the board to restart (0 = no request)
 
 struct SaveResult { bool ok; char msg[128]; };
@@ -326,6 +335,7 @@ function updateLamps() {
         if (st.fps !== undefined) t += " | " + st.fps + " fps, drawing " + st.lvgl_busy + "%";
         const L = st.link;
         if (L) {
+          if (L.auto) t += " | automatic";
           t += L.role === "remote"
             ? " | Remote board, " + (L.last_ms < 0 ? "no packets yet" : L.pps + " packets/s from " + L.from) + ", ch " + L.channel
             : " | Main board, sending " + L.pps + " packets/s, ch " + L.channel;
@@ -402,6 +412,7 @@ R"rawliteral(<style>
   </style>)rawliteral" PH_OPEN
 R"rawliteral(<div class="pad">
   <h1>Gauge Configuration</h1>
+  <label style="display:flex;gap:8px;align-items:center;color:#999;font-size:13px"><input type="checkbox" style="width:auto" onchange="SHOW_ALL=this.checked;renderPages()"> Show signals with no source yet (lists show only what this system has had data for)</label>
   <div id="status"></div>
   <div id="boot">Page script has not started yet...</div>
 
@@ -459,6 +470,7 @@ R"rawliteral(
         has_warning:false, warning_threshold:0, warning_above:false, alert_fullscreen:false, history_sec:30, ref_enabled:false, ref_value:0 };
     }
 
+    var SHOW_ALL = false;   // "Show signals with no source": every signal, not just those this system has had data for
     function signalOptionsHtml(selected) {
       // Alphabetical, so a signal is always in the same place; "(live)" says which ones have data now.
       const sorted = signalActivity.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -466,6 +478,7 @@ R"rawliteral(
       for (const s of sorted) {
         if (s.id === 0 || s.flag) continue;   // ECU on/off flags belong on an indicators page, not on a gauge
         if (s.unused && s.id !== selected) continue;   // a custom slot not set up on the hub yet
+        if (s.nosrc && !SHOW_ALL && s.id !== selected) continue;   // no source on this system (no hub, no sensor)
         const liveTag = s.age_ms < 5000 ? " (live)" : (s.age_ms > 1e8 ? " (no data)" : ` (${Math.round(s.age_ms/1000)}s ago)`);
         html += `<option value="${s.id}" ${selected===s.id?"selected":""}>${s.name}${liveTag}</option>`;
       }
@@ -1300,6 +1313,42 @@ R"rawliteral(
 </html>
 )rawliteral";
 
+// First-boot setup (factory setup): where this screen goes, and the home Wi-Fi.
+static const char SETUP_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Setup</title>" PH_STYLE
+R"rawliteral(<style>
+    .card { background:#111; padding:14px 16px; border-radius:8px; margin:14px 0; }
+    .card label { display:block; margin:10px 0 4px; }
+    .card input, .card select { width:100%; box-sizing:border-box; }
+    .note { color:#999; font-size:13px; }
+    .msg { color:#7fdf7f; min-height:1em; margin-top:8px; }
+  </style>)rawliteral" PH_OPEN
+R"rawliteral(<div class="pad">
+  <h1>Setup</h1>
+  <p class="note" id="who"></p>
+  <div class="card">
+    <label>Where does this screen go?<select id="pos"><option value="">Pick one</option><option>Left</option><option>Center</option><option>Right</option><option>Single</option></select></label>
+    <p class="note">Single: the only screen. With more than one, their names set their order (shift light, buttons). A screen with the CAN wire becomes the main one by itself.</p>
+    <label>Home Wi-Fi name (optional)<input id="ssid" maxlength="32" autocomplete="off"></label>
+    <label>Home Wi-Fi password<input id="pass" type="password" maxlength="63" autocomplete="new-password"></label>
+    <p class="note">For updates and these pages at home. In the car the screens need no network; with a hub they join its own.</p>
+    <button type="button" onclick="save()">Save and restart</button>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>)rawliteral" PH_CLOSE
+R"rawliteral(
+<script>
+  fetch("/setup.json").then(r => r.json()).then(s => {
+    document.getElementById("who").textContent = (s.setup ? "New screen. " : "Set up as " + s.name + ". ") + (s.hub ? "A hub is sending data." : "No hub heard yet.");
+    if (["Left","Center","Right","Single"].includes(s.name)) document.getElementById("pos").value = s.name;
+    document.getElementById("ssid").value = s.ssid || "";
+  }).catch(() => {});
+  async function save() {
+    const m = document.getElementById("msg"), q = new URLSearchParams({ pos: document.getElementById("pos").value, ssid: document.getElementById("ssid").value, pass: document.getElementById("pass").value });
+    try { const r = await fetch("/setup/save?" + q); m.style.color = r.ok ? "#7fdf7f" : "#ff8080"; m.textContent = await r.text(); }
+    catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the screen."; }
+  }
+</script></body></html>)rawliteral";
+
 static const char SETTINGS_HTML[] PROGMEM = PH_HEAD "<title>MSP-DASH Board Settings</title>" PH_STYLE
 R"rawliteral(<style>
     .card { background:#111; padding:14px 16px; border-radius:8px; margin:14px 0; }
@@ -1343,9 +1392,23 @@ R"rawliteral(<div class="pad">
     <div class="msg" id="mNet"></div></div>
 
   <div class="card"><h2>ESP-NOW role</h2>
-    <label>This board is<select id="role"><option value="main">Main (reads CAN, sends to the others)</option><option value="remote">Remote (shows the main board's data)</option></select></label>
+    <label>This board is<select id="role"><option value="auto">Automatic (remote if a hub or another screen sends data, main if only CAN is heard)</option><option value="main">Main (reads CAN, sends to the others)</option><option value="remote">Remote (shows the main board's data)</option></select></label>
     <button type="button" onclick="reboot('/role?set=' + v('role'), 'mRole')">Save role and reboot</button>
     <div class="msg" id="mRole"></div></div>
+
+  <div class="card"><h2>Settings backup</h2>
+    <p class="note">One file with this screen's settings: pages, gauges, colours, warnings, name, logging channels, display. With a hub, its Backup page saves every board at once.</p>
+    <label class="chk"><input type="checkbox" id="bkpw"> Include Wi-Fi passwords</label>
+    <button type="button" onclick="location.href='/backup.txt?pw=' + ck('bkpw')">Export</button>
+    <label>Restore from a file<input type="file" id="bkfile" accept=".txt"></label>
+    <button type="button" onclick="restoreFile()">Restore</button>
+    <div class="msg" id="mBk"></div></div>
+
+  <div class="card"><h2>Factory reset</h2>
+    <p class="note">Erases every setting on this screen (name, role, network, pages, gauges, colours, logging channels) and restarts it into its first-boot setup. The firmware and the SD card's logs stay.
+    Without the web page: hold BOOT while powering on, and press it again when the screen asks; or type <b>factory reset</b> in the USB serial monitor.</p>
+    <button type="button" class="danger" onclick="factory()">Factory reset</button>
+    <div class="msg" id="mFac"></div></div>
 </div>)rawliteral" PH_CLOSE
 R"rawliteral(
 <script>
@@ -1357,6 +1420,21 @@ R"rawliteral(
     catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the board."; }
   }
   function reboot(url, msgId) { if (confirm("The board will save this and reboot. Continue?")) go(url, msgId); }
+  async function restoreFile() {
+    const m = document.getElementById("mBk"), f = document.getElementById("bkfile").files[0];
+    if (!f) { m.style.color = "#ff8080"; m.textContent = "Pick a file first."; return; }
+    if (!confirm("Restore " + f.name + " onto this screen? Its current settings are replaced and it restarts.")) return;
+    try { const r = await fetch("/restore", { method: "POST", headers: { "X-MSP": "1" }, body: await f.text() });
+      m.style.color = r.ok ? "#7fdf7f" : "#ff8080"; m.textContent = await r.text(); }
+    catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the board."; }
+  }
+  async function factory() {
+    if (!confirm("Factory reset this screen? Every setting is erased.")) return;
+    if (!confirm("Really? This cannot be undone (export a backup first if unsure).")) return;
+    const m = document.getElementById("mFac");
+    try { const r = await fetch("/factory", { method: "POST", headers: { "X-MSP": "1" } }); m.textContent = await r.text(); }
+    catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the board."; }
+  }
   async function saveDisplay() {
     await go("/display?sweep=" + ck("sweep") + "&demo=" + ck("demo"), "mDisp");
     await fetch("/perf?on=" + ck("perf")).catch(() => {});
@@ -1370,7 +1448,7 @@ R"rawliteral(
     const L = st.link || {};
     document.getElementById("who").textContent = (L.name || "") + " | build " + st.build + " | " + (st.ip || "");
     document.getElementById("name").value = L.name || "";
-    document.getElementById("role").value = L.role === "remote" ? "remote" : "main";
+    document.getElementById("role").value = L.auto ? "auto" : (L.role === "remote" ? "remote" : "main");
     document.getElementById("sweep").checked = st.startup_sweep !== false;
     document.getElementById("demo").checked = st.demo !== false;
     document.getElementById("perf").checked = !!st.perf_overlay;
@@ -1540,7 +1618,39 @@ static bool netLoad(IPAddress &ip, IPAddress &gw, IPAddress &mask, IPAddress &dn
   return true;
 }
 
+// ---- the home network: set in the first-boot setup (NVS "wifi"), else the one built in (wifi_config.h) ----
+static String s_homeSsid, s_homePass;
+static bool s_setupMode = false;          // no position chosen yet (new or reset board): setup network + /setup
+static char s_setupSsid[33] = "";
+#define SETUP_PASS "mspdash123"
+const char *web_monitor_home_ssid(void) { return s_homeSsid.c_str(); }
+bool web_monitor_setup_mode(void) { return s_setupMode; }
+static void homeLoad() {
+  Preferences p; p.begin("wifi", true);
+  s_homeSsid = p.getString("ssid", ""); s_homePass = p.getString("pass", "");
+  p.end();
+  if (!s_homeSsid.length()) { s_homeSsid = WIFI_SSID; s_homePass = WIFI_PASSWORD; }
+  Preferences l; l.begin("link", true); s_setupMode = !l.isKey("name"); l.end();
+}
+// The settings this board backs up: its namespaces (the Wi-Fi passwords only on request) and its gauge file.
+static const char *const BK_NS[] = { "disp", "hubnet", "link", "logchans", "net", "sdlog", "slots", "wifi", "seen" };
+static const char *const BK_SECRET[] = { "wifi", "hubnet" };
+static const char *const BK_FILES[] = { "cfg_display.json" };
+static bool bkFileWrite(const char *name, const uint8_t *d, size_t n) {
+  if (strcmp(name, "cfg_display.json")) return false;
+  FILE *f = fopen("/ffat/cfg_display.json", "wb"); if (!f) return false;
+  bool ok = fwrite(d, 1, n, f) == n; fclose(f); return ok;
+}
+// Factory reset: every setting and the gauge file gone; restarts into the first-boot setup. Keeps firmware and SD logs.
+void web_monitor_factory_reset(void) {
+  remove("/ffat/cfg_display.json");
+  bk_factory_wipe();
+  Serial.println("Factory reset done, restarting");
+  delay(200); ESP.restart();
+}
+
 void web_monitor_init(void) {
+  homeLoad();
   WiFi.mode(WIFI_STA);
   {
     IPAddress ip, gw, mask, dns;
@@ -1554,12 +1664,12 @@ void web_monitor_init(void) {
   bool homeSeen = false;
   {
     int n = WiFi.scanNetworks(false, false, false, 100);
-    for (int i = 0; i < n && !homeSeen; i++) if (WiFi.SSID(i) == WIFI_SSID) homeSeen = true;
+    for (int i = 0; i < n && !homeSeen; i++) if (s_homeSsid.length() && WiFi.SSID(i) == s_homeSsid) homeSeen = true;
     WiFi.scanDelete();
-    Serial.printf("WiFi scan: %d networks, \"%s\" %s\n", n, WIFI_SSID, homeSeen ? "found" : "not found - skipping WiFi");
+    Serial.printf("WiFi scan: %d networks, \"%s\" %s\n", n, s_homeSsid.c_str(), homeSeen ? "found" : "not found - skipping WiFi");
   }
-  if (homeSeen) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Connecting to WiFi network \"%s\"", WIFI_SSID);
+  if (homeSeen) WiFi.begin(s_homeSsid.c_str(), s_homePass.c_str());
+  Serial.printf("Connecting to WiFi network \"%s\"", s_homeSsid.c_str());
 
   unsigned long startAttempt = millis();
   while (homeSeen && WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
@@ -1576,8 +1686,77 @@ void web_monitor_init(void) {
     Serial.println("WiFi connection FAILED - web monitor will not be reachable.");
   }
 
+  // First-boot setup: its own network ("MSP-DASH-Setup-XXXX", on the car channel, or the home one's) and /setup.
+  if (s_setupMode) {
+    uint8_t mac[6]; WiFi.macAddress(mac);
+    snprintf(s_setupSsid, sizeof s_setupSsid, "MSP-DASH-Setup-%02X%02X", mac[4], mac[5]);
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(s_setupSsid, SETUP_PASS, WiFi.status() == WL_CONNECTED ? WiFi.channel() : ESPNOW_CAR_CHANNEL);
+    Serial.printf("First-boot setup: join \"%s\" (password %s), open http://192.168.4.1/setup\n", s_setupSsid, SETUP_PASS);
+  }
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (s_setupMode) { request->redirect("/setup"); return; }
     request->send_P(200, "text/html", INDEX_HTML);
+  });
+  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) { request->send_P(200, "text/html", SETUP_HTML); });
+  server.on("/setup/save", HTTP_GET, [](AsyncWebServerRequest *request) {   // position, and the home network (optional)
+    auto P = [&](const char *k) { return request->hasParam(k) ? request->getParam(k)->value() : String(""); };
+    String pos = P("pos"), ss = P("ssid"), pw = P("pass"); ss.trim();
+    if (pos != "Left" && pos != "Center" && pos != "Right" && pos != "Single") { request->send(400, "text/plain", "Pick where this screen goes"); return; }
+    if (ss.length() > 32 || pw.length() > 63 || (ss.length() && pw.length() && pw.length() < 8)) { request->send(400, "text/plain", "Network name up to 32 characters; password 8 to 63 (or none for an open network)"); return; }
+    espnow_link_set_name(pos.c_str());
+    if (ss.length()) { Preferences p; p.begin("wifi", false); p.putString("ssid", ss); p.putString("pass", pw); p.end(); }
+    request->send(200, "text/plain", "Saved. The screen restarts as " + pos + (ss.length() ? " and joins " + ss : String("")) + ".");
+    s_rebootAtMs = millis() + 1500;
+  });
+  server.on("/setup.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
+    String j = String("{\"setup\":") + (s_setupMode ? "true" : "false") + ",\"name\":\"" + nm + "\",\"ssid\":\"" + s_homeSsid + "\",\"hub\":" + (espnow_link_hub_heard() ? "true" : "false") + "}";
+    request->send(200, "application/json", j);
+  });
+  // ---- settings backup (factory setup): export as lines, restore (checked first), factory reset ----
+  server.on("/backup.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    bool pw = request->hasParam("pw") && request->getParam("pw")->value() == "1";
+    char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm);
+    String out = String("# msp-dash screen ") + nm + " build " + FW_BUILD_NUMBER + "\n";
+    out += bk_export(BK_NS, sizeof BK_NS / sizeof *BK_NS, BK_SECRET, sizeof BK_SECRET / sizeof *BK_SECRET, pw);
+    FILE *f = fopen("/ffat/cfg_display.json", "rb");
+    if (f) {
+      fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+      if (n > 0 && n < 100000) {
+        uint8_t *b = (uint8_t *)ps_malloc(n); char *h = (char *)ps_malloc(2 * n + 1);
+        if (b && h && fread(b, 1, n, f) == (size_t)n) { bk_hex(b, (int)n, h); out += "f cfg_display.json "; out += h; out += "\n"; }
+        free(b); free(h);
+      }
+      fclose(f);
+    }
+    AsyncWebServerResponse *r = request->beginResponse(200, "text/plain", out);
+    r->addHeader("Content-Disposition", String("attachment; filename=\"msp-dash-") + nm + ".txt\"");
+    request->send(r);
+  });
+  server.on("/restore", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      char *body = (char *)request->_tempObject;
+      if (!request->hasHeader("X-MSP")) { request->send(403, "text/plain", "Forbidden"); return; }
+      if (!body) { request->send(400, "text/plain", "Nothing received"); return; }
+      int bad = bk_check(body, BK_NS, sizeof BK_NS / sizeof *BK_NS, BK_FILES, 1);
+      if (bad) { request->send(400, "text/plain", "Not restored: line " + String(bad) + " is not a setting this screen knows. Nothing was changed."); return; }
+      bool ok = bk_apply(body, BK_NS, sizeof BK_NS / sizeof *BK_NS, BK_FILES, 1, bkFileWrite);
+      request->send(ok ? 200 : 500, "text/plain", ok ? "Restored. The screen restarts." : "Restored with errors; the screen restarts.");
+      s_rebootAtMs = millis() + 1500;
+    },
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (total > 400000) return;
+      if (index == 0) { request->_tempObject = ps_malloc(total + 1); }
+      char *b = (char *)request->_tempObject; if (!b) return;
+      memcpy(b + index, data, len);
+      if (index + len == total) b[total] = 0;
+    });
+  server.on("/factory", HTTP_POST, [](AsyncWebServerRequest *request) {   // POST with the X-MSP header, like /reboot
+    if (!request->hasHeader("X-MSP")) { request->send(403, "text/plain", "Forbidden"); return; }
+    request->send(200, "text/plain", "Factory reset: every setting is erased and the screen restarts into its first-boot setup.");
+    s_factoryAtMs = millis() + 1200;
   });
 
 
@@ -1645,8 +1824,8 @@ void web_monitor_init(void) {
   // Board role for the ESP-NOW link: /role?set=main or /role?set=remote, saved, then the board reboots.
   server.on("/role", HTTP_GET, [](AsyncWebServerRequest *request) {
     String r = request->hasParam("set") ? request->getParam("set")->value() : "";
-    if (r != "main" && r != "remote") { request->send(400, "text/plain", "use /role?set=main or /role?set=remote"); return; }
-    espnow_link_set_remote(r == "remote");
+    if (r != "main" && r != "remote" && r != "auto") { request->send(400, "text/plain", "use /role?set=auto, main or remote"); return; }
+    if (r == "auto") espnow_link_set_auto(); else espnow_link_set_remote(r == "remote");
     request->send(200, "text/plain", "Role set to " + r + ". Rebooting.");
     s_rebootAtMs = millis() + 800;
   });
@@ -1669,6 +1848,8 @@ void web_monitor_init(void) {
     JsonObject link = doc["link"].to<JsonObject>();
     char mac[18]; espnow_link_peer_mac(mac);
     link["role"] = espnow_link_is_remote() ? "remote" : "main";
+    link["auto"] = espnow_link_is_auto();       // no saved role: worked out at start (factory setup)
+    doc["hub"] = espnow_link_hub_heard();       // a hub is sending: the full system
     { char nm[ESPNOW_NAME_LEN + 1]; espnow_link_name(nm); link["name"] = nm; }
     link["pps"] = espnow_link_pps();
     link["last_ms"] = espnow_link_last_ms();
@@ -1761,6 +1942,7 @@ void web_monitor_init(void) {
       o["name"] = gauge_config_signal_name((SignalId)sig);
       o["age_ms"] = gauge_config_signal_age_ms((SignalId)sig);
       o["flag"] = gauge_signal_is_flag(sig);   // an ECU on/off flag: 1 or 0
+      o["nosrc"] = !gauge_config_signal_ever_seen((SignalId)sig);   // never had data on this system: hidden from the lists
       if (gauge_signal_is_custom(sig)) {        // a custom slot, set up on the hub's /custom page
         const CustomSlotInfo *in = custom_slot_info(sig - SIG_C1);
         o["custom"] = true;
@@ -2050,6 +2232,7 @@ void web_monitor_loop(void) {
       char a[20] = "", b[20] = "", c[20] = "", d[20] = "", cmd[8] = "";
       int k = sscanf(line, "%7s %19s %19s %19s %19s", cmd, a, b, c, d);
       if (k <= 0) continue;
+      if (!strcmp(cmd, "factory") && !strcmp(a, "reset")) { Serial.println("Factory reset..."); web_monitor_factory_reset(); }
       if (!strcmp(cmd, "dhcp")) { netSave("", "", "", ""); Serial.println("OK: DHCP, rebooting"); delay(100); ESP.restart(); }
       else if (!strcmp(cmd, "ip")) {
         IPAddress i, g, m, x;
@@ -2091,6 +2274,14 @@ void web_monitor_loop(void) {
     } else if (n < sizeof(line) - 1) line[n++] = ch;
   }
 
+  if (s_factoryAtMs && (long)(millis() - s_factoryAtMs) >= 0) web_monitor_factory_reset();
+  { static uint32_t last = 0; static uint8_t k = 0;   // first-boot setup: how to reach the setup page, on the screen
+    if (s_setupMode && millis() - last > 4000) {
+      last = millis(); char t[48];
+      if (k++ % 2 == 0) snprintf(t, sizeof t, "Setup: join %s", s_setupSsid); else snprintf(t, sizeof t, "Pass %s, 192.168.4.1", SETUP_PASS);
+      gauge_app_popup_ms(t, 3800);
+    } }
+  { static uint32_t last = 0; if (millis() - last > 30000) { last = millis(); gauge_config_seen_save(); } }   // signals that have a source
   if (s_rebootAtMs != 0 && (long)(now - s_rebootAtMs) >= 0) {
     Serial.println("Rebooting (requested from the web page)");
     delay(50);

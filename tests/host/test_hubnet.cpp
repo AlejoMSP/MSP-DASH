@@ -16,6 +16,7 @@ int main() {
   CHECK(sizeof(HubNetPacket) == 102 && sizeof(HubNetPacket) <= 250, "packet fits one ESP-NOW frame");
   int hub = defined(slurp("../../esp32-input/esp32-input.ino"), "CAR_CHANNEL"), scr = defined(slurp("../../esp32s3-amoled-bsp-base/espnow_link.h"), "ESPNOW_CAR_CHANNEL");
   CHECK(hub == HUBNET_CHANNEL && scr == HUBNET_CHANNEL, "hub, screens and the hub's network all on the same car channel");
+  CHECK((SIG_COUNT & LINK_COUNT_FROM_HUB) == 0 && ((SIG_COUNT | LINK_COUNT_FROM_HUB) & LINK_COUNT_MASK) == SIG_COUNT, "the hub flag sits above any signal count and masks off cleanly");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

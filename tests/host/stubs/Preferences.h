@@ -28,6 +28,9 @@ public:
   float getFloat(const char *k, float def) { auto it = store().find(ns + "/" + k); return it == store().end() ? def : std::stof(it->second); }
   size_t putFloat(const char *k, float v) { store()[ns + "/" + k] = std::to_string(v); return 4; }
   size_t getBytesLength(const char *k) { auto it = store().find(ns + "/" + k); return it == store().end() ? 0 : it->second.size(); }
+  uint64_t getULong64(const char *, uint64_t d = 0) { return d; }
+  size_t putULong64(const char *, uint64_t) { return 8; }
+  bool isKey(const char *k) { return store().count(ns + "/" + k) > 0; }
   bool remove(const char *k) { return store().erase(ns + "/" + k) > 0; }
   size_t getBytes(const char *k, void *buf, size_t len) { auto it = store().find(ns + "/" + k); if (it == store().end() || it->second.size() != len) return 0; memcpy(buf, it->second.data(), len); return len; }
   size_t putBytes(const char *k, const void *buf, size_t len) { store()[ns + "/" + k] = std::string((const char *)buf, len); return len; }

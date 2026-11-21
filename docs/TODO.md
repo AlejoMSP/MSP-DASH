@@ -58,7 +58,7 @@ once against a multimeter.
 - Done (hub 61): screens join the hub's own network in the car.
 - rusEFI warning / error code as text on the screens and OLED (idea from ESP32-OBD-Display).
 
-## Factory setup (planned, see docs/FACTORY_SETUP.md)
+## Factory setup (built in hub 62 / build 226, see docs/FACTORY_SETUP.md)
 
 1. Automatic roles and the hub flag.
 2. First-boot setup (position, home Wi-Fi; show only what exists).

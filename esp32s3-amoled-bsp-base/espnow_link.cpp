@@ -11,7 +11,7 @@
 #include "gauge_config.h"
 #include <Arduino.h>
 #include <Preferences.h>
-#include "wifi_config.h"   // WIFI_SSID: the home network
+#include "web_monitor.h"   // the home network's name
 #include "serial_log.h"    // RT_LOG
 #include <WiFi.h>
 #include <esp_now.h>
@@ -33,6 +33,8 @@ static uint32_t s_lastHelloMs = 0;
 
 
 static bool s_remote = false;
+static bool s_auto = false;              // no role saved (new or reset board): works it out at start (factory setup)
+static volatile uint32_t s_hubMs = 0;    // last data packet flagged "from a hub"
 static bool s_up = false;
 static uint16_t s_seq = 0;
 static uint32_t s_ppsWindowMs = 0, s_ppsCount = 0, s_pps = 0;
@@ -168,7 +170,7 @@ static void hubNetStep(uint32_t now) {
       strcpy(s_hubSsid, h.ssid); strcpy(s_hubPass, h.pass);
       Preferences p; p.begin("hubnet", false); p.putString("ssid", s_hubSsid); p.putString("pass", s_hubPass); p.end();
       s_hubJoinMs = 0;   // new details: try now
-      if (WiFi.status() == WL_CONNECTED && WiFi.SSID() != WIFI_SSID) WiFi.disconnect(false, false);   // on the hub's old one: rejoin
+      if (WiFi.status() == WL_CONNECTED && WiFi.SSID() != web_monitor_home_ssid()) WiFi.disconnect(false, false);   // on the hub's old one: rejoin
     }
   }
   if (!s_hubSsid[0] || WiFi.status() == WL_CONNECTED) return;
@@ -205,7 +207,9 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
 // Writes the received values exactly the way the CAN decoder would.
 static void applyPacket(const LinkPacket *p) {
   if (p->has_mask & LINK_MASK_SIMULATED) sim_note_remote();   // the hub's simulator is running: show SIMULATED, do not log
-  int n = p->count < SIG_COUNT ? p->count : SIG_COUNT;
+  if (p->count & LINK_COUNT_FROM_HUB) s_hubMs = millis();
+  int cnt = p->count & LINK_COUNT_MASK;
+  int n = cnt < SIG_COUNT ? cnt : SIG_COUNT;
   #define PUT(sig, var, has) if (sig < n && (p->has_mask >> sig & 1ull)) { var = p->v[sig]; has = true; gauge_config_mark_signal_active((SignalId)(sig)); }
   PUT(SIG_RPM, g_rpm, g_rpm_has_data)
   PUT(SIG_CLT, g_clt_f, g_clt_has_data)
@@ -336,17 +340,37 @@ void espnow_link_loop(void) {
   }
 }
 
+// No role saved = automatic: listen as a remote; becomes main only if its own CAN bus has traffic and nobody sends data.
 bool espnow_link_is_remote(void) {
   static bool loaded = false;
-  if (!loaded) { Preferences pr; pr.begin("link", true); s_remote = pr.getBool("remote", false); pr.end(); loaded = true; }
+  if (!loaded) {
+    Preferences pr; pr.begin("link", true);
+    s_auto = !pr.isKey("remote");
+    s_remote = s_auto ? true : pr.getBool("remote", false);
+    pr.end(); loaded = true;
+  }
   return s_remote;
 }
+bool espnow_link_is_auto(void) { espnow_link_is_remote(); return s_auto; }
+bool espnow_link_any_rx(void) { return s_everRx; }
+bool espnow_link_hub_heard(void) { return s_hubMs && millis() - s_hubMs < 5000; }
 
 void espnow_link_set_remote(bool remote) {
   Preferences pr;
   pr.begin("link", false);
   pr.putBool("remote", remote);
   pr.end();
+}
+void espnow_link_set_auto(void) { Preferences pr; pr.begin("link", false); pr.remove("remote"); pr.end(); }
+
+// Automatic role, decided: nothing from other boards but CAN on this one. Switch to main without a restart.
+void espnow_link_become_main(void) {
+  if (!s_remote) return;
+  s_remote = false;
+  if (!s_up) return;
+  esp_now_register_recv_cb(onHello);
+  xTaskCreatePinnedToCore(sendTask, "espnow_tx", 4096, NULL, 2, NULL, 0);
+  Serial.println("Automatic role: CAN heard and no other board: this screen is MAIN");
 }
 
 uint32_t espnow_link_pps(void) { return s_pps; }

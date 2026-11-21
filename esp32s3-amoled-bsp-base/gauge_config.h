@@ -245,6 +245,8 @@ bool gauge_config_signal_has_data(SignalId sig);
 // the reference screenshots) - call from the CAN frame handlers
 // whenever a signal's value actually gets updated. ----
 void gauge_config_mark_signal_active(SignalId sig);
+bool gauge_config_signal_ever_seen(SignalId sig);   // had data at least once on this system (saved)
+void gauge_config_seen_save(void);                  // keep the list (call now and then)
 
 // Milliseconds since this signal was last updated (very large if never
 // seen) - lower means "more active/live" for sorting purposes.

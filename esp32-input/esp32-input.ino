@@ -12,6 +12,7 @@
 
 #include "hub_pins.h"         // every GPIO the hub uses: roles, defaults, what each GPIO can do (docs/HUB_PINS.md)
 #include "hub_inputs.h"       // configurable inputs: switches, analog sensors (Inputs page)
+#include "settings_backup.h"   // export / restore / factory reset (Backup page)
 #include "cpu_load.h"         // busy % per core (Board status page)
 #include "hub_wifi.h"         // the hub's own Wi-Fi network for the car (Setup page)
 #include "shift_light.h"      // staged shift light across the screens (Setup page)
@@ -54,7 +55,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 61
+#define INPUT_BUILD 62
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -216,6 +217,11 @@ static void rateStep() {
   s_rate.canFps = (ct - s_rate.canTotal) * 1000 / dt; s_rate.canTotal = ct;
   s_rate.sentPs = (sn - s_rate.sent) * 1000 / dt; s_rate.sent = sn;
 }
+
+// ---- settings backup and factory reset (settings_backup.h) ----
+static const char *const HUB_BK_NS[] = { "ap", "bri", "btncfg", "buttons", "imu", "inputs", "oled", "opages", "outputs", "pins", "rf", "shift", "slots", "time" };
+static const char *const HUB_BK_SECRET[] = { "ap" };   // its Wi-Fi password: only with "include passwords"
+static void hubFactoryReset() { bk_factory_wipe(); Serial.println("Factory reset done, restarting"); delay(200); ESP.restart(); }
 
 // ---- the hub's own Wi-Fi network (hub_wifi.h, Setup page) ----
 static ApCfg s_ap;
@@ -1172,6 +1178,30 @@ static void setupWeb() {
     if (a == BA_RACE) r = s_raceOn ? "Race mode on" : "Race mode off";
     server.send(200, "text/plain", r);
   });
+  // ---- settings backup and factory reset (factory setup) ----
+  server.on("/backup", HTTP_GET, []() { server.send_P(200, "text/html", BACKUP_HTML, strlen_P(BACKUP_HTML)); });
+  server.on("/backup.txt", HTTP_GET, []() {
+    String out = String("# msp-dash hub build ") + INPUT_BUILD + "\n";
+    out += bk_export(HUB_BK_NS, sizeof HUB_BK_NS / sizeof *HUB_BK_NS, HUB_BK_SECRET, 1, server.arg("pw") == "1");
+    server.sendHeader("Content-Disposition", "attachment; filename=\"msp-dash-hub.txt\"");
+    server.send(200, "text/plain", out);
+  });
+  server.on("/restore", HTTP_POST, []() {
+    String body = server.arg("plain");
+    if (!body.length()) { server.send(400, "text/plain", "Nothing received"); return; }
+    int bad = bk_check(body.c_str(), HUB_BK_NS, sizeof HUB_BK_NS / sizeof *HUB_BK_NS, NULL, 0);
+    if (bad) { server.send(400, "text/plain", "Not restored: line " + String(bad) + " is not a setting this hub knows. Nothing was changed."); return; }
+    char *b = strdup(body.c_str());
+    bool ok = b && bk_apply(b, HUB_BK_NS, sizeof HUB_BK_NS / sizeof *HUB_BK_NS, NULL, 0, NULL);
+    free(b);
+    server.send(ok ? 200 : 500, "text/plain", ok ? "Restored. The hub restarts." : "Restored with errors; the hub restarts.");
+    delay(500); ESP.restart();
+  });
+  server.on("/factory", HTTP_POST, []() {
+    if (server.arg("confirm") != "yes") { server.send(400, "text/plain", "Not confirmed"); return; }
+    server.send(200, "text/plain", "Factory reset: every hub setting is erased and the hub restarts.");
+    delay(500); hubFactoryReset();
+  });
   server.on("/boards", HTTP_GET, []() { server.send_P(200, "text/html", BOARDS_HTML, strlen_P(BOARDS_HTML)); });
   server.on("/boards.json", HTTP_GET, []() {   // every board's numbers: the hub's own, then each screen from its hello
     uint8_t cpu[2]; cpu_load_pct(cpu);
@@ -1630,7 +1660,7 @@ static void setupWeb() {
 static void dataTask(void *) {
   uint16_t seq = 0;
   for (;;) {
-    LinkPacket p; p.magic = PKT_MAGIC; p.seq = seq++; p.count = SIG_COUNT; p.has_mask = 0;
+    LinkPacket p; p.magic = PKT_MAGIC; p.seq = seq++; p.count = SIG_COUNT | LINK_COUNT_FROM_HUB; p.has_mask = 0;   // "from a hub" flag (factory setup)
     for (int i = 0; i < SIG_COUNT; i++) {
       bool has = i != SIG_NONE && gauge_config_signal_has_data((SignalId)i);
       p.v[i] = has ? gauge_config_signal_value((SignalId)i) : 0.0f;
@@ -1720,8 +1750,40 @@ void setup() {
   if (s_wifiUp) setupWeb();
 }
 
+// Factory reset from the hub's BOOT button (GPIO 0): in the first 15 s after power-up hold it 5 s, then press again
+// within 10 s (the screens and the serial port ask). Skipped if GPIO 0 is given to an input or button.
+static int s_facState = 0; static uint32_t s_facT = 0;
+static void hubFactoryButton() {
+  int &state = s_facState; uint32_t &t = s_facT;
+  if (state == 9) return;
+  uint32_t now = millis();
+  if (state == 0 && (now > 15000 || pinUser(PIN_BOOT_BTN, -1).length())) { state = 9; return; }
+  if (state == 0) pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
+  bool down = digitalRead(PIN_BOOT_BTN) == LOW;
+  switch (state) {
+    case 0: if (down) { state = 1; t = now; } break;
+    case 1: if (!down) { state = 0; break; }
+            if (now - t >= 5000) { state = 2; Serial.println("Factory reset? Let go of BOOT, then press it again within 10 s"); sendCmd(LINK_CMD_POPUP, 0, "Hub reset? Press BOOT"); } break;
+    case 2: if (!down) { state = 3; t = now; } break;
+    case 3: if (now - t > 10000) { Serial.println("Factory reset cancelled"); sendCmd(LINK_CMD_POPUP, 0, "Hub reset cancelled"); state = 9; }
+            else if (down && now - t > 300) { sendCmd(LINK_CMD_POPUP, 0, "Hub factory reset"); hubFactoryReset(); }
+            break;
+  }
+}
+static char s_serLine[32]; static uint8_t s_serN = 0;
+static void hubSerial() {   // USB serial: "factory reset"
+  char *line = s_serLine; uint8_t &n = s_serN;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') { line[n] = 0; n = 0; if (!strcmp(line, "factory reset")) { Serial.println("Factory reset..."); hubFactoryReset(); } }
+    else if (n < sizeof s_serLine - 1) line[n++] = c;
+  }
+}
+
 void loop() {
   rateStep();
+  hubFactoryButton();
+  hubSerial();
   { static uint32_t lastBtn = 0; if (millis() - lastBtn >= 10) { lastBtn = millis(); handleButtons(); } }
   { static uint32_t lastNet = 0;   // own network on: tell the screens its name and password, so they join it in the car
     if (s_apOn && millis() - lastNet >= HUBNET_MS) {

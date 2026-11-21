@@ -57,6 +57,58 @@
 #define CAN_RX_PIN GPIO_NUM_44
 #define CAN_BITRATE TWAI_TIMING_CONFIG_500KBITS()
 
+// ---- automatic role (factory setup): a board with no saved role listens to its own CAN bus (listen-only, sends
+// nothing) and to ESP-NOW. Data from a hub or another screen: stays remote and stops listening to CAN. CAN traffic and
+// nobody else: becomes main. Re-checked all the time until one of the two happens (the ECU may power up later).
+static bool s_canListening = false, s_autoDone = false;
+static void canListen() {
+  twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_LISTEN_ONLY);
+  twai_timing_config_t t = CAN_BITRATE;
+  twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+  s_canListening = twai_driver_install(&g, &t, &f) == ESP_OK && twai_start() == ESP_OK;
+}
+static void autoRoleStep() {
+  if (s_autoDone || !espnow_link_is_auto()) return;
+  if (espnow_link_any_rx()) {   // a hub or a main screen is sending: remote it is
+    if (s_canListening) { twai_stop(); twai_driver_uninstall(); s_canListening = false; }
+    s_autoDone = true; Serial.println("Automatic role: data from another board: this screen is REMOTE");
+    return;
+  }
+  twai_message_t m;
+  if (s_canListening && twai_receive(&m, 0) == ESP_OK) {   // CAN here and nobody sending: main
+    twai_stop(); twai_driver_uninstall(); s_canListening = false;
+    twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+    g.rx_queue_len = 64;
+    twai_timing_config_t t = CAN_BITRATE;
+    twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    if (twai_driver_install(&g, &t, &f) == ESP_OK && twai_start() == ESP_OK) can_start_task();
+    espnow_link_become_main();
+    s_autoDone = true;
+  }
+}
+
+// ---- factory reset from the BOOT button (factory setup): in the first 15 s after power-up, hold BOOT for 5 s; the
+// screen asks; let go and press BOOT again within 10 s. (BOOT cannot be held WHILE powering on: the chip would start
+// its USB loader instead of this firmware.) Any other time BOOT is the page button as before.
+static void factoryButtonStep() {
+  static int state = 0; static uint32_t t = 0; static int shown = -1;
+  if (state == 9) return;
+  uint32_t now = millis(); bool down = digitalRead(BOOT_BTN_PIN) == LOW;
+  switch (state) {
+    case 0: if (now > 15000) { state = 9; break; } if (down) { state = 1; t = now; } break;
+    case 1: if (!down) { state = 0; break; }
+            if (now - t >= 5000) { state = 2; gauge_app_popup_ms("Factory reset? Let go, then press BOOT again", 10000); } break;
+    case 2: if (!down) { state = 3; t = now; } break;
+    case 3: {
+      int left = 10 - (int)((now - t) / 1000);
+      if (left != shown) { shown = left; char m[48]; snprintf(m, sizeof m, "Factory reset? Press BOOT (%d s)", left); gauge_app_popup_ms(m, 1500); }
+      if (now - t > 10000) { gauge_app_popup("Factory reset cancelled"); state = 9; }
+      else if (down && now - t > 300) { gauge_app_popup("Factory reset..."); delay(600); web_monitor_factory_reset(); }
+      break;
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -74,6 +126,7 @@ void setup()
   lcd_lvgl_Init();
 
   // --- CAN init (main board only; a remote board takes its values over ESP-NOW) ---
+  if (espnow_link_is_auto()) canListen();   // automatic role: only listen for now (autoRoleStep decides)
   if (!espnow_link_is_remote()) {
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   g_config.rx_queue_len = 64; // default is 5 - this bus runs several hundred frames/sec, so give the driver room to buffer
@@ -101,6 +154,8 @@ void loop()
   // slow, non-time-critical work, so it can safely block on SD writes
   // without ever delaying a CAN frame.
   checkPageButton();
+  factoryButtonStep();
+  autoRoleStep();
   web_monitor_loop();
   sim_loop();
   espnow_link_loop();

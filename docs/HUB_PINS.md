@@ -38,6 +38,12 @@ use. Every other GPIO is free for buttons, inputs (switches, analog sensors), ou
 Free GPIOs with the defaults: 0 (R19, the BOOT button: not LOW at power-up), 2 (R20), 12 (L18, not HIGH at power-up),
 25 and 26 (unless the page buttons below are on them).
 
+## BOOT button (factory reset)
+
+The DevKitC's BOOT button is GPIO 0 (R19). In the first 15 s after power-up, holding it 5 s and pressing it again
+within 10 s erases every hub setting (the screens and the serial port ask first). Skipped if GPIO 0 is given to an
+input or a button.
+
 ## Default buttons (Buttons page)
 
 Since hub 53 the two page buttons are ordinary buttons on the **Buttons** page, not fixed functions: any button can sit on

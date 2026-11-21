@@ -15,6 +15,9 @@ void web_monitor_init(void);
 // Call every loop() iteration - handles periodic broadcast of current
 // gauge values to any connected web clients over WebSocket.
 void web_monitor_loop(void);
+const char *web_monitor_home_ssid(void);   // the home network (first-boot setup, else wifi_config.h)
+bool web_monitor_setup_mode(void);         // no position chosen yet: first-boot setup running
+void web_monitor_factory_reset(void);      // erase every setting and restart (keeps firmware and SD logs)
 
 // Call for EVERY received CAN frame (recognized or not) - tracks it in
 // the raw CAN monitor table (ID, latest raw bytes, frequency), viewable

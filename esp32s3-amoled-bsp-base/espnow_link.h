@@ -15,6 +15,11 @@ extern "C" {
 void espnow_link_init(void);            // call after WiFi has connected or given up
 void espnow_link_loop(void);            // call from loop()
 bool espnow_link_is_remote(void);
+bool espnow_link_is_auto(void);       // no role saved: decides by itself (factory setup)
+bool espnow_link_any_rx(void);        // data heard from another board since start
+bool espnow_link_hub_heard(void);     // a hub's data within the last 5 s
+void espnow_link_set_auto(void);      // forget the saved role: automatic from the next start
+void espnow_link_become_main(void);   // automatic role decided main: start sending (no restart)
 void espnow_link_set_remote(bool remote); // saved on the board; takes effect after a reboot
 uint32_t espnow_link_pps(void);          // packets per second, sent (main) or received (remote)
 int32_t espnow_link_last_ms(void);       // remote: ms since the last packet, -1 = never

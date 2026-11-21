@@ -49,6 +49,7 @@ struct SerialClass { int available() { return 0; } int read() { return -1; } tem
 extern SerialClass Serial;
 struct EspClass { void restart() {} uint32_t getFreePsram() { return 0; } uint32_t getFreeHeap() { return 0; } uint32_t getMinFreeHeap() { return 0; } } extern ESP;
 inline float temperatureRead() { return 40; }
+inline void *ps_malloc(size_t n) { return malloc(n); }
 inline bool ledcAttach(uint8_t, uint32_t, uint8_t) { return true; }
 inline bool ledcWrite(uint8_t, uint32_t) { return true; }
 inline uint32_t getCpuFrequencyMhz() { return 240; }

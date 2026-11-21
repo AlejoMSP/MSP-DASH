@@ -9,7 +9,7 @@
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
 #define HUB_NAV_STYLE "*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{background:#000;color:#ddd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:1000px;margin:0 auto;padding:12px 16px calc(24px + env(safe-area-inset-bottom))}body.wide{max-width:none}\ninput,select,textarea{font-size:16px}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:calc(52px + env(safe-area-inset-top))!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
-#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><a href=\"/boards\">Board status</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><a href=\"/boards\">Board status</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><a href=\"/backup\">Backup</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH</title>
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="MSP-DASH">
@@ -154,7 +154,10 @@ button{margin-top:10px;padding:8px 12px;background:#4dd0e1;border:0;color:#000;b
 <label>Password (8 or more, blank = keep)<input id="wfpass" type="password" maxlength="63" autocomplete="new-password"></label></div>
 <div class="row"><button type="button" onclick="wfSave(0)">Save</button><button type="button" onclick="wfSave(1)">Save and restart</button></div>
 <span id="wfmsg" class="note"></span></details></div>
-<div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div></div>
+<div class="card" id="hub"><h3>Hub</h3><div class="grid" id="stat"></div>
+<p class="note">Factory reset erases every hub setting (buttons, inputs, outputs, pin moves, OLED, shift light, ECU maps, Wi-Fi, brightness, clock, custom sensors) and restarts it. Export a backup first (Backup page).
+Without this page: in the first 15 s after power-up hold the hub's BOOT button for 5 s, then press it again when the screens ask; or type <b>factory reset</b> in the USB serial monitor.</p>
+<button type="button" style="background:#e53935;color:#fff" onclick="facReset()">Factory reset the hub</button> <span id="facmsg" class="note"></span></div>
 <script>
 let st={};const ids=["mode","day","nmin","nmax","dlo","dhi","lon"];const $=id=>document.getElementById(id);
 const kv=(k,v)=>'<div class="kv"><b>'+k+'</b>'+v+'</div>';
@@ -188,6 +191,8 @@ async function wf(){try{const w=await (await fetch("/wifi.json")).json();
 async function wfSave(rs){if(rs&&!confirm("Restart the hub now? The screens lose data for about 20 s."))return;
  const q="mode="+$("wfmode").value+"&ssid="+encodeURIComponent($("wfssid").value)+"&pass="+encodeURIComponent($("wfpass").value)+"&restart="+rs;
  const r=await fetch("/wifi/set?"+q);$("wfmsg").textContent=await r.text();if(r.ok)$("wfpass").value="";}
+async function facReset(){if(!confirm("Factory reset the hub? Every hub setting is erased."))return;if(!confirm("Really? This cannot be undone."))return;
+ const r=await fetch("/factory",{method:"POST",body:"confirm=yes",headers:{"Content-Type":"application/x-www-form-urlencoded"}});$("facmsg").textContent=await r.text();}
 async function clk(){try{const t=await (await fetch("/time.json")).json();$("clk").textContent="| "+(t.known?t.local:"no time from the GPS yet");
 if(!clk.done){$("tzstd").value=String(t.std);$("tzdst").checked=t.dst;clk.done=1;}}catch(e){}}
 async function saveTz(){$("tzmsg").textContent=await (await fetch("/time/set?std="+$("tzstd").value+"&dst="+($("tzdst").checked?1:0))).text();}
@@ -876,4 +881,47 @@ async function load(){try{const d=await (await fetch("/boards.json")).json();
  $("boards").innerHTML=hub(d.hub)+(d.screens.length?d.screens.map(scr).join(""):'<div class="card"><p class="note">No screens heard yet.</p></div>');}
  catch(e){$("boards").innerHTML='<p class="note">Could not reach the hub</p>';}}
 load();setInterval(load,2000);
+</script></body></html>)HTML";
+
+static const char BACKUP_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Backup</title>
+<style>h2{color:#4dd0e1;margin:6px 0 10px}h3{color:#4dd0e1;margin:0 0 8px;font-size:16px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}
+button{padding:8px 14px;background:#4dd0e1;color:#000;border:0;border-radius:6px}select,input{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #222;text-align:left;font-size:14px}th{color:#4dd0e1;font-weight:normal}#msg{min-height:1.3em;color:#4dd0e1}#msg.bad{color:#ff6b6b}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Backup</h2>
+<div id="msg"></div>
+<div class="card"><h3>Export</h3>
+<p class="note">One file with every board's settings: the hub and each screen that is online. Keep it somewhere safe; it restores a board after a factory reset, or copies one screen's layout to another.</p>
+<label class="note"><input type="checkbox" id="pw" style="width:auto"> Include Wi-Fi passwords</label><br><br>
+<button onclick="exportAll()">Export everything</button> <span class="note" id="exp"></span></div>
+<div class="card"><h3>Restore</h3>
+<p class="note">Pick a backup file, tick what to restore, and pick where each screen's part goes. Each board checks its part first and changes nothing if it is not right, then restarts.
+A screen's part put onto a different screen brings only its layout (pages, gauges, colours, logging channels), not its name or network.</p>
+<input type="file" id="file" accept=".json" onchange="readFile()"><div id="parts"></div></div>
+<script>
+const $=id=>document.getElementById(id);let B=null,SCR=[];
+const esc=t=>String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+function msg(t,bad){$("msg").textContent=t;$("msg").className=bad?"bad":"";}
+async function screens(){try{const d=await (await fetch("/boards.json")).json();SCR=d.screens.filter(s=>s.online&&s.ip&&s.ip!=="0.0.0.0");}catch(e){SCR=[];}return SCR;}
+async function exportAll(){msg("Collecting...");const pw=$("pw").checked?1:0,out={msp_dash_backup:1,date:new Date().toISOString(),parts:[]};
+ try{out.parts.push({board:"Hub",kind:"hub",text:await (await fetch("/backup.txt?pw="+pw)).text()});}catch(e){msg("Could not read the hub",true);return;}
+ const miss=[];for(const s of await screens()){try{const r=await fetch("http://"+s.ip+"/backup.txt?pw="+pw);if(!r.ok)throw 0;out.parts.push({board:s.name,kind:"screen",ip:s.ip,build:s.build,text:await r.text()});}catch(e){miss.push(s.name);}}
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,1)],{type:"application/json"}));
+ a.download="msp-dash-backup-"+out.date.slice(0,10)+".json";document.body.appendChild(a);a.click();a.remove();
+ $("exp").textContent=out.parts.map(p=>p.board).join(", ")+" saved"+(miss.length?"; not reached: "+miss.join(", "):"");msg(miss.length?"Saved, but some screens did not answer":"Saved",!!miss.length);}
+async function readFile(){const f=$("file").files[0];if(!f)return;try{B=JSON.parse(await f.text());if(!B.msp_dash_backup||!Array.isArray(B.parts))throw 0;}catch(e){B=null;msg("Not an MSP-DASH backup file",true);$("parts").innerHTML="";return;}
+ await screens();const opts=n=>SCR.map(s=>'<option value="'+esc(s.ip)+'"'+(s.name===n?" selected":"")+'>'+esc(s.name)+' ('+esc(s.ip)+')</option>').join("");
+ $("parts").innerHTML='<p class="note">From '+esc(B.date||"?")+'</p><table><tr><th></th><th>Part</th><th>Goes to</th></tr>'+B.parts.map((p,i)=>'<tr><td><input type="checkbox" id="c'+i+'" checked style="width:auto"></td><td>'+esc(p.board)+
+  (p.build?' <span class="note">build '+p.build+'</span>':'')+'</td><td>'+(p.kind==="hub"?"this hub":SCR.length?'<select id="t'+i+'">'+opts(p.board)+'</select>':'<span class="note">no screen online</span>')+'</td></tr>').join("")+'</table><br><button onclick="restore()">Restore the ticked parts</button>';}
+// A screen part onto another screen: its layout only (not its name, role, network or the hub's Wi-Fi details).
+const IDENT=/^n (link|net|wifi|hubnet) /;
+async function restore(){if(!B)return;if(!confirm("Restore the ticked parts? Those boards' settings are replaced and they restart."))return;
+ const res=[],order=B.parts.map((p,i)=>i).sort((a,b)=>(B.parts[a].kind==="hub")-(B.parts[b].kind==="hub"));   // screens first, the hub last
+ for(const i of order){const p=B.parts[i];if(!$("c"+i)||!$("c"+i).checked)continue;
+  try{let r;if(p.kind==="hub")r=await fetch("/restore",{method:"POST",body:p.text});
+   else{const t=$("t"+i);if(!t){res.push(p.board+": no screen to send it to");continue;}
+    const same=SCR.find(s=>s.ip===t.value&&s.name===p.board),body=same?p.text:p.text.split("\n").filter(l=>!IDENT.test(l)).join("\n");
+    r=await fetch("http://"+t.value+"/restore",{method:"POST",headers:{"X-MSP":"1"},body:body});}
+   res.push(p.board+": "+await r.text());}catch(e){res.push(p.board+": no answer");}}
+ msg(res.join(" | ")||"Nothing ticked",res.some(x=>/Not restored|no answer|errors/.test(x)));}
 </script></body></html>)HTML";

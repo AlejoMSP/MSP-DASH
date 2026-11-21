@@ -91,6 +91,7 @@ static inline void pin_map_upgrade(const uint8_t old[PIN_MAP_OLD_COUNT], uint8_t
   *btnNext = old[0]; *btnPrev = old[1];
   for (int r = 0; r < PR_COUNT; r++) map[r] = old[r + 2];
 }
+#define PIN_BOOT_BTN 0       // the DevKitC's BOOT button: factory reset (first 15 s after power-up), unless GPIO 0 is given to something
 #define PIN_BTN_NEXT_DEF 25   // the default page buttons (Buttons page): right / next on GPIO 25 (L14)
 #define PIN_BTN_PREV_DEF 26   //                                          left / previous on GPIO 26 (L15)
 // The role on a GPIO, or -1.

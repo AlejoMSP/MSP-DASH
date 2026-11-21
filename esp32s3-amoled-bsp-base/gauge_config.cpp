@@ -649,9 +649,20 @@ bool gauge_config_signal_has_data(SignalId sig) {
   return gauge_config_signal_age_ms(sig) < GAUGE_SIGNAL_STALE_MS;
 }
 
+// Every signal that has ever had data on this system (factory setup: the editor lists only these). Kept in NVS "seen".
+static uint64_t s_seenMask = 0, s_seenSaved = 0;
+static bool s_seenLoaded = false;
+static void seenLoad() { if (s_seenLoaded) return; Preferences p; p.begin("seen", true); s_seenSaved = p.getULong64("m", 0); p.end(); s_seenMask |= s_seenSaved; s_seenLoaded = true; }
 void gauge_config_mark_signal_active(SignalId sig) {
   if (sig < 0 || sig >= SIG_COUNT) return;
   s_signalLastSeenMs[sig] = millis();
+  s_seenMask |= 1ull << sig;
+}
+bool gauge_config_signal_ever_seen(SignalId sig) { seenLoad(); return sig > 0 && sig < SIG_COUNT && ((s_seenMask >> sig) & 1); }
+void gauge_config_seen_save(void) {   // from the web loop every 30 s, only when something new turned up
+  seenLoad();
+  if (s_seenMask == s_seenSaved) return;
+  Preferences p; p.begin("seen", false); p.putULong64("m", s_seenMask); p.end(); s_seenSaved = s_seenMask;
 }
 
 uint32_t gauge_config_signal_age_ms(SignalId sig) {

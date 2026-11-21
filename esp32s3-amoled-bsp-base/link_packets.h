@@ -15,6 +15,10 @@ typedef struct __attribute__((packed)) {
   uint64_t has_mask;       // bit s = signal s has data (64 bits since the custom slots, build 171)
   float v[SIG_COUNT];
 } LinkPacket;
+// count's top bit (build 226 / hub 62): set by the hub, so a screen can tell a hub's data from a main screen's.
+// Receivers read count & LINK_COUNT_MASK (older screens take min(count, SIG_COUNT), which is still right).
+#define LINK_COUNT_FROM_HUB 0x8000u
+#define LINK_COUNT_MASK 0x7FFFu
 // has_mask has 64 bits, one per signal. Past 64 signals it needs to grow, or signals would silently drop.
 static_assert(SIG_COUNT <= 64, "LinkPacket.has_mask holds 64 signals");
 static_assert(sizeof(LinkPacket) <= 250, "an ESP-NOW packet is 250 bytes at most");
