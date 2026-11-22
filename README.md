@@ -65,7 +65,7 @@ cls
 cd C:\Users\alejo\OneDrive\GIT\MSP-DASH
 git pull origin main
 copy C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_parsing.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\can_flags.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\gauge_config.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\link_packets.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\simulator.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\simulator.cpp,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\custom_slots.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\color_presets.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\button_actions.h,C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32s3-amoled-bsp-base\gps_time.h C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input\
-arduino-cli compile --clean --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio --build-path C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
+arduino-cli compile --clean --fqbn esp32:esp32:esp32:FlashFreq=40,FlashMode=dio,PartitionScheme=min_spiffs --build-path C:\esp32build-input C:\Users\alejo\OneDrive\GIT\MSP-DASH\esp32-input
 curl.exe -s -H "Expect:" -w " HTTP %{http_code}" -F "firmware=@C:\esp32build-input\esp32-input.ino.bin" http://192.168.55.204/update
 ```
 
