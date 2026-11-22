@@ -51,6 +51,7 @@ struct EspClass { void restart() {} uint32_t getFreePsram() { return 0; } uint32
 inline float temperatureRead() { return 40; }
 inline void *ps_malloc(size_t n) { return malloc(n); }
 inline bool ledcAttach(uint8_t, uint32_t, uint8_t) { return true; }
+inline bool ledcDetach(uint8_t) { return true; }
 inline bool ledcWrite(uint8_t, uint32_t) { return true; }
 inline uint32_t getCpuFrequencyMhz() { return 240; }
 uint32_t millis(); void delay(uint32_t);

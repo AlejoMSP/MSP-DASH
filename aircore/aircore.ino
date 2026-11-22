@@ -9,8 +9,9 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 2
-#define PWM_HZ 20000          // above hearing, so the coils do not whine
+#define AIRCORE_BUILD 3
+#define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
+static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 #define PWM_FULL 1023
 #define STEP_MS 5             // needle update
 #define LOST_MS 1500          // no data for this long: needles go to the start of the scale, and the hunt for the hub starts
@@ -73,20 +74,22 @@ static void defaultsFor(Gauge &g) { if (g.sig == LINK_SIG_RPM) aircore_defaults_
 static void setRole(int speedo) { G[0].name = speedo ? "speedo" : "tach"; G[0].sig = speedo ? LINK_SIG_VSS : LINK_SIG_RPM; }
 static void cfgSave(int) {
   EEPROM.write(0, AIRCORE_VERSION); EEPROM.write(1, G[0].sig == LINK_SIG_VSS ? 1 : 0);
-  EEPROM.put(4, G[0].cfg); EEPROM.commit();
+  EEPROM.put(4, G[0].cfg); EEPROM.put(40, s_pwmHz); EEPROM.commit();
 }
 static void cfgLoad() {
   EEPROM.begin(EE_SIZE);
   bool ok = EEPROM.read(0) == AIRCORE_VERSION;
   setRole(ok && EEPROM.read(1) == 1);
-  if (ok) EEPROM.get(4, G[0].cfg);
+  if (ok) { EEPROM.get(4, G[0].cfg); EEPROM.get(40, s_pwmHz); }
+  if (s_pwmHz < 100 || s_pwmHz > 40000) s_pwmHz = PWM_HZ_DEFAULT;
   if (!ok || !aircore_valid(&G[0].cfg)) defaultsFor(G[0]);
 }
 #else
-static void cfgSave(int g) { Preferences p; p.begin("aircore", false); p.putBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)); p.putUChar("ver", AIRCORE_VERSION); p.end(); }
+static void cfgSave(int g) { Preferences p; p.begin("aircore", false); p.putBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)); p.putUChar("ver", AIRCORE_VERSION); p.putULong("pwm", s_pwmHz); p.end(); }
 static void cfgLoad() {
   Preferences p; p.begin("aircore", true);
   bool ok = p.getUChar("ver", 0) == AIRCORE_VERSION;
+  s_pwmHz = p.getULong("pwm", PWM_HZ_DEFAULT); if (s_pwmHz < 100 || s_pwmHz > 40000) s_pwmHz = PWM_HZ_DEFAULT;
   for (int g = 0; g < GAUGES; g++)
     if (!ok || p.getBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)) != sizeof(AirCoreCfg) || !aircore_valid(&G[g].cfg)) defaultsFor(G[g]);
   p.end();
@@ -118,6 +121,13 @@ static void setChannel(uint8_t ch) { esp_wifi_set_promiscuous(true); esp_wifi_se
 #endif
 
 // ---- coils ----
+static void pwmApply() {   // the PWM frequency (the D1 Mini makes PWM in software: lower is steadier there)
+#if defined(ESP8266)
+  analogWriteFreq(s_pwmHz); analogWriteRange(PWM_FULL);
+#else
+  for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) { ledcDetach(G[g].pins[k]); ledcAttach(G[g].pins[k], s_pwmHz, 10); }
+#endif
+}
 static void pwmWrite(uint8_t pin, uint32_t duty) {
 #if defined(ESP8266)
   analogWrite(pin, duty);
@@ -143,7 +153,7 @@ static void sweep() {
 }
 
 static void show() {
-  Serial.printf("aircore build %d | channel %d | packets %lu | %s\n", AIRCORE_BUILD, s_ch, (unsigned long)s_rx,
+  Serial.printf("aircore build %d | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
                 millis() - s_lastRx < LOST_MS ? (s_sim ? "hub heard (SIMULATED data)" : "hub heard") : "no hub: hunting channels");
   for (int g = 0; g < GAUGES; g++) {
     const AirCoreCfg &c = G[g].cfg;
@@ -164,6 +174,7 @@ static void help() {
   Serial.println("  tach min 0 | max 8000         values at the start and end of the dial");
   Serial.println("  tach strength 0.8 | slew 720  drive (0.1-1) | fastest needle speed, deg/s");
   Serial.println("  (same for speedo)   sweep     needle(s) end to end   defaults   factory settings");
+  Serial.println("  pwm 2000                      coil PWM frequency, 100-40000 Hz (lower = steadier on the D1 Mini, may hum)");
 }
 static void command(String line) {
   line.trim(); line.toLowerCase();
@@ -172,6 +183,12 @@ static void command(String line) {
   if (line == "show") { show(); return; }
   if (line == "sweep") { sweep(); return; }
   if (line == "defaults") { for (int g = 0; g < GAUGES; g++) { defaultsFor(G[g]); cfgSave(g); } Serial.println("Factory settings back"); return; }
+  if (line.startsWith("pwm ")) {
+    long hz = line.substring(4).toInt();
+    if (hz < 100 || hz > 40000) { Serial.println("100 to 40000 Hz"); return; }
+    s_pwmHz = hz; pwmApply(); for (int g = 0; g < GAUGES; g++) cfgSave(g);
+    Serial.printf("pwm %ld Hz, saved\n", hz); return;
+  }
 #if defined(ESP8266)
   if (line == "role tach" || line == "role speedo") {
     setRole(line == "role speedo"); defaultsFor(G[0]); cfgSave(0);
@@ -199,13 +216,13 @@ void setup() {
   Serial.begin(115200);
   cfgLoad();
 #if defined(ESP8266)
-  analogWriteFreq(PWM_HZ); analogWriteRange(PWM_FULL);
+  analogWriteFreq(s_pwmHz); analogWriteRange(PWM_FULL);
   for (int k = 0; k < 4; k++) { pinMode(G[0].pins[k], OUTPUT); analogWrite(G[0].pins[k], 0); }
   WiFi.mode(WIFI_STA); WiFi.disconnect();
   setChannel(s_ch);
   if (esp_now_init() == 0) { esp_now_set_self_role(ESP_NOW_ROLE_SLAVE); esp_now_register_recv_cb(onRecv); } else Serial.println("ESP-NOW start FAILED");
 #else
-  for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) ledcAttach(G[g].pins[k], PWM_HZ, 10);   // 8 pins = the S2's 8 PWM channels
+  for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) ledcAttach(G[g].pins[k], s_pwmHz, 10);   // 8 pins = the S2's 8 PWM channels
   WiFi.mode(WIFI_STA); WiFi.disconnect(false, false);
   setChannel(s_ch);
   if (esp_now_init() == ESP_OK) esp_now_register_recv_cb(onRecv); else Serial.println("ESP-NOW start FAILED");

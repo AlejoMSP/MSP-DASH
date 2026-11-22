@@ -29,6 +29,8 @@ public:
   size_t putFloat(const char *k, float v) { store()[ns + "/" + k] = std::to_string(v); return 4; }
   size_t getBytesLength(const char *k) { auto it = store().find(ns + "/" + k); return it == store().end() ? 0 : it->second.size(); }
   uint64_t getULong64(const char *, uint64_t d = 0) { return d; }
+  uint32_t getULong(const char *, uint32_t d = 0) { return d; }
+  size_t putULong(const char *, uint32_t) { return 4; }
   size_t putULong64(const char *, uint64_t) { return 8; }
   bool isKey(const char *k) { return store().count(ns + "/" + k) > 0; }
   bool remove(const char *k) { return store().erase(ns + "/" + k) > 0; }
