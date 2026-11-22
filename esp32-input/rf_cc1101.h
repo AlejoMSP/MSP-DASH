@@ -11,6 +11,8 @@
 // every millisecond; while it is above the threshold the edges are collected into a "burst". Each burst is turned
 // into bits and Manchester bytes (rf_decode.h) and kept for the /rf page.
 #pragma once
+#include "esp_timer.h"
+#include "soc/gpio_reg.h"
 #include "hub_pins.h"
 #include <Arduino.h>
 #include <SPI.h>
@@ -71,14 +73,26 @@ static volatile uint32_t s_rfSpiEndUs = 0;
 static volatile uint32_t s_rfEdgeUs[RF_EDGE_RING];
 static volatile uint8_t s_rfEdgeLv[RF_EDGE_RING];
 static volatile uint32_t s_rfEdgeHead = 0;
+// IRAM-safe throughout (no digitalRead / micros, which live in flash): esp_timer and the GPIO input register.
+static volatile uint8_t s_rfIsrPin = 255;
 static void IRAM_ATTR rfEdgeIsr() {
-  uint32_t now = micros();
+  uint32_t now = (uint32_t)esp_timer_get_time();
   if (s_rfSpiBusy || now - s_rfSpiEndUs < RF_SPI_QUIET_US) return;
   uint32_t h = s_rfEdgeHead;
+  uint8_t pin = s_rfIsrPin;
+  uint32_t lv = pin < 32 ? (REG_READ(GPIO_IN_REG) >> pin) & 1 : (REG_READ(GPIO_IN1_REG) >> (pin - 32)) & 1;
   s_rfEdgeUs[h % RF_EDGE_RING] = now;
-  s_rfEdgeLv[h % RF_EDGE_RING] = (uint8_t)digitalRead(RF_GDO0);
+  s_rfEdgeLv[h % RF_EDGE_RING] = (uint8_t)lv;
   s_rfEdgeHead = h + 1;
 }
+// GDO0 carries the raw demodulated signal, so plain noise toggles it thousands of times a second. Hub 63: the
+// interrupt is only switched on while a burst is being recorded (it used to run all the time on core 0, next to
+// Wi-Fi, and on a noisy wire starved it: the task watchdog crashes in the network task, settings not saving).
+// A capture that brings more than RF_STORM_EDGES_PER_MS edges per millisecond is cut short as noise.
+#define RF_STORM_EDGES_PER_MS 60
+static volatile uint32_t s_rfStorms = 0;
+static void rfIrqOn() { s_rfIsrPin = RF_GDO0; attachInterrupt(digitalPinToInterrupt(RF_GDO0), rfEdgeIsr, CHANGE); }
+static void rfIrqOff() { detachInterrupt(digitalPinToInterrupt(RF_GDO0)); }
 
 // ---- CC1101 SPI ----
 static bool rfSelect() {
@@ -217,8 +231,8 @@ static int rfCollect(uint32_t &readTail, uint16_t *w, int n, uint32_t &prevUs, u
 // RF_CAPTURE_MS, check the strength once, and keep recording (up to RF_CAPTURE_MAX_MS) while it is still there.
 static void rfTask(void *) {
   static uint16_t w[RF_MAX_PULSES];
-  // Attached here so the interrupt runs on core 0: the DHT22 read switches interrupts off on core 1 for ~5 ms.
-  attachInterrupt(digitalPinToInterrupt(RF_GDO0), rfEdgeIsr, CHANGE);
+  // The interrupt is attached from this task (core 0: the DHT22 read switches interrupts off on core 1 for ~5 ms),
+  // and only while recording (rfIrqOn / rfIrqOff).
   for (;;) {
     vTaskDelay(1);
     if (s_rfReconfig) { s_rfReconfig = false; rfConfigure(); }
@@ -226,13 +240,17 @@ static void rfTask(void *) {
     rfTrack(rssi);
     int thr = rfThreshold(); s_rfActiveThr = thr;
     if (rssi < thr) continue;
-    // a signal: record it with the SPI bus quiet
-    uint32_t readTail = s_rfEdgeHead > 64 ? s_rfEdgeHead - 64 : 0;      // keep the last few edges: the start of the preamble
+    // a signal: record it with the SPI bus quiet (the interrupt only runs from here to the end of the burst)
+    uint32_t readTail = s_rfEdgeHead;
+    rfIrqOn();
     uint32_t prevUs = 0; uint8_t firstLevel = 0, lastLevel = 0;
     int n = 0, peak = rssi;
+    bool storm = false;
     uint32_t start = millis();
     for (;;) {
+      uint32_t headBefore = s_rfEdgeHead;
       vTaskDelay(pdMS_TO_TICKS(RF_CAPTURE_MS));
+      if (s_rfEdgeHead - headBefore > (uint32_t)RF_STORM_EDGES_PER_MS * RF_CAPTURE_MS) { s_rfStorms++; storm = true; break; }   // noise, not a sensor
       n = rfCollect(readTail, w, n, prevUs, firstLevel, lastLevel);
       if (millis() - start >= RF_CAPTURE_MAX_MS || n >= RF_MAX_PULSES) break;
       int r = rfRssiDbm(); s_rfRssi = r;
@@ -240,7 +258,8 @@ static void rfTask(void *) {
       if (r < thr) break;
       if (r > peak) peak = r;
     }
-    rfFinishBurst(w, n, firstLevel, peak);
+    rfIrqOff();
+    if (!storm) rfFinishBurst(w, n, firstLevel, peak);
   }
 }
 
