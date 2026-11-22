@@ -64,3 +64,12 @@ once against a multimeter.
 2. First-boot setup (position, home Wi-Fi; show only what exists).
 3. Factory reset without flashing (BOOT at power-up, Board settings button, serial `factory`).
 4. Settings backup (hub Backup page; per-screen export / restore).
+
+## Ideas from nDash (shelved, github.com/Light-r4y/nDASH, MIT)
+
+- Bench page on the hub: rusEFI output tests over CAN (extended ID 0x77000C, data 66 00 subsystem index: coils, injectors, fuel pump, fans, relays, start / stop), refused above 100 RPM.
+- Automatic rollback of a firmware update that fails to start (check Arduino bootloader support).
+- A password on the web pages (restore and factory reset are open to anyone on the network today).
+- SD logs in MegaLogViewer's .mlg format.
+- Warning zones that fill the whole tile red at a limit (amber only colours the number).
+- Pressure unit choice per signal; a frame-rate budget warning in the editor; stop logging when the card is nearly full; release zips with install.bat.
