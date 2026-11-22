@@ -43,8 +43,9 @@ $libPath = if (Test-Path "$env:USERPROFILE\OneDrive\Documents\Arduino\libraries\
 } else {
     "$env:USERPROFILE\Documents\Arduino\libraries"
 }
-Copy-Item "$libPath\lvgl\lv_conf_template.h" "$libPath\lv_conf.h"
-(Get-Content "$libPath\lv_conf.h") -replace '^#if 0 /\* Set this to "1" to enable content \*/', '#if 1 /* Set this to "1" to enable content */' | Set-Content "$libPath\lv_conf.h"
+# Switch it on (LVGL 8.4's template says "Set it to"; older ones "Set this to") and turn on the fonts the screens use
+if (-not (Test-Path "$libPath\lv_conf.h")) { Copy-Item "$libPath\lvgl\lv_conf_template.h" "$libPath\lv_conf.h" }
+(Get-Content "$libPath\lv_conf.h") -replace '^#if 0 /\*\s*Set (it|this) to "1" to enable content\s*\*/', '#if 1 /*Set it to "1" to enable content*/' -replace '^#define LV_FONT_MONTSERRAT_(28|36|48)\s+0', '#define LV_FONT_MONTSERRAT_$1 1' | Set-Content "$libPath\lv_conf.h"
 
 Write-Host "Setup complete. Library path used: $libPath"
 ```
