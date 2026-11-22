@@ -1,5 +1,46 @@
 # aircore: the stock NB tach and speedo
 
+## Wemos D1 Mini (ESP8266): one board per gauge (build 2)
+
+Each gauge gets its own D1 Mini and its own DRV8833. Tell each board once which gauge it is: `role tach` or
+`role speedo` in the serial monitor (it starts as the tach).
+
+| D1 Mini pin | GPIO | DRV8833 |
+|---|---|---|
+| D1 | 5 | IN1 |
+| D2 | 4 | IN2 |
+| D5 | 14 | IN3 |
+| D6 | 12 | IN4 |
+| 5V | | VCC (VM), from the 5 V buck converter; the D1 Mini can take its own 5 V from the same supply |
+| G | | GND |
+
+OUT1 / OUT2 to the gauge's sine coil, OUT3 / OUT4 to its cosine coil; EEP / nSLEEP (if the board has it) to 3.3 V.
+None of D1, D2, D5, D6 is a boot pin, so the DRV8833 cannot stop the D1 Mini from starting.
+
+First time only, add the ESP8266 boards to arduino-cli (PowerShell):
+
+```powershell
+cls
+arduino-cli config add board_manager.additional_urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
+arduino-cli core update-index
+arduino-cli core install esp8266:esp8266
+```
+
+Build and flash one board (its COM port in place of COM7):
+
+```powershell
+cls
+cd C:\Users\alejo\OneDrive\GIT\MSP-DASH
+git pull origin main
+arduino-cli compile --clean --fqbn esp8266:esp8266:d1_mini --build-path C:\esp32build-aircore8266 C:\Users\alejo\OneDrive\GIT\MSP-DASH\aircore
+arduino-cli upload -p COM7 --fqbn esp8266:esp8266:d1_mini --input-dir C:\esp32build-aircore8266 C:\Users\alejo\OneDrive\GIT\MSP-DASH\aircore
+arduino-cli monitor -p COM7 -c baudrate=115200
+```
+
+Then calibrate as below (only its own gauge's commands work on it).
+
+## ESP32-S2 Mini: both gauges on one board
+
 Drives the stock air-core tach and speedometer from the hub's data. It only listens: it picks up the hub's ESP-NOW
 data packet (RPM and speed) on whatever Wi-Fi channel the hub is on, so it needs no network and no setup on the hub.
 
