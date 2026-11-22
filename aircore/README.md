@@ -39,6 +39,20 @@ arduino-cli monitor -p COM7 -c baudrate=115200
 
 Then calibrate as below (only its own gauge's commands work on it).
 
+## ESP32 DevKitC (WROOM): both gauges on one board (build 4)
+
+Hardware PWM, so the needles stay steady whatever Wi-Fi does (the D1 Mini's software PWM can make them stutter).
+
+| ESP32 | Tach DRV8833 | | ESP32 | Speedo DRV8833 |
+|---|---|---|---|---|
+| GPIO 16 | IN1 | | GPIO 21 | IN1 |
+| GPIO 17 | IN2 | | GPIO 22 | IN2 |
+| GPIO 18 | IN3 | | GPIO 23 | IN3 |
+| GPIO 19 | IN4 | | GPIO 25 | IN4 |
+
+DRV8833 VCC: 9-10 V from an adjustable buck converter (the coils need it: at 5 V the return magnet wins at the top of
+the scale). ESP32: 5 V on its 5V pin, or USB. Grounds shared. fqbn `esp32:esp32:esp32`.
+
 ## ESP32-S2 Mini: both gauges on one board
 
 Drives the stock air-core tach and speedometer from the hub's data. It only listens: it picks up the hub's ESP-NOW

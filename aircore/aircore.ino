@@ -3,13 +3,15 @@
 //   Wemos D1 Mini (ESP8266), fqbn esp8266:esp8266:d1_mini: ONE gauge per board (type "role tach" or "role speedo"
 //     once), one DRV8833 each, on D1 / D2 / D5 / D6.
 //   Lolin ESP32-S2 Mini, fqbn esp32:esp32:lolin_s2_mini: BOTH gauges on one board, two DRV8833.
+//   ESP32 DevKitC (WROOM), fqbn esp32:esp32:esp32: BOTH gauges, two DRV8833, on GPIO 16-19 and 21-23, 25
+//     (hardware PWM, steady whatever Wi-Fi does; no boot or flash pins).
 // It only listens: it picks up the hub's ESP-NOW data packet (RPM and speed) on whatever channel the hub is on, and
 // needs no Wi-Fi network. Setup and calibration over the USB serial port (115200): type "help". See README.md.
 #include <Arduino.h>
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 3
+#define AIRCORE_BUILD 4
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 #define PWM_FULL 1023
@@ -52,6 +54,12 @@ typedef struct {
 #if defined(ESP8266)
 // D1 = GPIO 5, D2 = GPIO 4, D5 = GPIO 14, D6 = GPIO 12 (none of them a boot pin). Its role picks tach or speedo.
 static Gauge G[GAUGES] = { { "tach", { 5, 4, 14, 12 }, LINK_SIG_RPM, {}, 0, 0, 0 } };
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+// ESP32 DevKitC: tach IN1-IN4 on GPIO 16, 17, 18, 19; speedo on 21, 22, 23, 25 (none a boot, flash or input-only pin).
+static Gauge G[GAUGES] = {
+  { "tach",   { 16, 17, 18, 19 }, LINK_SIG_RPM, {}, 0, 0, 0 },
+  { "speedo", { 21, 22, 23, 25 }, LINK_SIG_VSS, {}, 0, 0, 0 },
+};
 #else
 static Gauge G[GAUGES] = {
   { "tach",   { 3, 5, 7, 9 },     LINK_SIG_RPM, {}, 0, 0, 0 },
@@ -222,7 +230,7 @@ void setup() {
   setChannel(s_ch);
   if (esp_now_init() == 0) { esp_now_set_self_role(ESP_NOW_ROLE_SLAVE); esp_now_register_recv_cb(onRecv); } else Serial.println("ESP-NOW start FAILED");
 #else
-  for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) ledcAttach(G[g].pins[k], s_pwmHz, 10);   // 8 pins = the S2's 8 PWM channels
+  for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) ledcAttach(G[g].pins[k], s_pwmHz, 10);   // 8 pins: the S2's 8 PWM channels (the ESP32 has 16)
   WiFi.mode(WIFI_STA); WiFi.disconnect(false, false);
   setChannel(s_ch);
   if (esp_now_init() == ESP_OK) esp_now_register_recv_cb(onRecv); else Serial.println("ESP-NOW start FAILED");
