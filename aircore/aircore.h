@@ -42,8 +42,18 @@ static inline void aircore_coils(float deg, float strength, float *sinOut, float
   *sinOut = sinf(r) * strength; *cosOut = cosf(r) * strength;
 }
 // One coil's two DRV8833 inputs from a drive of -1..1: PWM on one side, the other low (fast decay). full = max duty.
+// Fast decay: between pulses the coil current is pushed back against the supply, so it falls quickly; with a coil
+// this slow (inductive) against a 20 kHz PWM the average current is well below duty x V / R and not in proportion.
 static inline void aircore_bridge(float drive, uint32_t full, uint32_t *inA, uint32_t *inB) {
   float m = drive < 0 ? -drive : drive; if (m > 1) m = 1;
   uint32_t d = (uint32_t)(m * full + 0.5f);
   if (drive >= 0) { *inA = d; *inB = 0; } else { *inA = 0; *inB = d; }
+}
+// Slow decay (aircore build 5, the default): one input held high, the other PWM'd low for the on-time; between pulses
+// both are high, the DRV8833 shorts the coil (brake) and its current keeps flowing. The average current then follows
+// duty x V / R: stronger and in proportion, so the needle holds where it is told.
+static inline void aircore_bridge_slow(float drive, uint32_t full, uint32_t *inA, uint32_t *inB) {
+  float m = drive < 0 ? -drive : drive; if (m > 1) m = 1;
+  uint32_t d = (uint32_t)(m * full + 0.5f);
+  if (drive >= 0) { *inA = full; *inB = full - d; } else { *inA = full - d; *inB = full; }
 }

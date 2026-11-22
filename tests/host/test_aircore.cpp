@@ -30,6 +30,9 @@ int main() {
   aircore_bridge(0.5f, 1023, &x, &y); CHECK(x == 512 && y == 0, "forward half: PWM on IN-A, IN-B low");
   aircore_bridge(-1.0f, 1023, &x, &y); CHECK(x == 0 && y == 1023, "full reverse: PWM on IN-B");
   aircore_bridge(1.7f, 1023, &x, &y); CHECK(x == 1023 && y == 0, "past full: held at full");
+  aircore_bridge_slow(0.5f, 1023, &x, &y); CHECK(x == 1023 && y == 511, "slow decay, forward half: IN-A held high, IN-B low for half the time");
+  aircore_bridge_slow(-0.25f, 1023, &x, &y); CHECK(x == 767 && y == 1023, "slow decay, reverse quarter: IN-B high, IN-A low a quarter of the time");
+  aircore_bridge_slow(0, 1023, &x, &y); CHECK(x == 1023 && y == 1023, "slow decay, no drive: both high (brake, no current)");
   printf("5. settings\n");
   AirCoreCfg c; aircore_defaults_tach(&c); c.maxVal = 0; CHECK(!aircore_valid(&c), "max not above min: refused");
   aircore_defaults_tach(&c); c.strength = 1.5f; CHECK(!aircore_valid(&c), "strength over 1: refused");

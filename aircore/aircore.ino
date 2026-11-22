@@ -11,9 +11,10 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 4
+#define AIRCORE_BUILD 5
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
+static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
 #define PWM_FULL 1023
 #define STEP_MS 5             // needle update
 #define LOST_MS 1500          // no data for this long: needles go to the start of the scale, and the hunt for the hub starts
@@ -82,21 +83,22 @@ static void defaultsFor(Gauge &g) { if (g.sig == LINK_SIG_RPM) aircore_defaults_
 static void setRole(int speedo) { G[0].name = speedo ? "speedo" : "tach"; G[0].sig = speedo ? LINK_SIG_VSS : LINK_SIG_RPM; }
 static void cfgSave(int) {
   EEPROM.write(0, AIRCORE_VERSION); EEPROM.write(1, G[0].sig == LINK_SIG_VSS ? 1 : 0);
-  EEPROM.put(4, G[0].cfg); EEPROM.put(40, s_pwmHz); EEPROM.commit();
+  EEPROM.put(4, G[0].cfg); EEPROM.put(40, s_pwmHz); EEPROM.write(44, s_slow); EEPROM.commit();
 }
 static void cfgLoad() {
   EEPROM.begin(EE_SIZE);
   bool ok = EEPROM.read(0) == AIRCORE_VERSION;
   setRole(ok && EEPROM.read(1) == 1);
-  if (ok) { EEPROM.get(4, G[0].cfg); EEPROM.get(40, s_pwmHz); }
+  if (ok) { EEPROM.get(4, G[0].cfg); EEPROM.get(40, s_pwmHz); s_slow = EEPROM.read(44) != 0; }
   if (s_pwmHz < 100 || s_pwmHz > 40000) s_pwmHz = PWM_HZ_DEFAULT;
   if (!ok || !aircore_valid(&G[0].cfg)) defaultsFor(G[0]);
 }
 #else
-static void cfgSave(int g) { Preferences p; p.begin("aircore", false); p.putBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)); p.putUChar("ver", AIRCORE_VERSION); p.putULong("pwm", s_pwmHz); p.end(); }
+static void cfgSave(int g) { Preferences p; p.begin("aircore", false); p.putBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)); p.putUChar("ver", AIRCORE_VERSION); p.putULong("pwm", s_pwmHz); p.putUChar("slow", s_slow); p.end(); }
 static void cfgLoad() {
   Preferences p; p.begin("aircore", true);
   bool ok = p.getUChar("ver", 0) == AIRCORE_VERSION;
+  s_slow = p.getUChar("slow", 1) != 0;
   s_pwmHz = p.getULong("pwm", PWM_HZ_DEFAULT); if (s_pwmHz < 100 || s_pwmHz > 40000) s_pwmHz = PWM_HZ_DEFAULT;
   for (int g = 0; g < GAUGES; g++)
     if (!ok || p.getBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)) != sizeof(AirCoreCfg) || !aircore_valid(&G[g].cfg)) defaultsFor(G[g]);
@@ -146,8 +148,9 @@ static void pwmWrite(uint8_t pin, uint32_t duty) {
 static void drive(int g, float deg) {
   float s, c; aircore_coils(deg, G[g].cfg.strength, &s, &c);
   uint32_t a, b;
-  aircore_bridge(s, PWM_FULL, &a, &b); pwmWrite(G[g].pins[0], a); pwmWrite(G[g].pins[1], b);
-  aircore_bridge(c, PWM_FULL, &a, &b); pwmWrite(G[g].pins[2], a); pwmWrite(G[g].pins[3], b);
+  void (*bridge)(float, uint32_t, uint32_t *, uint32_t *) = s_slow ? aircore_bridge_slow : aircore_bridge;
+  bridge(s, PWM_FULL, &a, &b); pwmWrite(G[g].pins[0], a); pwmWrite(G[g].pins[1], b);
+  bridge(c, PWM_FULL, &a, &b); pwmWrite(G[g].pins[2], a); pwmWrite(G[g].pins[3], b);
 }
 
 // Start-up sweep: the needle(s) to the end of the scale and back, like the stock cluster.
@@ -161,7 +164,7 @@ static void sweep() {
 }
 
 static void show() {
-  Serial.printf("aircore build %d | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
+  Serial.printf("aircore build %d | %s decay | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, s_slow ? "slow" : "fast", (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
                 millis() - s_lastRx < LOST_MS ? (s_sim ? "hub heard (SIMULATED data)" : "hub heard") : "no hub: hunting channels");
   for (int g = 0; g < GAUGES; g++) {
     const AirCoreCfg &c = G[g].cfg;
@@ -183,6 +186,7 @@ static void help() {
   Serial.println("  tach strength 0.8 | slew 720  drive (0.1-1) | fastest needle speed, deg/s");
   Serial.println("  (same for speedo)   sweep     needle(s) end to end   defaults   factory settings");
   Serial.println("  pwm 2000                      coil PWM frequency, 100-40000 Hz (lower = steadier on the D1 Mini, may hum)");
+  Serial.println("  decay slow | decay fast       how the coil current is driven between pulses (slow: stronger, steadier)");
 }
 static void command(String line) {
   line.trim(); line.toLowerCase();
@@ -191,6 +195,10 @@ static void command(String line) {
   if (line == "show") { show(); return; }
   if (line == "sweep") { sweep(); return; }
   if (line == "defaults") { for (int g = 0; g < GAUGES; g++) { defaultsFor(G[g]); cfgSave(g); } Serial.println("Factory settings back"); return; }
+  if (line == "decay slow" || line == "decay fast") {
+    s_slow = line == "decay slow"; for (int g = 0; g < GAUGES; g++) cfgSave(g);
+    Serial.printf("%s decay, saved\n", s_slow ? "slow" : "fast"); return;
+  }
   if (line.startsWith("pwm ")) {
     long hz = line.substring(4).toInt();
     if (hz < 100 || hz > 40000) { Serial.println("100 to 40000 Hz"); return; }
