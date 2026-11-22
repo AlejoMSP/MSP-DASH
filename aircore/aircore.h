@@ -7,6 +7,7 @@
 #pragma once
 #include <stdint.h>
 #include <math.h>
+#include <string.h>
 
 typedef struct __attribute__((packed)) {
   float minVal, maxVal;     // the value at the start and at the end of the dial (RPM, or mph)
@@ -56,4 +57,43 @@ static inline void aircore_bridge_slow(float drive, uint32_t full, uint32_t *inA
   float m = drive < 0 ? -drive : drive; if (m > 1) m = 1;
   uint32_t d = (uint32_t)(m * full + 0.5f);
   if (drive >= 0) { *inA = full; *inB = full - d; } else { *inA = full - d; *inB = full; }
+}
+
+// ---- multi-point calibration (aircore build 6) ----
+// The gauge's return magnet makes the needle lag the coils' field more the further it swings, so one zero and span
+// cannot put every mark in the right place. Points: the coil angle for a value (0 RPM at 180, 2000 at 118, ...).
+// With two or more points the needle angle comes from them (straight lines between points, held at the end points);
+// with fewer, from zero and span as before.
+#define AIRCORE_POINTS 12
+typedef struct __attribute__((packed)) { uint8_t n; float v[AIRCORE_POINTS]; float a[AIRCORE_POINTS]; } AirCorePoints;
+static inline void aircore_points_clear(AirCorePoints *p) { memset(p, 0, sizeof *p); }
+static inline int aircore_points_valid(const AirCorePoints *p) {
+  if (p->n > AIRCORE_POINTS) return 0;
+  for (int i = 0; i < p->n; i++) { if (p->a[i] < -720 || p->a[i] > 720 || p->v[i] != p->v[i]) return 0; if (i && p->v[i] <= p->v[i - 1]) return 0; }
+  return 1;
+}
+// Add or move a point (a value already there gets the new angle). Kept in order of value. 0 = table full.
+static inline int aircore_points_set(AirCorePoints *p, float v, float a) {
+  for (int i = 0; i < p->n; i++) if (p->v[i] == v) { p->a[i] = a; return 1; }
+  if (p->n >= AIRCORE_POINTS) return 0;
+  int i = p->n;
+  while (i > 0 && p->v[i - 1] > v) { p->v[i] = p->v[i - 1]; p->a[i] = p->a[i - 1]; i--; }
+  p->v[i] = v; p->a[i] = a; p->n++;
+  return 1;
+}
+static inline int aircore_points_remove(AirCorePoints *p, float v) {
+  for (int i = 0; i < p->n; i++) if (p->v[i] == v) {
+    for (int k = i; k + 1 < p->n; k++) { p->v[k] = p->v[k + 1]; p->a[k] = p->a[k + 1]; }
+    p->n--; return 1;
+  }
+  return 0;
+}
+// The needle angle for a value: from the points if there are two or more, else from zero and span.
+static inline float aircore_angle_pts(const AirCoreCfg *c, const AirCorePoints *p, float v) {
+  if (!p || p->n < 2) return aircore_angle(c, v);
+  if (v <= p->v[0]) return p->a[0];
+  if (v >= p->v[p->n - 1]) return p->a[p->n - 1];
+  int i = 1; while (v > p->v[i]) i++;
+  float f = (v - p->v[i - 1]) / (p->v[i] - p->v[i - 1]);
+  return p->a[i - 1] + f * (p->a[i] - p->a[i - 1]);
 }

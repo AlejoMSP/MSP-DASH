@@ -107,3 +107,21 @@ Use the S2 Mini's own COM port (COM7 here is an example). If it does not show up
 
 Defaults: tach 0-8000 RPM, speedo 0-150 mph, both 240 degrees, strength 0.8. Needles move at most 720 (tach) and 360
 (speedo) degrees a second, and go back to the start of the scale 1.5 s after the hub goes quiet.
+
+## Multi-point calibration (build 6)
+
+The return magnet makes the needle lag more the further it swings, so zero and span alone leave the middle marks off.
+Mark each dial number instead (up to 12 per gauge); with two or more marks they replace zero and span.
+
+```
+tach angle 180        hold the needle; step it until it sits exactly on 0
+tach mark 0           that angle is the 0 mark
+tach angle 118        step it onto 1000 (or 2000 ...)
+tach mark 1000
+...                   the same for each number up to 8000
+tach release
+show                  lists the marks
+```
+
+`tach point 2000 118` types a mark in directly, `tach unpoint 2000` removes one, `tach clearpoints` removes all.
+Between marks the needle moves in a straight line, so more marks where the dial is uneven give a closer match.

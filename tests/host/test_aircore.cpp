@@ -38,7 +38,22 @@ int main() {
   aircore_defaults_tach(&c); c.strength = 1.5f; CHECK(!aircore_valid(&c), "strength over 1: refused");
   aircore_defaults_tach(&c); c.spanDeg = 0; CHECK(!aircore_valid(&c), "no span: refused");
   CHECK(sizeof(AirCoreCfg) == 24, "saved settings: 24 bytes");
-  printf("6. the hub's packet\n");
+  printf("6. multi-point calibration\n");
+  { AirCoreCfg t2; aircore_defaults_tach(&t2); AirCorePoints p; aircore_points_clear(&p);
+    aircore_points_set(&p, 0, 180);
+    CHECK(near(aircore_angle_pts(&t2, &p, 4000), aircore_angle(&t2, 4000), 1e-4f), "one mark: zero / span still used");
+    aircore_points_set(&p, 4000, 80); aircore_points_set(&p, 2000, 118); aircore_points_set(&p, 8000, -20);
+    CHECK(p.n == 4 && p.v[0] == 0 && p.v[1] == 2000 && p.v[2] == 4000 && p.v[3] == 8000, "kept in order of value");
+    CHECK(near(aircore_angle_pts(&t2, &p, 2000), 118, 1e-4f) && near(aircore_angle_pts(&t2, &p, 1000), 149, 1e-4f), "on a mark, and halfway between two");
+    CHECK(near(aircore_angle_pts(&t2, &p, 6000), 30, 1e-4f), "between 4000 (80) and 8000 (-20): 30");
+    CHECK(near(aircore_angle_pts(&t2, &p, -100), 180, 1e-4f) && near(aircore_angle_pts(&t2, &p, 9500), -20, 1e-4f), "held at the end marks");
+    aircore_points_set(&p, 2000, 115); CHECK(p.n == 4 && near(p.a[1], 115, 1e-4f), "the same value again: moved, not added");
+    CHECK(aircore_points_remove(&p, 4000) && p.n == 3 && p.v[2] == 8000 && !aircore_points_remove(&p, 4000), "removed; removing it again: no");
+    CHECK(aircore_points_valid(&p), "valid");
+    AirCorePoints bad = p; bad.v[1] = 9000; CHECK(!aircore_points_valid(&bad), "out of order: not valid (cleared on load)");
+    AirCorePoints full; aircore_points_clear(&full); for (int i = 0; i < AIRCORE_POINTS; i++) aircore_points_set(&full, i * 100, 180 - i);
+    CHECK(!aircore_points_set(&full, 5000, 0), "12 marks: no more"); }
+  printf("7. the hub's packet\n");
   CHECK(LINK_PKT_MAGIC == PKT_MAGIC && LINK_PKT_V_OFFSET == offsetof(LinkPacket, v), "magic and where the values start match link_packets.h");
   CHECK(LINK_SIG_RPM == SIG_RPM && LINK_SIG_VSS == SIG_VSS && AC_MASK_SIMULATED == LINK_MASK_SIMULATED, "RPM, speed and the simulator flag match");
   printf("\n%d passed, %d failed\n", pass, fail);
