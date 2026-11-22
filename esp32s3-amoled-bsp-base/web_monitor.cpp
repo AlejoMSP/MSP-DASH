@@ -1698,7 +1698,6 @@ void web_monitor_init(void) {
     if (s_setupMode) { request->redirect("/setup"); return; }
     request->send_P(200, "text/html", INDEX_HTML);
   });
-  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) { request->send_P(200, "text/html", SETUP_HTML); });
   server.on("/setup/save", HTTP_GET, [](AsyncWebServerRequest *request) {   // position, and the home network (optional)
     auto P = [&](const char *k) { return request->hasParam(k) ? request->getParam(k)->value() : String(""); };
     String pos = P("pos"), ss = P("ssid"), pw = P("pass"); ss.trim();
@@ -1714,6 +1713,9 @@ void web_monitor_init(void) {
     String j = String("{\"setup\":") + (s_setupMode ? "true" : "false") + ",\"name\":\"" + nm + "\",\"ssid\":\"" + s_homeSsid + "\",\"hub\":" + (espnow_link_hub_heard() ? "true" : "false") + "}";
     request->send(200, "application/json", j);
   });
+  // After /setup/save and /setup.json: AsyncWebServer's "/setup" also answers "/setup/<anything>", so registered first it
+  // swallowed the Save request (build 227 fix).
+  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *request) { request->send_P(200, "text/html", SETUP_HTML); });
   // ---- settings backup (factory setup): export as lines, restore (checked first), factory reset ----
   server.on("/backup.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
     bool pw = request->hasParam("pw") && request->getParam("pw")->value() == "1";
