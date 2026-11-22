@@ -1400,7 +1400,7 @@ R"rawliteral(<div class="pad">
     <p class="note">One file with this screen's settings: pages, gauges, colours, warnings, name, logging channels, display. With a hub, its Backup page saves every board at once.</p>
     <label class="chk"><input type="checkbox" id="bkpw"> Include Wi-Fi passwords</label>
     <button type="button" onclick="location.href='/backup.txt?pw=' + ck('bkpw')">Export</button>
-    <label>Restore from a file<input type="file" id="bkfile" accept=".txt"></label>
+    <label>Restore from a file (this screen's export, or the hub's whole-system backup)<input type="file" id="bkfile" accept=".txt,.json"></label>
     <button type="button" onclick="restoreFile()">Restore</button>
     <div class="msg" id="mBk"></div></div>
 
@@ -1423,8 +1423,17 @@ R"rawliteral(
   async function restoreFile() {
     const m = document.getElementById("mBk"), f = document.getElementById("bkfile").files[0];
     if (!f) { m.style.color = "#ff8080"; m.textContent = "Pick a file first."; return; }
+    let body = await f.text();
+    // A whole-system file from the hub's Backup page (.json): take this screen's part, by its name.
+    try { const j = JSON.parse(body);
+      if (j && j.msp_dash_backup && Array.isArray(j.parts)) {
+        const st = await (await fetch("/status.json")).json(), nm = st && st.link ? st.link.name : "";
+        const part = j.parts.find(p => p.kind === "screen" && p.board === nm);
+        if (!part) { m.style.color = "#ff8080"; m.textContent = "That backup has no part for " + (nm || "this screen") + " (it has: " + j.parts.map(p => p.board).join(", ") + "). Use the hub's Backup page to put another screen's part here."; return; }
+        body = part.text;
+      } } catch (e) { /* not JSON: this screen's own .txt export */ }
     if (!confirm("Restore " + f.name + " onto this screen? Its current settings are replaced and it restarts.")) return;
-    try { const r = await fetch("/restore", { method: "POST", headers: { "X-MSP": "1" }, body: await f.text() });
+    try { const r = await fetch("/restore", { method: "POST", headers: { "X-MSP": "1" }, body: body });
       m.style.color = r.ok ? "#7fdf7f" : "#ff8080"; m.textContent = await r.text(); }
     catch (e) { m.style.color = "#ff8080"; m.textContent = "No answer from the board."; }
   }
