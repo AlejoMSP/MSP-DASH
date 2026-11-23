@@ -51,7 +51,8 @@ Hardware PWM, so the needles stay steady whatever Wi-Fi does (the D1 Mini's soft
 | GPIO 19 | IN4 | | GPIO 25 | IN4 |
 
 DRV8833 VCC: 9-10 V from an adjustable buck converter (the coils need it: at 5 V the return magnet wins at the top of
-the scale). ESP32: 5 V on its 5V pin, or USB. Grounds shared. fqbn `esp32:esp32:esp32`.
+the scale). If one gauge still slips back partway up at 10 V while the other is fine, try another DRV8833 first: on the
+bench a weak channel stopped the tach at ~2300 RPM, and a fresh board reached 8000. ESP32: 5 V on its 5V pin, or USB. Grounds shared. fqbn `esp32:esp32:esp32`.
 
 ## ESP32-S2 Mini: both gauges on one board
 
