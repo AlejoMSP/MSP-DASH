@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate hardware/kicad/msp-dash-wiring.kicad_sch: the whole MSP-DASH wiring as a KiCad schematic.
 
-Every part is a simple box symbol (defined in the file, no external libraries). Connections are net labels on short
+Every part is a simple box symbol (defined in the file, no external libraries), marked "not on board": this is a wiring
+drawing, not a PCB, so "Update PCB from Schematic" has nothing to place (no footprint errors). Connections are net labels on short
 wire stubs at each pin, so the drawing stays readable and KiCad's netlist / ERC see the real connections. Pin names
 carry the Freenove terminal for the hub (L9, R11 ...). Pins follow docs/HUB_PINS.md (defaults) and aircore/README.md.
 Run:  python3 tools/gen_kicad_wiring.py   (rewrites the .kicad_sch and .kicad_pro)
@@ -107,7 +108,7 @@ def lib_symbol(sym, left, right):
         pins.append(f'(pin passive line (at {mm(-half - 2)} {mm(top - 2 - 2 * i)} 0) (length 2.54) (name {q(n)} {FONT}) (number {q(str(i + 1))} {FONT}))')
     for i, (n, _) in enumerate(right):
         pins.append(f'(pin passive line (at {mm(half + 2)} {mm(top - 2 - 2 * i)} 180) (length 2.54) (name {q(n)} {FONT}) (number {q(str(len(left) + i + 1))} {FONT}))')
-    return (f'(symbol {q("msp:" + sym)} (in_bom yes) (on_board yes)\n'
+    return (f'(symbol {q("msp:" + sym)} (in_bom yes) (on_board no)\n'
             f'  (property "Reference" "U" (at 0 {mm(top + 2)} 0) {FONT})\n  (property "Value" {q(sym)} (at 0 {mm(top - 2 * rows - 4)} 0) {FONT})\n'
             f'  (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n  (property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
             f'  (symbol {q(sym + "_0_1")} {" ".join(body)})\n  (symbol {q(sym + "_1_1")}\n    ' + "\n    ".join(pins) + '))')
@@ -124,7 +125,7 @@ for idx, (ref, value, sym, left, right, x, y) in enumerate(PARTS):
         seen[sym] = layout; libs.append(lib_symbol(sym, left, right))
     half, rows, top = sym_geom(left, right)
     pin_uuids = " ".join(f'(pin {q(str(i + 1))} (uuid {uid()}))' for i in range(len(left) + len(right)))
-    out.append(f'(symbol (lib_id {q("msp:" + sym)}) (at {mm(x)} {mm(y)} 0) (unit 1) (in_bom yes) (on_board yes) (dnp no) (uuid {uid()})\n'
+    out.append(f'(symbol (lib_id {q("msp:" + sym)}) (at {mm(x)} {mm(y)} 0) (unit 1) (in_bom yes) (on_board no) (dnp no) (uuid {uid()})\n'
                f'  (property "Reference" {q(ref)} (at {mm(x)} {mm(y - top - 2)} 0) {FONT})\n'
                f'  (property "Value" {q(value)} (at {mm(x)} {mm(y - top + 2 * rows + 4)} 0) {FONT})\n'
                f'  (property "Footprint" "" (at {mm(x)} {mm(y)} 0) (effects (font (size 1.27 1.27)) hide))\n'
