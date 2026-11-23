@@ -55,7 +55,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 63
+#define INPUT_BUILD 64
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -184,7 +184,27 @@ extern "C" float gauge_config_signal_value(SignalId sig) {
 typedef struct { uint8_t mac[6]; uint32_t ip; uint16_t build; char name[LINK_NAME_LEN + 1]; uint32_t lastMs; uint32_t hellos; uint32_t uptime; HelloStats st; bool used; } ScreenSlot;
 static ScreenSlot s_screens[SCREEN_MAX];
 static portMUX_TYPE s_scrMux = portMUX_INITIALIZER_UNLOCKED;
+// ---- the stock tach / speedo board (aircore/): its status, for the Stock gauges page ----
+#define AC_SLOTS 4
+typedef struct { bool used; uint8_t mac[6]; uint8_t gauge; uint32_t lastMs; AcStatus st; } AcSlot;
+static AcSlot s_ac[AC_SLOTS];
+static portMUX_TYPE s_acMux = portMUX_INITIALIZER_UNLOCKED;
+static void acStatusIn(const uint8_t *mac, const uint8_t *data) {
+  const AcStatus *st = (const AcStatus *)data;
+  portENTER_CRITICAL(&s_acMux);
+  int slot = -1, oldest = 0;
+  for (int i = 0; i < AC_SLOTS; i++) {
+    if (s_ac[i].used && s_ac[i].gauge == st->gauge && !memcmp(s_ac[i].mac, mac, 6)) { slot = i; break; }
+    if (slot < 0 && !s_ac[i].used) slot = i;
+  }
+  if (slot < 0) { for (int i = 1; i < AC_SLOTS; i++) if (s_ac[i].lastMs < s_ac[oldest].lastMs) oldest = i; slot = oldest; }
+  s_ac[slot].used = true; memcpy(s_ac[slot].mac, mac, 6); s_ac[slot].gauge = st->gauge;
+  memcpy(&s_ac[slot].st, st, sizeof(AcStatus)); s_ac[slot].lastMs = millis();
+  portEXIT_CRITICAL(&s_acMux);
+}
+
 static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len >= (int)sizeof(AcStatus) && ((const AcStatus *)data)->magic == AC_STATUS_MAGIC) { acStatusIn(info->src_addr, data); return; }
   if (len < (int)offsetof(HelloPacket, name) || ((const HelloPacket *)data)->magic != HELLO_MAGIC) return;
   HelloPacket h; memset(&h, 0, sizeof h); memcpy(&h, data, len < (int)sizeof h ? len : sizeof h);
   portENTER_CRITICAL(&s_scrMux);
@@ -1179,6 +1199,40 @@ static void setupWeb() {
     server.send(200, "text/plain", r);
   });
   // ---- settings backup and factory reset (factory setup) ----
+  // ---- Stock gauges page (aircore board) ----
+  server.on("/aircore", HTTP_GET, []() { server.send_P(200, "text/html", AIRCORE_HTML, strlen_P(AIRCORE_HTML)); });
+  server.on("/aircore.json", HTTP_GET, []() {
+    AcSlot c[AC_SLOTS];
+    portENTER_CRITICAL(&s_acMux); memcpy(c, s_ac, sizeof c); portEXIT_CRITICAL(&s_acMux);
+    String j = "{\"gauges\":[";
+    bool first = true; uint32_t now = millis();
+    for (int i = 0; i < AC_SLOTS; i++) {
+      if (!c[i].used || now - c[i].lastMs > 60000) continue;
+      const AcStatus &t = c[i].st; char b[420];
+      snprintf(b, sizeof b, "%s{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"g\":%u,\"age\":%lu,\"build\":%u,\"gauges\":%u,\"name\":\"%s\",\"mode\":%u,"
+               "\"slow\":%u,\"hub\":%u,\"has\":%u,\"pwm\":%lu,\"needle\":%.1f,\"value\":%.1f,\"shown\":%.1f,\"sweepS\":%.1f,\"strength\":%.2f,"
+               "\"slew\":%.0f,\"min\":%g,\"max\":%g,\"zero\":%.1f,\"span\":%.1f,\"ch\":%u,\"pts\":[",
+               first ? "" : ",", c[i].mac[0], c[i].mac[1], c[i].mac[2], c[i].mac[3], c[i].mac[4], c[i].mac[5], t.gauge, (unsigned long)(now - c[i].lastMs),
+               t.build, t.gauges, t.sig == SIG_RPM ? "tach" : t.sig == SIG_VSS ? "speedo" : "gauge", t.mode, t.slow, t.hubHeard, t.has, (unsigned long)t.pwmHz,
+               t.needle, t.value, t.target, t.sweepS, t.strength, t.slew, t.minV, t.maxV, t.zero, t.span, t.ch);
+      j += b; first = false;
+      for (int k = 0; k < t.npts && k < AC_POINTS; k++) { snprintf(b, sizeof b, "%s[%g,%.1f]", k ? "," : "", t.pv[k], t.pa[k]); j += b; }
+      j += "]}";
+    }
+    j += "]}";
+    server.send(200, "application/json", j);
+  });
+  server.on("/aircore/cmd", HTTP_GET, []() {   // mac=AA:BB:..&g=0&op=N&a=..&b=..
+    AcCmd c; memset(&c, 0, sizeof c); c.magic = AC_CMD_MAGIC;
+    unsigned m[6];
+    if (sscanf(server.arg("mac").c_str(), "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) != 6) { server.send(400, "text/plain", "Which board?"); return; }
+    for (int i = 0; i < 6; i++) c.mac[i] = (uint8_t)m[i];
+    c.gauge = (uint8_t)server.arg("g").toInt(); c.op = (uint8_t)server.arg("op").toInt();
+    if (c.op < AC_OP_LIVE || c.op > AC_OP_SPAN) { server.send(400, "text/plain", "Unknown command"); return; }
+    c.a = server.arg("a").toFloat(); c.b = server.arg("b").toFloat();
+    esp_now_send(BCAST, (const uint8_t *)&c, sizeof c);
+    server.send(200, "text/plain", "Sent");
+  });
   server.on("/backup", HTTP_GET, []() { server.send_P(200, "text/html", BACKUP_HTML, strlen_P(BACKUP_HTML)); });
   server.on("/backup.txt", HTTP_GET, []() {
     String out = String("# msp-dash hub build ") + INPUT_BUILD + "\n";

@@ -6,12 +6,13 @@
 //   ESP32 DevKitC (WROOM), fqbn esp32:esp32:esp32: BOTH gauges, two DRV8833, on GPIO 16-19 and 21-23, 25
 //     (hardware PWM, steady whatever Wi-Fi does; no boot or flash pins).
 // It only listens: it picks up the hub's ESP-NOW data packet (RPM and speed) on whatever channel the hub is on, and
-// needs no Wi-Fi network. Setup and calibration over the USB serial port (115200): type "help". See README.md.
+// needs no Wi-Fi network. Setup and calibration over the USB serial port (115200): type "help", or on the hub's
+// "Stock gauges" page (build 7 on: modes, PWM, calibration over ESP-NOW). See README.md.
 #include <Arduino.h>
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 6
+#define AIRCORE_BUILD 7
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
@@ -51,21 +52,24 @@ typedef struct {
   AirCoreCfg cfg;
   AirCorePoints pts;          // multi-point calibration (2+ points: used instead of zero / span)
   float needle;               // where it is now, degrees
-  float holdDeg; uint32_t holdUntil;
+  float holdDeg; uint32_t holdUntil;   // AC_MODE_ANGLE: the angle, and until when (0 = until told otherwise)
+  uint8_t mode;               // AC_MODE_LIVE / SWEEP / TARGET / ANGLE (not saved: every start is live)
+  float target, sweepS, shown;   // TARGET: the value; SWEEP: seconds end to end and back; what it shows now
+  uint32_t sweepT0;
 } Gauge;
 #if defined(ESP8266)
 // D1 = GPIO 5, D2 = GPIO 4, D5 = GPIO 14, D6 = GPIO 12 (none of them a boot pin). Its role picks tach or speedo.
-static Gauge G[GAUGES] = { { "tach", { 5, 4, 14, 12 }, LINK_SIG_RPM, {}, {}, 0, 0, 0 } };
+static Gauge G[GAUGES] = { { "tach", { 5, 4, 14, 12 }, LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 } };
 #elif defined(CONFIG_IDF_TARGET_ESP32)
 // ESP32 DevKitC: tach IN1-IN4 on GPIO 16, 17, 18, 19; speedo on 21, 22, 23, 25 (none a boot, flash or input-only pin).
 static Gauge G[GAUGES] = {
-  { "tach",   { 16, 17, 18, 19 }, LINK_SIG_RPM, {}, {}, 0, 0, 0 },
-  { "speedo", { 21, 22, 23, 25 }, LINK_SIG_VSS, {}, {}, 0, 0, 0 },
+  { "tach",   { 16, 17, 18, 19 }, LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "speedo", { 21, 22, 23, 25 }, LINK_SIG_VSS, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
 };
 #else
 static Gauge G[GAUGES] = {
-  { "tach",   { 3, 5, 7, 9 },     LINK_SIG_RPM, {}, {}, 0, 0, 0 },
-  { "speedo", { 11, 12, 16, 18 }, LINK_SIG_VSS, {}, {}, 0, 0, 0 },
+  { "tach",   { 3, 5, 7, 9 },     LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "speedo", { 11, 12, 16, 18 }, LINK_SIG_VSS, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
 };
 #endif
 
@@ -112,7 +116,17 @@ static void cfgLoad() {
 #endif
 
 // ---- the hub's data packet: RPM and speed out of it, if it has them ----
+static volatile bool s_cmdNew = false;
+static AcCmd s_cmdRx;
+static uint8_t s_myMac[6];
 static void handlePacket(const uint8_t *d, int len) {
+  if (len >= (int)sizeof(AcCmd) && ((const AcCmd *)d)->magic == AC_CMD_MAGIC) {   // from the hub's Stock gauges page
+    const AcCmd *c = (const AcCmd *)d;
+    static const uint8_t all[6] = { 255, 255, 255, 255, 255, 255 };
+    if (memcmp(c->mac, s_myMac, 6) && memcmp(c->mac, all, 6)) return;
+    LOCK(); memcpy(&s_cmdRx, d, sizeof s_cmdRx); s_cmdNew = true; UNLOCK();
+    return;
+  }
   if (len < LINK_PKT_V_OFFSET + 4) return;
   uint32_t magic; memcpy(&magic, d, 4);
   if (magic != LINK_PKT_MAGIC) return;
@@ -171,6 +185,72 @@ static void sweep() {
     }
 }
 
+// ---- the hub's Stock gauges page ----
+static void sendRaw(const uint8_t *d, int len) {
+  static uint8_t bc[6] = { 255, 255, 255, 255, 255, 255 };
+#if defined(ESP8266)
+  esp_now_send(bc, (uint8_t *)d, len);
+#else
+  esp_now_send(bc, d, len);
+#endif
+}
+static void sendStatus(int g) {
+  AcStatus st; memset(&st, 0, sizeof st);
+  st.magic = AC_STATUS_MAGIC; st.build = AIRCORE_BUILD; st.gauge = g; st.gauges = GAUGES; st.sig = G[g].sig;
+  st.mode = G[g].mode; st.slow = s_slow; st.hubHeard = s_lastRx && millis() - s_lastRx < LOST_MS; st.has = s_has[g];
+  st.pwmHz = s_pwmHz; st.needle = G[g].needle; st.value = s_val[g]; st.target = G[g].shown; st.sweepS = G[g].sweepS;
+  st.strength = G[g].cfg.strength; st.slew = G[g].cfg.slewDegS; st.minV = G[g].cfg.minVal; st.maxV = G[g].cfg.maxVal;
+  st.zero = G[g].cfg.zeroDeg; st.span = G[g].cfg.spanDeg; st.npts = G[g].pts.n; st.ch = s_ch;
+  for (int i = 0; i < G[g].pts.n && i < AC_POINTS; i++) { st.pv[i] = G[g].pts.v[i]; st.pa[i] = G[g].pts.a[i]; }
+  sendRaw((const uint8_t *)&st, sizeof st);
+}
+static void setMode(int g, uint8_t m) { G[g].mode = m; G[g].holdUntil = 0; G[g].sweepT0 = millis(); }
+static void applyCmd(const AcCmd &c) {
+  int g = c.gauge < GAUGES ? c.gauge : 0;
+  AirCoreCfg cfg = G[g].cfg;
+  switch (c.op) {
+    case AC_OP_LIVE: setMode(g, AC_MODE_LIVE); return;
+    case AC_OP_SWEEP: setMode(g, AC_MODE_SWEEP); if (c.a >= 1 && c.a <= 60) G[g].sweepS = c.a; return;
+    case AC_OP_TARGET: setMode(g, AC_MODE_TARGET); G[g].target = c.a; return;
+    case AC_OP_ANGLE: setMode(g, AC_MODE_ANGLE); G[g].holdDeg = c.a; return;
+    case AC_OP_PWM: if (c.a >= 100 && c.a <= 40000) { s_pwmHz = (uint32_t)c.a; pwmApply(); for (int k = 0; k < GAUGES; k++) cfgSave(k); } return;
+    case AC_OP_DECAY: s_slow = c.a != 0; for (int k = 0; k < GAUGES; k++) cfgSave(k); return;
+    case AC_OP_STRENGTH: cfg.strength = c.a; break;
+    case AC_OP_SLEW: cfg.slewDegS = c.a; break;
+    case AC_OP_RANGE: cfg.minVal = c.a; cfg.maxVal = c.b; break;
+    case AC_OP_ZERO: cfg.zeroDeg = c.a; break;
+    case AC_OP_SPAN: cfg.spanDeg = c.a; break;
+    case AC_OP_MARK: if (aircore_points_set(&G[g].pts, c.a, c.b)) cfgSave(g); return;
+    case AC_OP_MARK_HERE: if (aircore_points_set(&G[g].pts, c.a, G[g].needle)) cfgSave(g); return;
+    case AC_OP_UNMARK: if (aircore_points_remove(&G[g].pts, c.a)) cfgSave(g); return;
+    case AC_OP_CLEARMARKS: aircore_points_clear(&G[g].pts); cfgSave(g); return;
+    case AC_OP_DEFAULTS: defaultsFor(G[g]); aircore_points_clear(&G[g].pts); cfgSave(g); return;
+    default: return;
+  }
+  if (aircore_valid(&cfg)) { G[g].cfg = cfg; cfgSave(g); }
+}
+// The needle angle wanted now, from the gauge's mode.
+static float wantedAngle(int g, uint32_t now, bool heard) {
+  Gauge &G1 = G[g];
+  float lo = G1.pts.n >= 2 ? G1.pts.v[0] : G1.cfg.minVal, hi = G1.pts.n >= 2 ? G1.pts.v[G1.pts.n - 1] : G1.cfg.maxVal;
+  if (G1.mode == AC_MODE_ANGLE && G1.holdUntil && (int32_t)(now - G1.holdUntil) >= 0) setMode(g, AC_MODE_LIVE);   // a serial hold ran out
+  switch (G1.mode) {
+    case AC_MODE_ANGLE: return G1.holdDeg;
+    case AC_MODE_SWEEP: {
+      float ph = fmodf((now - G1.sweepT0) / 1000.0f, G1.sweepS) / G1.sweepS;
+      G1.shown = lo + (ph < 0.5f ? ph * 2 : 2 - ph * 2) * (hi - lo);
+      return aircore_angle_pts(&G1.cfg, &G1.pts, G1.shown);
+    }
+    case AC_MODE_TARGET: G1.shown = G1.target; return aircore_angle_pts(&G1.cfg, &G1.pts, G1.target);
+    default: {
+      float v; bool has;
+      LOCK(); v = s_val[g]; has = s_has[g] && heard; UNLOCK();
+      G1.shown = has ? v : lo;
+      return aircore_angle_pts(&G1.cfg, &G1.pts, G1.shown);
+    }
+  }
+}
+
 static void show() {
   Serial.printf("aircore build %d | %s decay | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, s_slow ? "slow" : "fast", (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
                 millis() - s_lastRx < LOST_MS ? (s_sim ? "hub heard (SIMULATED data)" : "hub heard") : "no hub: hunting channels");
@@ -197,6 +277,7 @@ static void help() {
   Serial.println("  tach zero 12 | span 245       coil angle at the start of the scale | degrees to the end");
   Serial.println("  tach min 0 | max 8000         values at the start and end of the dial");
   Serial.println("  tach strength 0.8 | slew 720  drive (0.1-1) | fastest needle speed, deg/s");
+  Serial.println("  tach target 3000 | sweeping 4   show a fixed value | sweep end to end and back every 4 s (release: live)");
   Serial.println("  tach mark 2000                 the angle the needle is held at now (tach angle ...) becomes the 2000 mark");
   Serial.println("  tach point 2000 118           the 2000 mark at coil angle 118, typed in");
   Serial.println("  tach unpoint 2000 | clearpoints   remove one mark | all of them (back to zero / span)");
@@ -233,17 +314,19 @@ static void command(String line) {
   int g = -1;
   for (int k = 0; k < GAUGES; k++) if (who == G[k].name) g = k;
   if (g < 0) { Serial.printf("? type help%s\n", GAUGES == 1 ? (String(" (this board drives the ") + G[0].name + ")").c_str() : ""); return; }
-  if (what == "release") { G[g].holdUntil = 0; Serial.println("Live data"); return; }
+  if (what == "release") { setMode(g, AC_MODE_LIVE); Serial.println("Live data"); return; }
   if (what == "clearpoints") { aircore_points_clear(&G[g].pts); cfgSave(g); Serial.printf("%s: marks cleared (zero / span again), saved\n", G[g].name); return; }
   if (isnan(v)) { Serial.println("? a number is missing"); return; }
-  if (what == "angle") { G[g].holdDeg = v; G[g].holdUntil = millis() + HOLD_MS; Serial.printf("%s held at %.1f deg\n", G[g].name, v); return; }
+  if (what == "angle") { setMode(g, AC_MODE_ANGLE); G[g].holdDeg = v; G[g].holdUntil = millis() + HOLD_MS; Serial.printf("%s held at %.1f deg\n", G[g].name, v); return; }
+  if (what == "target") { setMode(g, AC_MODE_TARGET); G[g].target = v; Serial.printf("%s showing %g (release: live)\n", G[g].name, v); return; }
+  if (what == "sweeping") { setMode(g, AC_MODE_SWEEP); if (v >= 1 && v <= 60) G[g].sweepS = v; Serial.printf("%s sweeping, %g s end to end and back (release: live)\n", G[g].name, G[g].sweepS); return; }
   if (what == "mark" || what == "point" || what == "unpoint") {
     float val = v, ang = G[g].holdDeg;
     if (what == "point") {   // "tach point 2000 118": value and angle typed in
       String rest = line.substring(sp2 + 1); rest.trim(); int sp3 = rest.indexOf(' ');
       if (sp3 < 0) { Serial.println("? tach point <value> <angle>"); return; }
       val = rest.substring(0, sp3).toFloat(); ang = rest.substring(sp3 + 1).toFloat();
-    } else if (what == "mark" && !(G[g].holdUntil && millis() < G[g].holdUntil)) { Serial.println("Hold the needle on the mark first (tach angle ...), then mark it"); return; }
+    } else if (what == "mark" && G[g].mode != AC_MODE_ANGLE) { Serial.println("Hold the needle on the mark first (tach angle ...), then mark it"); return; }
     if (what == "unpoint") { Serial.println(aircore_points_remove(&G[g].pts, val) ? "Mark removed, saved" : "No mark at that value"); cfgSave(g); return; }
     if (!aircore_points_set(&G[g].pts, val, ang)) { Serial.println("12 marks already: remove one first"); return; }
     cfgSave(g); Serial.printf("%s: %g at %.1f deg (%d marks), saved\n", G[g].name, val, ang, G[g].pts.n); return;
@@ -264,12 +347,22 @@ void setup() {
   for (int k = 0; k < 4; k++) { pinMode(G[0].pins[k], OUTPUT); analogWrite(G[0].pins[k], 0); }
   WiFi.mode(WIFI_STA); WiFi.disconnect();
   setChannel(s_ch);
-  if (esp_now_init() == 0) { esp_now_set_self_role(ESP_NOW_ROLE_SLAVE); esp_now_register_recv_cb(onRecv); } else Serial.println("ESP-NOW start FAILED");
+  if (esp_now_init() == 0) {
+    static uint8_t bc[6] = { 255, 255, 255, 255, 255, 255 };
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO); esp_now_register_recv_cb(onRecv);
+    esp_now_add_peer(bc, ESP_NOW_ROLE_COMBO, 0, NULL, 0);   // status to the hub
+  } else Serial.println("ESP-NOW start FAILED");
+  WiFi.macAddress(s_myMac);
 #else
   for (int g = 0; g < GAUGES; g++) for (int k = 0; k < 4; k++) ledcAttach(G[g].pins[k], s_pwmHz, 10);   // 8 pins: the S2's 8 PWM channels (the ESP32 has 16)
   WiFi.mode(WIFI_STA); WiFi.disconnect(false, false);
   setChannel(s_ch);
-  if (esp_now_init() == ESP_OK) esp_now_register_recv_cb(onRecv); else Serial.println("ESP-NOW start FAILED");
+  if (esp_now_init() == ESP_OK) {
+    esp_now_register_recv_cb(onRecv);
+    esp_now_peer_info_t pi = {}; memset(pi.peer_addr, 0xFF, 6); pi.channel = 0; pi.encrypt = false;
+    esp_now_add_peer(&pi);   // status to the hub (channel 0 = whatever channel it is on)
+  } else Serial.println("ESP-NOW start FAILED");
+  WiFi.macAddress(s_myMac);
 #endif
   sweep();
   Serial.printf("\naircore build %d ready (%s). Type help.\n", AIRCORE_BUILD, GAUGES == 1 ? G[0].name : "tach + speedo");
@@ -280,14 +373,14 @@ void loop() {
   while (Serial.available()) { char ch = Serial.read(); if (ch == '\n' || ch == '\r') { command(line); line = ""; } else if (line.length() < 60) line += ch; }
   uint32_t now = millis();
   bool heard = s_lastRx && now - s_lastRx < LOST_MS;
+  static uint32_t lastSt = 0; static uint8_t stG = 0; bool stNow = false;
+  if (s_cmdNew) { AcCmd c; LOCK(); c = s_cmdRx; s_cmdNew = false; UNLOCK(); applyCmd(c); stNow = true; stG = c.gauge < GAUGES ? c.gauge : 0; }
+  if (heard && (stNow || now - lastSt >= 500 / GAUGES)) { lastSt = now; sendStatus(stG); stG = (stG + 1) % GAUGES; }   // half a second per gauge
   if (!heard && now - s_hopMs >= HOP_MS) { s_hopMs = now; s_ch = s_ch % 13 + 1; setChannel(s_ch); }   // hunt for the hub
   if (now - last < STEP_MS) return;
   float dt = (now - last) / 1000.0f; last = now;
   for (int g = 0; g < GAUGES; g++) {
-    float v; bool has;
-    LOCK(); v = s_val[g]; has = s_has[g] && heard; UNLOCK();
-    float rest = G[g].pts.n >= 2 ? G[g].pts.v[0] : G[g].cfg.minVal;
-    float target = G[g].holdUntil && now < G[g].holdUntil ? G[g].holdDeg : aircore_angle_pts(&G[g].cfg, &G[g].pts, has ? v : rest);
+    float target = wantedAngle(g, now, heard);
     G[g].needle = aircore_slew(G[g].needle, target, G[g].cfg.slewDegS, dt);
     drive(g, G[g].needle);
   }

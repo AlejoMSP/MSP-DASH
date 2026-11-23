@@ -2,7 +2,9 @@
 // sketch's copy of the hub's packet layout matches the real one.
 // Build: g++ -std=c++17 -I../../aircore -I../../esp32s3-amoled-bsp-base test_aircore.cpp
 #include "aircore.h"
+namespace ac {
 #include "aircore_link.h"
+}
 #include "link_packets.h"
 #include <stdio.h>
 #include <stddef.h>
@@ -56,6 +58,9 @@ int main() {
   printf("7. the hub's packet\n");
   CHECK(LINK_PKT_MAGIC == PKT_MAGIC && LINK_PKT_V_OFFSET == offsetof(LinkPacket, v), "magic and where the values start match link_packets.h");
   CHECK(LINK_SIG_RPM == SIG_RPM && LINK_SIG_VSS == SIG_VSS && AC_MASK_SIMULATED == LINK_MASK_SIMULATED, "RPM, speed and the simulator flag match");
+  CHECK(sizeof(ac::AcStatus) == sizeof(AcStatus) && sizeof(ac::AcCmd) == sizeof(AcCmd) && sizeof(AcStatus) <= 250, "status and command packets: same size on both sides, one ESP-NOW frame");
+  CHECK(offsetof(ac::AcStatus, pwmHz) == offsetof(AcStatus, pwmHz) && offsetof(ac::AcStatus, pv) == offsetof(AcStatus, pv) && offsetof(ac::AcCmd, a) == offsetof(AcCmd, a), "same layout");
+  CHECK(ac::AC_OP_SPAN == AC_OP_SPAN && ac::AC_MODE_ANGLE == AC_MODE_ANGLE && AC_POINTS == AIRCORE_POINTS, "same command numbers; as many marks as the board keeps");
   printf("\n%d passed, %d failed\n", pass, fail);
   return fail ? 1 : 0;
 }

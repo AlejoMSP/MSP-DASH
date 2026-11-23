@@ -6,7 +6,7 @@ A small OLED on the hub shows warning lamps and quick pages.
 
 The stock tach and speedo: `aircore/` (ESP32-S2 Mini + DRV8833, build 1).
 
-Current builds: **screens 231**, **hub 63**.
+Current builds: **screens 231**, **hub 64**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 

@@ -9,7 +9,7 @@
 // drawer behind the menu button on a phone. Also the shared look (chips, toast). The current page is highlighted by the
 // onerror of a 1-pixel image, so the menu adds no <script> to the page.
 #define HUB_NAV_STYLE "*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{background:#000;color:#ddd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:1000px;margin:0 auto;padding:12px 16px calc(24px + env(safe-area-inset-bottom))}body.wide{max-width:none}\ninput,select,textarea{font-size:16px}\n.nav{position:fixed;left:0;top:0;bottom:0;width:200px;background:#0b1a1d;padding:12px 8px;overflow-y:auto;z-index:50}\n.nav .brand{color:#4dd0e1;font-weight:bold;font-size:18px;margin:2px 10px 8px}\n.nav .grp{color:#6b8a90;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 10px 4px}\n.nav a{display:block;color:#cfe8ec;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:14px}\n.nav a:hover{background:#13292d}.nav a.on{background:#1d3b40;color:#4dd0e1;font-weight:bold}\n.navbtn{display:none;position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;z-index:60;background:#0b1a1d;color:#4dd0e1;border:1px solid #1d3b40;border-radius:6px;font-size:20px;padding:4px 10px}\n@media(min-width:800px){body{margin-left:216px!important}}\n@media(max-width:799px){.navbtn{display:block}.nav{transform:translateX(-100%);transition:transform .2s}.nav.open{transform:none;box-shadow:4px 0 20px #000}body{padding-top:calc(52px + env(safe-area-inset-top))!important}}\n.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#222;color:#bbb}.chip.ok{background:#16351c;color:#7bd88f}.chip.warn{background:#3d3000;color:#ffd54f}.chip.bad{background:#3d0b0b;color:#ff6b6b}\n.toast{position:fixed;right:16px;bottom:16px;background:#1d3b40;color:#e0f7fa;padding:10px 14px;border-radius:8px;z-index:70;box-shadow:0 4px 16px #000}"
-#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><a href=\"/boards\">Board status</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><a href=\"/backup\">Backup</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
+#define HUB_NAV "<button class=\"navbtn\" onclick=\"document.querySelector('.nav').classList.toggle('open')\">&#9776;</button><div class=\"nav\"><div class=\"brand\">MSP-DASH</div><div class=\"grp\">Overview</div><a href=\"/\">Dashboard</a><a href=\"/boards\">Board status</a><div class=\"grp\">Displays</div><a href=\"/screen\">Screens</a><a href=\"/oled\">OLED</a><a href=\"/aircore\">Stock gauges</a><div class=\"grp\">Sensors</div><a href=\"/sensors\">Live sensors</a><a href=\"/custom\">Custom sensors</a><div class=\"grp\">Controls</div><a href=\"/inputs\">Inputs and pins</a><a href=\"/buttons\">Buttons</a><div class=\"grp\">Logging</div><a href=\"/screen?s=Center&p=log-channels\">Logging</a><a href=\"/screen?s=Center&p=sd\">SD card</a><div class=\"grp\">Setup</div><a href=\"/setup\">Setup</a><a href=\"/firmware\">Firmware</a><a href=\"/backup\">Backup</a><div class=\"grp\">Tools</div><a href=\"/simulator\">Simulator</a><a href=\"/can\">Raw CAN</a><a href=\"/rf\">433 MHz</a></div><img src=\"data:,\" alt=\"\" style=\"display:none\" onerror=\"var h=location.pathname+location.search;document.querySelectorAll('.nav a').forEach(function(a){var t=a.getAttribute('href');if(t===h||(t===location.pathname&&t.indexOf('?')<0&&h.indexOf('?')<0))a.classList.add('on')})\">"
 
 static const char HOME_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH</title>
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="MSP-DASH">
@@ -924,4 +924,63 @@ async function restore(){if(!B)return;if(!confirm("Restore the ticked parts? Tho
     r=await fetch("http://"+t.value+"/restore",{method:"POST",headers:{"X-MSP":"1"},body:body});}
    res.push(p.board+": "+await r.text());}catch(e){res.push(p.board+": no answer");}}
  msg(res.join(" | ")||"Nothing ticked",res.some(x=>/Not restored|no answer|errors/.test(x)));}
+</script></body></html>)HTML";
+
+// Stock gauges (aircore board, hub 64): modes, PWM, calibration, over ESP-NOW.
+static const char AIRCORE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>MSP-DASH Stock gauges</title>
+<style>h2{color:#4dd0e1;margin:6px 0 10px}h3{color:#4dd0e1;margin:0;font-size:17px}.card{background:#111;border-radius:8px;padding:12px;margin:0 0 12px}.note{color:#888;font-size:13px}
+button{padding:7px 12px;background:#4dd0e1;color:#000;border:0;border-radius:6px;margin:2px}button.off{background:#26363a;color:#cfe8ec}button.danger{background:#e53935;color:#fff}
+input,select{background:#000;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px;width:90px}input[type=range]{width:100%;padding:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.big{font-size:22px;color:#fff}.lab{color:#888;font-size:12px;display:block}
+table{border-collapse:collapse}td,th{padding:4px 10px;border-bottom:1px solid #222;text-align:left;font-size:14px}th{color:#4dd0e1;font-weight:normal}#msg{min-height:1.2em;color:#4dd0e1}
+)HTML" HUB_NAV_STYLE R"HTML(</style></head><body>)HTML" HUB_NAV R"HTML(
+<h2>Stock gauges</h2>
+<p class="note">The original tach and speedo, driven by the aircore board (build 7 or later). Modes are not saved: a restart goes back to live data.</p>
+<div id="msg"></div><div id="gauges"><p class="note">Looking for the gauge board...</p></div>
+<script>
+const $=id=>document.getElementById(id);
+const OP={live:1,sweep:2,target:3,angle:4,pwm:5,decay:6,strength:7,slew:8,range:9,mark:10,markHere:11,unmark:12,clear:13,defaults:14};
+const MODES=["Live","Sweep","Target","Angle"];
+const PWMS=[100,200,250,500,1000,2000,2500,4000,5000,8000,10000,12500,15000,16000,20000,25000,30000,32000,40000];
+let G=[],built="";
+const key=g=>g.mac+"/"+g.g;
+async function cmd(g,op,a,b){try{const q=new URLSearchParams({mac:g.mac,g:g.g,op:op,a:a===undefined?0:a,b:b===undefined?0:b});
+ const r=await fetch("/aircore/cmd?"+q);$("msg").textContent=r.ok?"":await r.text();}catch(e){$("msg").textContent="No answer from the hub";}}
+function byKey(k){return G.find(g=>key(g)===k);}
+function C(k,op,a,b){const g=byKey(k);if(g)cmd(g,op,a,b);}
+let tmr={};function soon(k,fn){clearTimeout(tmr[k]);tmr[k]=setTimeout(fn,150);}
+function card(g){const k=key(g),u=g.name==="tach"?"RPM":"mph",id=k.replace(/[^A-Za-z0-9]/g,"");
+ return '<div class="card" data-k="'+k+'"><div class="row"><h3>'+(g.name==="tach"?"Tach":"Speedo")+'</h3><span class="note">'+g.mac+' | build '+g.build+' | channel '+g.ch+'</span></div>'+
+ '<div class="row"><span><span class="lab">Showing</span><span class="big" id="v'+id+'"></span></span><span><span class="lab">Needle</span><span class="big" id="n'+id+'"></span></span><span><span class="lab">Mode</span><span class="big" id="m'+id+'"></span></span></div>'+
+ '<div class="row"><button onclick="C(\''+k+'\','+OP.live+')">Live</button>'+
+ '<button onclick="C(\''+k+'\','+OP.sweep+',$(\'sw'+id+'\').value)">Sweep</button><input id="sw'+id+'" type="number" min="1" max="60" step="0.5" value="'+g.sweepS+'"> s end to end and back</div>'+
+ '<div class="row"><span class="lab">Target ('+u+'): the needle follows the slider</span><input type="range" id="tr'+id+'" min="'+g.min+'" max="'+g.max+'" step="'+(g.name==="tach"?50:1)+'" value="'+g.min+'" oninput="$(\'tv'+id+'\').value=this.value;soon(\'t'+id+'\',()=>C(\''+k+'\','+OP.target+',this.value))">'+
+ '<input id="tv'+id+'" type="number" value="'+g.min+'"><button onclick="$(\'tr'+id+'\').value=$(\'tv'+id+'\').value;C(\''+k+'\','+OP.target+',$(\'tv'+id+'\').value)">Go</button></div>'+
+ '<h3 style="margin-top:12px">Calibration</h3><p class="note">Angle mode holds the needle at a coil angle: move it onto a dial number and save that number as a mark. With two or more marks the needle goes from mark to mark.</p>'+
+ '<div class="row"><span class="lab">Coil angle</span><input type="range" id="ar'+id+'" min="-360" max="360" step="0.5" value="'+g.needle+'" oninput="$(\'av'+id+'\').value=this.value;soon(\'a'+id+'\',()=>C(\''+k+'\','+OP.angle+',this.value))">'+
+ '<input id="av'+id+'" type="number" step="0.5" value="'+g.needle+'"><button onclick="$(\'ar'+id+'\').value=$(\'av'+id+'\').value;C(\''+k+'\','+OP.angle+',$(\'av'+id+'\').value)">Hold</button>'+
+ '<button class="off" onclick="var x=$(\'av'+id+'\');x.value=(+x.value-0.5);$(\'ar'+id+'\').value=x.value;C(\''+k+'\','+OP.angle+',x.value)">-0.5</button><button class="off" onclick="var x=$(\'av'+id+'\');x.value=(+x.value+0.5);$(\'ar'+id+'\').value=x.value;C(\''+k+'\','+OP.angle+',x.value)">+0.5</button></div>'+
+ '<div class="row">Dial number <input id="mk'+id+'" type="number"> <button onclick="C(\''+k+'\','+OP.markHere+',$(\'mk'+id+'\').value)">Save as mark</button><span class="note">(the needle\'s angle now)</span></div>'+
+ '<div id="pt'+id+'"></div>'+
+ '<div class="row"><span class="lab">Strength</span><input id="st'+id+'" type="number" min="0.1" max="1" step="0.05" value="'+g.strength+'"><button class="off" onclick="C(\''+k+'\','+OP.strength+',$(\'st'+id+'\').value)">Set</button>'+
+ '<span class="lab">Needle speed, deg/s</span><input id="sl'+id+'" type="number" min="10" max="5000" value="'+g.slew+'"><button class="off" onclick="C(\''+k+'\','+OP.slew+',$(\'sl'+id+'\').value)">Set</button></div>'+
+ '<div class="row"><span class="lab">Dial range ('+u+')</span><input id="mn'+id+'" type="number" value="'+g.min+'"> to <input id="mx'+id+'" type="number" value="'+g.max+'"><button class="off" onclick="C(\''+k+'\','+OP.range+',$(\'mn'+id+'\').value,$(\'mx'+id+'\').value)">Set</button></div>'+
+ '<div class="row"><button class="off" onclick="if(confirm(\'Remove every mark?\'))C(\''+k+'\','+OP.clear+')">Clear marks</button><button class="danger" onclick="if(confirm(\'Factory settings for this gauge (marks too)?\'))C(\''+k+'\','+OP.defaults+')">Factory settings</button></div></div>';}
+function boardCard(g){const m=g.mac,id=m.replace(/:/g,"");
+ return '<div class="card"><h3>Board '+m+'</h3><p class="note">Shared by its gauges. Lower PWM can be steadier, higher is silent.</p><div class="row"><span class="lab">PWM</span><select id="pw'+id+'">'+
+ PWMS.map(v=>'<option value="'+v+'"'+(v===g.pwm?" selected":"")+'>'+(v>=1000?v/1000+" kHz":v+" Hz")+'</option>').join("")+(PWMS.includes(g.pwm)?"":'<option value="'+g.pwm+'" selected>'+g.pwm+' Hz</option>')+'</select>'+
+ '<button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.pwm+',$(\'pw'+id+'\').value)">Set</button><input id="pc'+id+'" type="number" min="100" max="40000" placeholder="Hz"><button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.pwm+',$(\'pc'+id+'\').value)">Set any</button>'+
+ '<span class="lab">Coil drive</span><select id="dc'+id+'"><option value="1"'+(g.slow?" selected":"")+'>Slow decay (stronger)</option><option value="0"'+(g.slow?"":" selected")+'>Fast decay</option></select><button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.decay+',$(\'dc'+id+'\').value)">Set</button></div></div>';}
+function live(g){const id=key(g).replace(/[^A-Za-z0-9]/g,""),u=g.name==="tach"?" RPM":" mph";
+ $("v"+id).textContent=Math.round(g.shown)+u+(g.mode===0&&!g.has?" (no data)":"");$("n"+id).textContent=g.needle.toFixed(1)+"\u00b0";
+ $("m"+id).textContent=MODES[g.mode]||"?";
+ const pts=g.pts.length?'<table><tr><th>Mark</th><th>Coil angle</th><th></th></tr>'+g.pts.map(p=>'<tr><td>'+p[0]+'</td><td>'+p[1]+'\u00b0</td><td><button class="off" onclick="C(\''+key(g)+'\','+OP.unmark+','+p[0]+')">Remove</button></td></tr>').join("")+'</table>'
+  +(g.pts.length<2?'<p class="note">One more mark and they replace zero / span.</p>':''):'<p class="note">No marks yet: zero '+g.zero+'\u00b0, span '+g.span+'\u00b0 in use.</p>';
+ const t=$("pt"+id);if(t.innerHTML!==pts)t.innerHTML=pts;}
+async function poll(){try{const d=await (await fetch("/aircore.json")).json();G=d.gauges;
+ const sig=G.map(g=>key(g)+":"+g.min+":"+g.max).join("|");
+ if(!G.length){$("gauges").innerHTML='<p class="note">No gauge board heard. It needs aircore build 7 or later and the hub\'s data (same channel).</p>';built="";return;}
+ if(sig!==built){const macs=[...new Set(G.map(g=>g.mac))];$("gauges").innerHTML=macs.map(m=>boardCard(G.find(g=>g.mac===m))+G.filter(g=>g.mac===m).map(card).join("")).join("");built=sig;}
+ G.forEach(live);}catch(e){}}
+poll();setInterval(poll,500);
 </script></body></html>)HTML";

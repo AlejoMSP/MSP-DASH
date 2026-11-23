@@ -1,5 +1,10 @@
 # aircore: the stock NB tach and speedo
 
+**Hub page (build 7, hub 64):** Stock gauges on the hub (`http://192.168.55.204/aircore`): live / sweep / target /
+angle modes per gauge (the needle follows the target slider), PWM from 100 Hz to 40 kHz, slow or fast decay, strength,
+needle speed, dial range, and calibration marks (hold an angle, save it as a dial number; remove; clear). Serial
+commands still work.
+
 ## Wemos D1 Mini (ESP8266): one board per gauge (build 2)
 
 Each gauge gets its own D1 Mini and its own DRV8833. Tell each board once which gauge it is: `role tach` or
