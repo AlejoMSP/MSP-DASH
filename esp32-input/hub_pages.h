@@ -944,8 +944,10 @@ const MODES=["Live","Sweep","Target","Angle"];
 const PWMS=[100,200,250,500,1000,2000,2500,4000,5000,8000,10000,12500,15000,16000,20000,25000,30000,32000,40000];
 let G=[],built="";
 const key=g=>g.mac+"/"+g.g;
+let pend={};   // board MAC -> the command number it should apply next (shown until its status says it did)
 async function cmd(g,op,a,b){try{const q=new URLSearchParams({mac:g.mac,g:g.g,op:op,a:a===undefined?0:a,b:b===undefined?0:b});
- const r=await fetch("/aircore/cmd?"+q);$("msg").textContent=r.ok?"":await r.text();}catch(e){$("msg").textContent="No answer from the hub";}}
+ const r=await fetch("/aircore/cmd?"+q),t=await r.text();
+ if(!r.ok){$("msg").textContent=t;return;}$("msg").textContent="";const n=parseInt(t.replace("Sent ",""));if(n)pend[g.mac]={seq:n,t:Date.now()};}catch(e){$("msg").textContent="No answer from the hub";}}
 function byKey(k){return G.find(g=>key(g)===k);}
 function C(k,op,a,b){const g=byKey(k);if(g)cmd(g,op,a,b);}
 let tmr={};function soon(k,fn){clearTimeout(tmr[k]);tmr[k]=setTimeout(fn,150);}
@@ -967,7 +969,7 @@ function card(g){const k=key(g),u=g.name==="tach"?"RPM":"mph",id=k.replace(/[^A-
  '<div class="row"><span class="lab">Dial range ('+u+')</span><input id="mn'+id+'" type="number" value="'+g.min+'"> to <input id="mx'+id+'" type="number" value="'+g.max+'"><button class="off" onclick="C(\''+k+'\','+OP.range+',$(\'mn'+id+'\').value,$(\'mx'+id+'\').value)">Set</button></div>'+
  '<div class="row"><button class="off" onclick="if(confirm(\'Remove every mark?\'))C(\''+k+'\','+OP.clear+')">Clear marks</button><button class="danger" onclick="if(confirm(\'Factory settings for this gauge (marks too)?\'))C(\''+k+'\','+OP.defaults+')">Factory settings</button></div></div>';}
 function boardCard(g){const m=g.mac,id=m.replace(/:/g,"");
- return '<div class="card"><h3>Board '+m+'</h3><p class="note">Shared by its gauges. Lower PWM can be steadier, higher is silent.</p><div class="row"><span class="lab">PWM</span><select id="pw'+id+'">'+
+ return '<div class="card"><h3>Board '+m+'</h3><p class="note" id="bs'+id+'"></p><p class="note">Shared by its gauges. Lower PWM can be steadier, higher is silent.</p><div class="row"><span class="lab">PWM</span><select id="pw'+id+'">'+
  PWMS.map(v=>'<option value="'+v+'"'+(v===g.pwm?" selected":"")+'>'+(v>=1000?v/1000+" kHz":v+" Hz")+'</option>').join("")+(PWMS.includes(g.pwm)?"":'<option value="'+g.pwm+'" selected>'+g.pwm+' Hz</option>')+'</select>'+
  '<button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.pwm+',$(\'pw'+id+'\').value)">Set</button><input id="pc'+id+'" type="number" min="100" max="40000" placeholder="Hz"><button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.pwm+',$(\'pc'+id+'\').value)">Set any</button>'+
  '<span class="lab">Coil drive</span><select id="dc'+id+'"><option value="1"'+(g.slow?" selected":"")+'>Slow decay (stronger)</option><option value="0"'+(g.slow?"":" selected")+'>Fast decay</option></select><button class="off" onclick="cmd({mac:\''+m+'\',g:0},'+OP.decay+',$(\'dc'+id+'\').value)">Set</button></div></div>';}
@@ -977,10 +979,17 @@ function live(g){const id=key(g).replace(/[^A-Za-z0-9]/g,""),u=g.name==="tach"?"
  const pts=g.pts.length?'<table><tr><th>Mark</th><th>Coil angle</th><th></th></tr>'+g.pts.map(p=>'<tr><td>'+p[0]+'</td><td>'+p[1]+'\u00b0</td><td><button class="off" onclick="C(\''+key(g)+'\','+OP.unmark+','+p[0]+')">Remove</button></td></tr>').join("")+'</table>'
   +(g.pts.length<2?'<p class="note">One more mark and they replace zero / span.</p>':''):'<p class="note">No marks yet: zero '+g.zero+'\u00b0, span '+g.span+'\u00b0 in use.</p>';
  const t=$("pt"+id);if(t.innerHTML!==pts)t.innerHTML=pts;}
+let ups={};
+function boardLive(g){const id=g.mac.replace(/:/g,""),e=$("bs"+id);if(!e)return;
+ const p=pend[g.mac],late=p&&g.seq!==p.seq&&Date.now()-p.t>1500;if(p&&g.seq===p.seq)delete pend[g.mac];
+ const restarted=ups[g.mac]!==undefined&&g.up<ups[g.mac];ups[g.mac]=g.up;if(restarted)ups["r"+g.mac]=Date.now();
+ const age=g.age>1500?" | not heard for "+(g.age/1000).toFixed(0)+" s":"";
+ e.textContent="Up "+Math.floor(g.up/60)+" min "+(g.up%60)+" s"+age+(late?" | last command not confirmed: press again":"")+(Date.now()-(ups["r"+g.mac]||0)<20000?" | it RESTARTED":"");
+ e.style.color=(age||late||Date.now()-(ups["r"+g.mac]||0)<20000)?"#ff8080":"#888";}
 async function poll(){try{const d=await (await fetch("/aircore.json")).json();G=d.gauges;
  const sig=G.map(g=>key(g)+":"+g.min+":"+g.max).join("|");
  if(!G.length){$("gauges").innerHTML='<p class="note">No gauge board heard. It needs aircore build 7 or later and the hub\'s data (same channel).</p>';built="";return;}
  if(sig!==built){const macs=[...new Set(G.map(g=>g.mac))];$("gauges").innerHTML=macs.map(m=>boardCard(G.find(g=>g.mac===m))+G.filter(g=>g.mac===m).map(card).join("")).join("");built=sig;}
- G.forEach(live);}catch(e){}}
+ G.forEach(live);G.forEach(boardLive);}catch(e){}}
 poll();setInterval(poll,500);
 </script></body></html>)HTML";

@@ -6,7 +6,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
 const els = {}; const el = id => els[id] || (els[id] = { id, innerHTML: "", textContent: "", value: "" });
 const calls = []; let data = { gauges: [] };
 const ctx = { document: { getElementById: el }, console, URLSearchParams, setInterval() {}, setTimeout: (f) => f(), clearTimeout() {}, confirm: () => true,
-  fetch: async (u) => { calls.push(u); if (u === "/aircore.json") return { ok: true, json: async () => data }; return { ok: true, text: async () => "Sent" }; } };
+  fetch: async (u) => { calls.push(u); if (u === "/aircore.json") return { ok: true, json: async () => data }; return { ok: true, text: async () => "Sent 7" }; } };
 vm.createContext(ctx); vm.runInContext(hubScript('AIRCORE_HTML'), ctx);
 const R = c => vm.runInContext(c, ctx);
 const mac = "AA:BB:CC:DD:EE:01";
@@ -33,5 +33,12 @@ const g = (n, name, extra) => Object.assign({ mac, g: n, age: 100, build: 7, gau
   calls.length = 0; R(`C("${mac}/0",11,3000)`); await settle(); c = sent()[0]; check(c && c.op === "11" && c.a === "3000", "save the needle's angle as the 3000 mark");
   calls.length = 0; R(`cmd({mac:"${mac}",g:0},5,2000)`); await settle(); c = sent()[0]; check(c && c.op === "5" && c.a === "2000", "PWM 2 kHz for the board");
   calls.length = 0; R(`C("${mac}/0",9,0,7000)`); await settle(); c = sent()[0]; check(c && c.op === "9" && c.a === "0" && c.b === "7000", "dial range 0 to 7000");
+  console.log("4. the board's health");
+  data.gauges[0].up = 600; data.gauges[0].seq = 7; await R("poll()"); await settle();
+  check(/^Up 10 min 0 s$/.test(el("bsAABBCCDDEE01").textContent), "uptime shown");
+  data.gauges[0].up = 5; await R("poll()"); await settle();
+  check(/RESTARTED/.test(el("bsAABBCCDDEE01").textContent), "a restart is flagged");
+  data.gauges[0].age = 4000; await R("poll()"); await settle();
+  check(/not heard for 4 s/.test(el("bsAABBCCDDEE01").textContent), "a quiet board is flagged");
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

@@ -12,13 +12,15 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 7
+#define AIRCORE_BUILD 8
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
 #define PWM_FULL 1023
 #define STEP_MS 5             // needle update
-#define LOST_MS 1500          // no data for this long: needles go to the start of the scale, and the hunt for the hub starts
+#define LOST_MS 1500          // no data for this long: needles go to the start of the scale
+#define HUNT_MS 5000          // no data for this long: hunt the channels for the hub (not sooner: a short gap is just a
+                              // missed packet, and while hunting the board misses the hub's commands too)
 #define HOP_MS 300            // channel hunt: time on each channel
 #define HOLD_MS 60000         // "angle" holds the needle this long (calibration)
 
@@ -194,6 +196,7 @@ static void sendRaw(const uint8_t *d, int len) {
   esp_now_send(bc, d, len);
 #endif
 }
+static uint16_t s_lastSeq = 0;   // the last command applied (so the hub page can tell it arrived)
 static void sendStatus(int g) {
   AcStatus st; memset(&st, 0, sizeof st);
   st.magic = AC_STATUS_MAGIC; st.build = AIRCORE_BUILD; st.gauge = g; st.gauges = GAUGES; st.sig = G[g].sig;
@@ -201,11 +204,14 @@ static void sendStatus(int g) {
   st.pwmHz = s_pwmHz; st.needle = G[g].needle; st.value = s_val[g]; st.target = G[g].shown; st.sweepS = G[g].sweepS;
   st.strength = G[g].cfg.strength; st.slew = G[g].cfg.slewDegS; st.minV = G[g].cfg.minVal; st.maxV = G[g].cfg.maxVal;
   st.zero = G[g].cfg.zeroDeg; st.span = G[g].cfg.spanDeg; st.npts = G[g].pts.n; st.ch = s_ch;
+  st.lastSeq = s_lastSeq; st.upS = millis() / 1000;
   for (int i = 0; i < G[g].pts.n && i < AC_POINTS; i++) { st.pv[i] = G[g].pts.v[i]; st.pa[i] = G[g].pts.a[i]; }
   sendRaw((const uint8_t *)&st, sizeof st);
 }
 static void setMode(int g, uint8_t m) { G[g].mode = m; G[g].holdUntil = 0; G[g].sweepT0 = millis(); }
 static void applyCmd(const AcCmd &c) {
+  if (c.seq && c.seq == s_lastSeq) return;   // the same command again (the hub sends each one 3 times)
+  s_lastSeq = c.seq;
   int g = c.gauge < GAUGES ? c.gauge : 0;
   AirCoreCfg cfg = G[g].cfg;
   switch (c.op) {
@@ -376,7 +382,8 @@ void loop() {
   static uint32_t lastSt = 0; static uint8_t stG = 0; bool stNow = false;
   if (s_cmdNew) { AcCmd c; LOCK(); c = s_cmdRx; s_cmdNew = false; UNLOCK(); applyCmd(c); stNow = true; stG = c.gauge < GAUGES ? c.gauge : 0; }
   if (heard && (stNow || now - lastSt >= 500 / GAUGES)) { lastSt = now; sendStatus(stG); stG = (stG + 1) % GAUGES; }   // half a second per gauge
-  if (!heard && now - s_hopMs >= HOP_MS) { s_hopMs = now; s_ch = s_ch % 13 + 1; setChannel(s_ch); }   // hunt for the hub
+  bool lost = !s_lastRx || now - s_lastRx >= HUNT_MS;
+  if (lost && now - s_hopMs >= HOP_MS) { s_hopMs = now; s_ch = s_ch % 13 + 1; setChannel(s_ch); }   // hunt for the hub
   if (now - last < STEP_MS) return;
   float dt = (now - last) / 1000.0f; last = now;
   for (int g = 0; g < GAUGES; g++) {

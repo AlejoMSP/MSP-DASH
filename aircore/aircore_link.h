@@ -24,12 +24,15 @@ typedef struct __attribute__((packed)) {
   uint8_t mode, slow, hubHeard, has;          // AC_MODE_*, slow decay, the hub's data heard, the value is live
   uint32_t pwmHz;
   float needle, value, target, sweepS, strength, slew, minV, maxV, zero, span;
-  uint8_t npts, ch, pad[2];
+  uint8_t npts, ch;
+  uint16_t lastSeq;                           // the last command applied (aircore 8)
   float pv[AC_POINTS], pa[AC_POINTS];         // calibration marks: value, coil angle
+  uint32_t upS;                               // seconds since the board started (a restart shows as a drop)
 } AcStatus;
 typedef struct __attribute__((packed)) {
   uint32_t magic;
   uint8_t mac[6];                             // the board it is for (all FF: every board)
   uint8_t gauge, op;                          // gauge index on that board, AC_OP_*
   float a, b;
+  uint16_t seq, pad;                          // the hub sends each command 3 times; the board applies a seq once
 } AcCmd;
