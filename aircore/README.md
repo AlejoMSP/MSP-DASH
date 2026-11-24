@@ -4,7 +4,7 @@ Drives the original Miata tach and speedometer (air-core gauges) from the hub's 
 it picks up the hub's ESP-NOW data packet (RPM and speed) on whatever Wi-Fi channel the hub is on, so it needs no
 network. It is set up from the hub's **Stock gauges** page (`http://192.168.55.204/aircore`) or over USB serial.
 
-Current firmware: **aircore build 9** (hub 66 or later for the Stock gauges page).
+Current firmware: **aircore build 10** (hub 68 or later for the Stock gauges page).
 
 ## What it uses (as built and tested)
 

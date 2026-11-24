@@ -12,7 +12,7 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 9
+#define AIRCORE_BUILD 10
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
@@ -215,10 +215,17 @@ static void sendStatus(int g) {
   sendRaw((const uint8_t *)&st, sizeof st);
 }
 static void setMode(int g, uint8_t m) { G[g].mode = m; G[g].holdUntil = 0; G[g].sweepT0 = millis(); }
+static const char *const AC_OP_NAMES[] = { "?", "live", "sweep", "target", "angle", "pwm", "decay", "strength", "slew",
+  "range", "mark", "mark here", "remove mark", "clear marks", "factory settings", "zero", "span" };
 static void applyCmd(const AcCmd &c) {
   if (c.seq && c.seq == s_lastSeq) return;   // the same command again (the hub sends each one 3 times)
   s_lastSeq = c.seq;
   int g = c.gauge < GAUGES ? c.gauge : 0;
+  // Every command from the hub's page, on the serial port (build 10): what arrived and for which gauge.
+  Serial.printf("hub page, command %u: %s %s", c.seq, G[g].name, c.op <= AC_OP_SPAN ? AC_OP_NAMES[c.op] : "?");
+  if (c.op == AC_OP_RANGE || c.op == AC_OP_MARK) Serial.printf(" %g %g", c.a, c.b);
+  else if (c.op != AC_OP_LIVE && c.op != AC_OP_CLEARMARKS && c.op != AC_OP_DEFAULTS) Serial.printf(" %g", c.a);
+  Serial.println();
   AirCoreCfg cfg = G[g].cfg;
   switch (c.op) {
     case AC_OP_LIVE: setMode(g, AC_MODE_LIVE); return;
@@ -301,9 +308,10 @@ static void help() {
 static void command(String line) {
   line.trim(); line.toLowerCase();
   if (!line.length()) return;
+  Serial.printf("> %s\n", line.c_str());   // echo: every typed command gets a line back
   if (line == "help") { help(); return; }
   if (line == "show") { show(); return; }
-  if (line == "sweep") { sweep(); return; }
+  if (line == "sweep") { sweep(); Serial.println("Sweep done"); return; }
   if (line == "defaults") { for (int g = 0; g < GAUGES; g++) { defaultsFor(G[g]); cfgSave(g); } Serial.println("Factory settings back"); return; }
   if (line == "decay slow" || line == "decay fast") {
     s_slow = line == "decay slow"; for (int g = 0; g < GAUGES; g++) cfgSave(g);
