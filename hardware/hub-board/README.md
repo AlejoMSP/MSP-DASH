@@ -8,8 +8,13 @@ docs/HUB_PINS.md; the board replaces the Freenove terminal board.
 report is cosmetic (silkscreen text overlapping, footprint library links that resolve on a PC with KiCad's standard
 libraries).
 
-Files: `hub-board.kicad_pcb` (open in KiCad 7 or 8), `hub-board-gerbers.zip` (upload to JLCPCB: 2 layers, 1.6 mm,
-1 oz, any colour), `gerbers/`.
+Files: `hub-board.kicad_pro` (open this in KiCad 7 or 8: it brings the schematic and the board), `hub-board.kicad_sch`,
+`hub-board.kicad_pcb`, `hub-board-gerbers.zip` (upload to JLCPCB: 2 layers, 1.6 mm, 1 oz, any colour), `gerbers/`.
+
+The schematic and the board are linked part by part, so a change in the schematic goes to the board with Tools >
+Update PCB from Schematic. To use a different plug: change that connector's Footprint field in the schematic (for
+example a JST-XH or Molex Micro-Fit footprint with the same number of pins), update the PCB, move the new part into
+place and re-route its tracks. Parts are boxes with every pin named; pins with the same label are connected.
 
 ## Check before ordering
 
