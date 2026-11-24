@@ -982,8 +982,9 @@ function live(g){const id=key(g).replace(/[^A-Za-z0-9]/g,""),u=g.name==="tach"?"
 let ups={};
 function boardLive(g){const id=g.mac.replace(/:/g,""),e=$("bs"+id);if(!e)return;
  const p=pend[g.mac],late=p&&g.seq!==p.seq&&Date.now()-p.t>1500;if(p&&g.seq===p.seq)delete pend[g.mac];
- const restarted=ups[g.mac]!==undefined&&g.up<ups[g.mac];ups[g.mac]=g.up;if(restarted)ups["r"+g.mac]=Date.now();
- const age=g.age>1500?" | not heard for "+(g.age/1000).toFixed(0)+" s":"";
+ // both gauges report the board's uptime, a second apart at most: a restart is a drop of more than 5 s
+ const restarted=ups[g.mac]!==undefined&&g.up+5<ups[g.mac];ups[g.mac]=Math.max(g.up,restarted?0:(ups[g.mac]||0));if(restarted){ups[g.mac]=g.up;ups["r"+g.mac]=Date.now();}
+ const age=g.age>4000?" | not heard for "+(g.age/1000).toFixed(0)+" s":"";
  e.textContent="Up "+Math.floor(g.up/60)+" min "+(g.up%60)+" s"+age+(late?" | last command not confirmed: press again":"")+(Date.now()-(ups["r"+g.mac]||0)<20000?" | it RESTARTED":"");
  e.style.color=(age||late||Date.now()-(ups["r"+g.mac]||0)<20000)?"#ff8080":"#888";}
 async function poll(){try{const d=await (await fetch("/aircore.json")).json();G=d.gauges;

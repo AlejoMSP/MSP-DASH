@@ -55,7 +55,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 66
+#define INPUT_BUILD 67
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----

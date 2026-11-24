@@ -36,9 +36,15 @@ const g = (n, name, extra) => Object.assign({ mac, g: n, age: 100, build: 7, gau
   console.log("4. the board's health");
   data.gauges[0].up = 600; data.gauges[0].seq = 7; await R("poll()"); await settle();
   check(/^Up 10 min 0 s$/.test(el("bsAABBCCDDEE01").textContent), "uptime shown");
-  data.gauges[0].up = 5; await R("poll()"); await settle();
+  data.gauges[1].up = 599; await R("poll()"); await settle();
+  check(!/RESTARTED/.test(el("bsAABBCCDDEE01").textContent), "the two gauges' uptimes a second apart: not a restart");
+  data.gauges[0].up = 5; data.gauges[1].up = 5; await R("poll()"); await settle();
   check(/RESTARTED/.test(el("bsAABBCCDDEE01").textContent), "a restart is flagged");
-  data.gauges[0].age = 4000; await R("poll()"); await settle();
-  check(/not heard for 4 s/.test(el("bsAABBCCDDEE01").textContent), "a quiet board is flagged");
+  data.gauges[0].up = 600; data.gauges[1].up = 601; await R("poll()"); await settle(); data.gauges[0].up = 601; data.gauges[1].up = 600; await R("poll()"); await settle();
+  const t = el("bsAABBCCDDEE01").textContent;
+  data.gauges[0].age = 2000; await R("poll()"); await settle();
+  check(!/not heard/.test(el("bsAABBCCDDEE01").textContent), "a 2 s gap (a lost packet or two) is not flagged");
+  data.gauges[0].age = 6000; await R("poll()"); await settle();
+  check(/not heard for 6 s/.test(el("bsAABBCCDDEE01").textContent), "a quiet board is flagged");
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();
