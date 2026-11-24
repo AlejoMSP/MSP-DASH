@@ -4,7 +4,7 @@ A digital gauge cluster for a turbocharged 2002 Mazda Miata (NB2) running rusEFI
 gauges; one ESP32 "hub" reads the car (CAN bus and its own sensors) and sends everything to them over ESP-NOW.
 A small OLED on the hub shows warning lamps and quick pages.
 
-The stock tach and speedo: `aircore/` (ESP32-S2 Mini + DRV8833, build 1).
+The stock tach and speedo: `aircore/` (ESP32 DevKitC + two DRV8833 at 5 V, aircore build 8; set up on the hub's Stock gauges page). Pinout and calibration: aircore/README.md.
 
 Current builds: **screens 245**, **hub 65**.
 
