@@ -105,12 +105,24 @@ mark; with fewer it uses zero and span.
 3. **Sweep** or **Target** to check; re-mark any number that is off (a new angle replaces the old one).
 4. Calibrate at the supply voltage the car will use: the needle lags a little more on less current.
 
-Bench calibration (5 V, slow decay, PWM 40 kHz), for reference or to type back in after a factory reset:
+The current calibration is in `aircore/calibration.txt` (see below): send it back with `configure.ps1` after a
+factory reset or a reflash. Angles depend on how the coils are wired: after rewiring a gauge, calibrate it again.
 
-| Gauge | Marks (value = coil angle) |
-|---|---|
-| Tach | 0=175, 1000=148, 2000=117, 3000=84, 4000=52.5, 5000=21, 6000=-11, 7000=-43, 8000=-84 |
-| Speedo | 0=175, 20=149, 40=114, 60=75, 80=41.5, 100=4.5, 120=-33, 145=-85 |
+## Saving and restoring the calibration (configure.ps1)
+
+`aircore/calibration.txt` holds the board's settings as serial commands (PWM, decay, and per gauge: strength, needle
+speed, dial range, marks). `aircore/configure.ps1` sends that file to the board, or saves the board's current settings
+into it. Close the serial monitor first (only one program can have the port).
+
+```powershell
+cls
+cd C:\Users\alejo\OneDrive\GIT\MSP-DASH\aircore
+powershell -ExecutionPolicy Bypass -File configure.ps1 -Port COM6 -Save    # board -> calibration.txt
+powershell -ExecutionPolicy Bypass -File configure.ps1 -Port COM6          # calibration.txt -> board
+```
+
+Each line's answer is printed (refused ones in red), then the board's `show`. After calibrating on the page, run
+`-Save` and commit the file, so a factory reset or a reflash never loses it. `-File other.txt` uses another file.
 
 ## Serial commands (115200, type `help`)
 
