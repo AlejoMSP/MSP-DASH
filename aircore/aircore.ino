@@ -12,7 +12,7 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 8
+#define AIRCORE_BUILD 9
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
@@ -188,13 +188,19 @@ static void sweep() {
 }
 
 // ---- the hub's Stock gauges page ----
+static uint32_t s_stSent = 0, s_stFail = 0;   // status packets to the hub (show prints them)
 static void sendRaw(const uint8_t *d, int len) {
   static uint8_t bc[6] = { 255, 255, 255, 255, 255, 255 };
 #if defined(ESP8266)
-  esp_now_send(bc, (uint8_t *)d, len);
+  int r = esp_now_send(bc, (uint8_t *)d, len);
 #else
-  esp_now_send(bc, d, len);
+  esp_err_t r = esp_now_send(bc, d, len);
+  if (r == ESP_ERR_ESPNOW_NOT_FOUND) {   // the broadcast peer went missing: add it again and retry once
+    esp_now_peer_info_t pi = {}; memset(pi.peer_addr, 0xFF, 6); pi.channel = 0; pi.encrypt = false;
+    esp_now_add_peer(&pi); r = esp_now_send(bc, d, len);
+  }
 #endif
+  if (r == 0) s_stSent++; else s_stFail++;
 }
 static uint16_t s_lastSeq = 0;   // the last command applied (so the hub page can tell it arrived)
 static void sendStatus(int g) {
@@ -258,6 +264,7 @@ static float wantedAngle(int g, uint32_t now, bool heard) {
 }
 
 static void show() {
+  Serial.printf("status to the hub's page: %lu sent, %lu failed\n", (unsigned long)s_stSent, (unsigned long)s_stFail);
   Serial.printf("aircore build %d | %s decay | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, s_slow ? "slow" : "fast", (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
                 millis() - s_lastRx < LOST_MS ? (s_sim ? "hub heard (SIMULATED data)" : "hub heard") : "no hub: hunting channels");
   for (int g = 0; g < GAUGES; g++) {

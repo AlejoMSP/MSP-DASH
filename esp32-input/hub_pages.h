@@ -988,7 +988,7 @@ function boardLive(g){const id=g.mac.replace(/:/g,""),e=$("bs"+id);if(!e)return;
  e.style.color=(age||late||Date.now()-(ups["r"+g.mac]||0)<20000)?"#ff8080":"#888";}
 async function poll(){try{const d=await (await fetch("/aircore.json")).json();G=d.gauges;
  const sig=G.map(g=>key(g)+":"+g.min+":"+g.max).join("|");
- if(!G.length){$("gauges").innerHTML='<p class="note">No gauge board heard. It needs aircore build 7 or later and the hub\'s data (same channel).</p>';built="";return;}
+ if(!G.length){$("gauges").innerHTML='<p class="note">No gauge board heard. It needs aircore build 7 or later and the hub\'s data (same channel). Status packets heard since the hub started: '+(d.rx||0)+(d.short?', '+d.short+' too short (update the gauge board)':'')+'. On the gauge board, <b>show</b> says how many it sent and how many failed.</p>';built="";return;}
  if(sig!==built){const macs=[...new Set(G.map(g=>g.mac))];$("gauges").innerHTML=macs.map(m=>boardCard(G.find(g=>g.mac===m))+G.filter(g=>g.mac===m).map(card).join("")).join("");built=sig;}
  G.forEach(live);G.forEach(boardLive);}catch(e){}}
 poll();setInterval(poll,500);
