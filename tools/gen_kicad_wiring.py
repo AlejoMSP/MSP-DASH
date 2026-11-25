@@ -90,7 +90,7 @@ TEXTS = [
     ("Hub", 20, 24, 2), ("CAN, radio, EGT, GPS, cabin", 150, 24, 2), ("I2C bus (3.3 V only)", 150, 127, 2),
     ("Analog inputs and buttons", 20, 127, 2), ("Power", 150, 167, 2), ("Screens (data over ESP-NOW, no wires)", 150, 192, 2),
     ("Gauge board (data over ESP-NOW)", 150, 225, 2),
-    ("Nets connect by label. GND terminals on the Freenove board: L19, R6, R12 (check the silkscreen).", 20, 285, 1.5),
+    ("Nets connect by label. GND terminals on the Freenove board: L19, R6, R12.", 20, 285, 1.5),
 ]
 
 # ---- output

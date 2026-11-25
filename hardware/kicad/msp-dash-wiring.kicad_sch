@@ -807,6 +807,6 @@
 (text "Power" (at 190.5 212.09 0) (effects (font (size 2 2)) (justify left bottom)) (uuid 532da4ca-ba29-5724-9ce7-436eda11e37a))
 (text "Screens (data over ESP-NOW, no wires)" (at 190.5 243.84 0) (effects (font (size 2 2)) (justify left bottom)) (uuid fe3002bf-aa48-5ba4-a283-5e375249da4f))
 (text "Gauge board (data over ESP-NOW)" (at 190.5 285.75 0) (effects (font (size 2 2)) (justify left bottom)) (uuid 8332f86f-2aea-5807-82d7-d5b87bf8ac92))
-(text "Nets connect by label. GND terminals on the Freenove board: L19, R6, R12 (check the silkscreen)." (at 25.4 361.95 0) (effects (font (size 1.5 1.5)) (justify left bottom)) (uuid 473b4697-13ab-5ef8-9e2b-8dbfa7a20bc6))
+(text "Nets connect by label. GND terminals on the Freenove board: L19, R6, R12." (at 25.4 361.95 0) (effects (font (size 1.5 1.5)) (justify left bottom)) (uuid 473b4697-13ab-5ef8-9e2b-8dbfa7a20bc6))
   (sheet_instances (path "/" (page "1")))
 )
