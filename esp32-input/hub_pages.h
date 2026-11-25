@@ -981,6 +981,7 @@ function live(g){const id=key(g).replace(/[^A-Za-z0-9]/g,""),u=g.name==="tach"?"
  const t=$("pt"+id);if(t.innerHTML!==pts)t.innerHTML=pts;}
 let ups={};
 function boardLive(g){const id=g.mac.replace(/:/g,""),e=$("bs"+id);if(!e)return;
+ if(pend[g.mac]&&Date.now()-pend[g.mac].t>8000)delete pend[g.mac];   // an old warning (say, from before the board restarted) goes away
  const p=pend[g.mac],late=p&&g.seq!==p.seq&&Date.now()-p.t>1500;
  if(p&&g.seq===p.seq){delete pend[g.mac];$("msg").style.color="#7fdf7f";$("msg").textContent="Board "+g.mac+" applied command "+g.seq;clearTimeout(boardLive.t);boardLive.t=setTimeout(()=>{$("msg").textContent="";$("msg").style.color="";},3000);}
  // both gauges report the board's uptime, a second apart at most: a restart is a drop of more than 5 s

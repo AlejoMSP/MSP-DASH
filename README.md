@@ -8,7 +8,7 @@ Power in the car (fuse, diode, TVS, buck options): docs/POWER.md.
 
 The stock tach and speedo: `aircore/` (ESP32 DevKitC + two DRV8833 at 5 V, aircore build 8; set up on the hub's Stock gauges page). Pinout and calibration: aircore/README.md.
 
-Current builds: **screens 245**, **hub 68**.
+Current builds: **screens 245**, **hub 69**.
 
 ![OLED pages](tools/icons/oled_pages_preview.png)
 
