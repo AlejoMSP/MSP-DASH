@@ -54,7 +54,8 @@ None of these is a boot, flash or input-only pin.
 | 5 V supply + | ESP32 5V pin, tach DRV8833 VCC, speedo DRV8833 VCC |
 | 5 V supply - | ESP32 GND, both DRV8833 GND (all grounds tied) |
 
-Never put 12 V on the DRV8833 (its limit is 10.8 V). The whole system's wiring, gauge board included, is in
+Never put 12 V on the DRV8833 (its limit is 10.8 V). For the 5 V supply in the car (fuse, diode, TVS, which buck
+module) see docs/POWER.md. The whole system's wiring, gauge board included, is in
 `hardware/kicad/msp-dash-wiring.kicad_sch` (PDF next to it).
 
 ## Build and flash (PowerShell)
