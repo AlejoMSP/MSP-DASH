@@ -12,7 +12,7 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 10
+#define AIRCORE_BUILD 11
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
@@ -21,7 +21,9 @@ static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the defau
 #define LOST_MS 1500          // no data for this long: needles go to the start of the scale
 #define HUNT_MS 5000          // no data for this long: hunt the channels for the hub (not sooner: a short gap is just a
                               // missed packet, and while hunting the board misses the hub's commands too)
-#define HOP_MS 300            // channel hunt: time on each channel
+#define HOP_MS 300            // channel scan: time on each channel
+#define RATE_MIN 8            // the hub sends ~20 packets a second: fewer than this over RATE_MS = wrong channel, scan
+#define RATE_MS 4000
 #define HOLD_MS 60000         // "angle" holds the needle this long (calibration)
 
 #if defined(ESP8266)
@@ -80,6 +82,12 @@ static volatile bool s_has[GAUGES], s_sim = false;
 static volatile uint32_t s_lastRx = 0, s_rx = 0;
 static uint8_t s_ch = 1;
 static uint32_t s_hopMs = 0;
+// Channel scan (build 11): every channel is listened to for HOP_MS and the one with the MOST of the hub's packets wins.
+// Stopping at the first channel with any packet was wrong on the bench: right next to the hub, a few of its packets
+// leak onto far-away channels (the board sat on 1 while the hub was on 10, hearing a trickle and missing the rest).
+static uint8_t s_scanCh = 0, s_bestCh = 1;     // s_scanCh 0 = not scanning
+static uint32_t s_scanRx0 = 0, s_bestN = 0, s_rateT0 = 0, s_rateRx0 = 0, s_scans = 0;
+static float s_rate = 0;
 
 static void defaultsFor(Gauge &g) { if (g.sig == LINK_SIG_RPM) aircore_defaults_tach(&g.cfg); else aircore_defaults_speedo(&g.cfg); }
 
@@ -271,7 +279,8 @@ static float wantedAngle(int g, uint32_t now, bool heard) {
 }
 
 static void show() {
-  Serial.printf("status to the hub's page: %lu sent, %lu failed\n", (unsigned long)s_stSent, (unsigned long)s_stFail);
+  Serial.printf("status to the hub's page: %lu sent, %lu failed | hub packets %.1f a second on channel %d%s | %lu channel scans\n",
+                (unsigned long)s_stSent, (unsigned long)s_stFail, s_rate, s_ch, s_scanCh ? " (scanning)" : "", (unsigned long)s_scans);
   Serial.printf("aircore build %d | %s decay | pwm %lu Hz | channel %d | packets %lu | %s\n", AIRCORE_BUILD, s_slow ? "slow" : "fast", (unsigned long)s_pwmHz, s_ch, (unsigned long)s_rx,
                 millis() - s_lastRx < LOST_MS ? (s_sim ? "hub heard (SIMULATED data)" : "hub heard") : "no hub: hunting channels");
   for (int g = 0; g < GAUGES; g++) {
@@ -398,7 +407,27 @@ void loop() {
   if (s_cmdNew) { AcCmd c; LOCK(); c = s_cmdRx; s_cmdNew = false; UNLOCK(); applyCmd(c); stNow = true; stG = c.gauge < GAUGES ? c.gauge : 0; }
   if (heard && (stNow || now - lastSt >= 500 / GAUGES)) { lastSt = now; sendStatus(stG); stG = (stG + 1) % GAUGES; }   // half a second per gauge
   bool lost = !s_lastRx || now - s_lastRx >= HUNT_MS;
-  if (lost && now - s_hopMs >= HOP_MS) { s_hopMs = now; s_ch = s_ch % 13 + 1; setChannel(s_ch); }   // hunt for the hub
+  if (s_scanCh) {   // scanning: count the hub's packets on each channel, keep the best
+    if (now - s_hopMs >= HOP_MS) {
+      uint32_t n = s_rx - s_scanRx0;
+      if (n > s_bestN) { s_bestN = n; s_bestCh = s_scanCh; }
+      if (s_scanCh >= 13) {
+        s_ch = s_bestN ? s_bestCh : 1; setChannel(s_ch); s_scanCh = 0;
+        s_rateT0 = now; s_rateRx0 = s_rx;
+        Serial.printf("Channel scan: the hub is loudest on channel %d (%lu packets in %d ms)\n", s_ch, (unsigned long)s_bestN, HOP_MS);
+      } else { s_scanCh++; setChannel(s_scanCh); s_hopMs = now; s_scanRx0 = s_rx; }
+    }
+  } else {
+    if (!s_rateT0) { s_rateT0 = now; s_rateRx0 = s_rx; }
+    if (now - s_rateT0 >= RATE_MS) {   // how many of the hub's packets arrive here
+      s_rate = (s_rx - s_rateRx0) * 1000.0f / (now - s_rateT0);
+      s_rateT0 = now; s_rateRx0 = s_rx;
+      if (s_rate < RATE_MIN) lost = true;   // a trickle: most likely the wrong channel
+    }
+    if (lost && (s_scans == 0 || now - s_hopMs >= HUNT_MS)) {   // start a scan: at once after start-up, then at most every HUNT_MS
+      s_scans++; s_scanCh = 1; s_bestN = 0; s_bestCh = s_ch; setChannel(1); s_hopMs = now; s_scanRx0 = s_rx;
+    }
+  }
   if (now - last < STEP_MS) return;
   float dt = (now - last) / 1000.0f; last = now;
   for (int g = 0; g < GAUGES; g++) {

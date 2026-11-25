@@ -4,7 +4,7 @@ Drives the original Miata tach and speedometer (air-core gauges) from the hub's 
 it picks up the hub's ESP-NOW data packet (RPM and speed) on whatever Wi-Fi channel the hub is on, so it needs no
 network. It is set up from the hub's **Stock gauges** page (`http://192.168.55.204/aircore`) or over USB serial.
 
-Current firmware: **aircore build 10** (hub 68 or later for the Stock gauges page).
+Current firmware: **aircore build 11** (hub 68 or later for the Stock gauges page).
 
 ## What it uses (as built and tested)
 
@@ -154,7 +154,8 @@ The same with `speedo` in place of `tach`.
 | Needle stutters and falls back to zero partway up the dial | A weak DRV8833 channel: swap the board. Check slow decay is on and strength is 1 |
 | Needle holds at some angles but not others | One coil not driven: check its two wires and its DRV8833 inputs (angles 0/180 use coil B, 90/270 coil A) |
 | Needle sits on 0 at some angles | Normal past the bottom of the dial: the gauge's stop pin |
-| `show` says "no hub: hunting channels" | Hub off, or the board has not found its channel yet (it waits 5 s before hunting, then tries each channel) |
+| `show` says "no hub: hunting channels" | Hub off, or the board has not found its channel yet (it listens to every channel and keeps the one where the hub is loudest) |
+| Page says "not heard", but page commands still work sometimes | Wrong channel: close to the hub, a few of its packets leak onto other channels. Build 11 scans again when fewer than 8 hub packets a second arrive; `show` prints the rate and the channel (compare with the hub's on /wifi.json) |
 | Page commands sometimes do nothing | Update both: hub 65 and aircore 8 confirm each command |
 
 ## Other boards (same sketch)
