@@ -3,8 +3,8 @@
 pwm 20000
 decay slow
 tach strength 1
-tach slew 720
-tach smooth 150
+tach slew 360
+tach smooth 350
 tach min 0
 tach max 8000
 tach clearpoints

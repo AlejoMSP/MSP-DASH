@@ -152,7 +152,7 @@ The same with `speedo` in place of `tach`.
 
 | Symptom | Likely cause |
 |---|---|
-| Needle jitters with the engine running | The ECU's value moves a little every packet: raise smoothing (tach 150-250 ms) |
+| Needle jitters with the engine running | The ECU's value moves a little every packet: raise smoothing. On the car the tach settled at smooth 350 with slew 360 |
 | Needle stutters and falls back to zero partway up the dial | A weak DRV8833 channel: swap the board. Check slow decay is on and strength is 1 |
 | Needle holds at some angles but not others | One coil not driven: check its two wires and its DRV8833 inputs (angles 0/180 use coil B, 90/270 coil A) |
 | Needle sits on 0 at some angles | Normal past the bottom of the dial: the gauge's stop pin |
