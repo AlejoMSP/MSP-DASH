@@ -55,7 +55,7 @@
 #include "hub_pages.h"     // the web pages (kept out of the .ino on purpose, see the file)
 #include "simulator.h"     // copied in at compile time with simulator.cpp: the bench simulator runs here (build 15 on)
 
-#define INPUT_BUILD 69
+#define INPUT_BUILD 70
 #define BOARD_NAME "Input"
 
 // ---- pins (ESP32-D bench) ----
@@ -1216,10 +1216,10 @@ static void setupWeb() {
       const AcStatus &t = c[i].st; char b[460];
       snprintf(b, sizeof b, "%s{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"g\":%u,\"age\":%lu,\"build\":%u,\"gauges\":%u,\"name\":\"%s\",\"mode\":%u,"
                "\"slow\":%u,\"hub\":%u,\"has\":%u,\"pwm\":%lu,\"needle\":%.1f,\"value\":%.1f,\"shown\":%.1f,\"sweepS\":%.1f,\"strength\":%.2f,"
-               "\"slew\":%.0f,\"min\":%g,\"max\":%g,\"zero\":%.1f,\"span\":%.1f,\"ch\":%u,\"seq\":%u,\"up\":%lu,\"pts\":[",
+               "\"slew\":%.0f,\"min\":%g,\"max\":%g,\"zero\":%.1f,\"span\":%.1f,\"ch\":%u,\"seq\":%u,\"up\":%lu,\"smooth\":%.0f,\"pts\":[",
                first ? "" : ",", c[i].mac[0], c[i].mac[1], c[i].mac[2], c[i].mac[3], c[i].mac[4], c[i].mac[5], t.gauge, (unsigned long)(now - c[i].lastMs),
                t.build, t.gauges, t.sig == SIG_RPM ? "tach" : t.sig == SIG_VSS ? "speedo" : "gauge", t.mode, t.slow, t.hubHeard, t.has, (unsigned long)t.pwmHz,
-               t.needle, t.value, t.target, t.sweepS, t.strength, t.slew, t.minV, t.maxV, t.zero, t.span, t.ch, t.lastSeq, (unsigned long)t.upS);
+               t.needle, t.value, t.target, t.sweepS, t.strength, t.slew, t.minV, t.maxV, t.zero, t.span, t.ch, t.lastSeq, (unsigned long)t.upS, t.smoothMs);
       j += b; first = false;
       for (int k = 0; k < t.npts && k < AC_POINTS; k++) { snprintf(b, sizeof b, "%s[%g,%.1f]", k ? "," : "", t.pv[k], t.pa[k]); j += b; }
       j += "]}";
@@ -1233,7 +1233,7 @@ static void setupWeb() {
     if (sscanf(server.arg("mac").c_str(), "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) != 6) { server.send(400, "text/plain", "Which board?"); return; }
     for (int i = 0; i < 6; i++) c.mac[i] = (uint8_t)m[i];
     c.gauge = (uint8_t)server.arg("g").toInt(); c.op = (uint8_t)server.arg("op").toInt();
-    if (c.op < AC_OP_LIVE || c.op > AC_OP_SPAN) { server.send(400, "text/plain", "Unknown command"); return; }
+    if (c.op < AC_OP_LIVE || c.op > AC_OP_SMOOTH) { server.send(400, "text/plain", "Unknown command"); return; }
     c.a = server.arg("a").toFloat(); c.b = server.arg("b").toFloat();
     static uint16_t seq = 0; if (++seq == 0) seq = 1;
     c.seq = seq;

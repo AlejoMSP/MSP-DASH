@@ -116,7 +116,8 @@ static inline int link_shift_color(int level, int idx, int n) {
 #define AC_POINTS 12   // = AIRCORE_POINTS (aircore.h)
 enum { AC_MODE_LIVE = 0, AC_MODE_SWEEP = 1, AC_MODE_TARGET = 2, AC_MODE_ANGLE = 3 };
 enum { AC_OP_LIVE = 1, AC_OP_SWEEP, AC_OP_TARGET, AC_OP_ANGLE, AC_OP_PWM, AC_OP_DECAY, AC_OP_STRENGTH, AC_OP_SLEW,
-       AC_OP_RANGE, AC_OP_MARK, AC_OP_MARK_HERE, AC_OP_UNMARK, AC_OP_CLEARMARKS, AC_OP_DEFAULTS, AC_OP_ZERO, AC_OP_SPAN };
+       AC_OP_RANGE, AC_OP_MARK, AC_OP_MARK_HERE, AC_OP_UNMARK, AC_OP_CLEARMARKS, AC_OP_DEFAULTS, AC_OP_ZERO, AC_OP_SPAN,
+       AC_OP_SMOOTH };   // AC_OP_SMOOTH: aircore 12 / hub 70
 typedef struct __attribute__((packed)) {
   uint32_t magic;
   uint8_t build, gauge, gauges, sig;         // this gauge's index on the board, how many it has, LINK_SIG_RPM / _VSS
@@ -127,6 +128,7 @@ typedef struct __attribute__((packed)) {
   uint16_t lastSeq;                           // the last command applied (aircore 8)
   float pv[AC_POINTS], pa[AC_POINTS];         // calibration marks: value, coil angle
   uint32_t upS;                               // seconds since the board started (a restart shows as a drop)
+  float smoothMs;                             // live value smoothing, ms (aircore 12; older boards: 0 via the hub)
 } AcStatus;
 typedef struct __attribute__((packed)) {
   uint32_t magic;

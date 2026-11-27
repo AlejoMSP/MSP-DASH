@@ -4,6 +4,7 @@ pwm 40000
 decay slow
 tach strength 1
 tach slew 360
+tach smooth 120
 tach min 0
 tach max 8000
 tach clearpoints
@@ -18,6 +19,7 @@ tach point 7000 217
 tach point 8000 257
 speedo strength 1
 speedo slew 360
+speedo smooth 300
 speedo min 0
 speedo max 150
 speedo clearpoints

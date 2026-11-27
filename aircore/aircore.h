@@ -97,3 +97,14 @@ static inline float aircore_angle_pts(const AirCoreCfg *c, const AirCorePoints *
   float f = (v - p->v[i - 1]) / (p->v[i] - p->v[i - 1]);
   return p->a[i - 1] + f * (p->a[i] - p->a[i - 1]);
 }
+
+// ---- smoothing (aircore build 12) ----
+// The ECU's RPM moves a little from packet to packet (20 a second), and the needle followed every step: it jittered.
+// A first-order low-pass on the live value: after tau the needle has gone 63 % of the way to a new value. tau 0 = off.
+static inline float aircore_lowpass(float now, float target, float dtS, float tauS) {
+  if (tauS <= 0 || dtS <= 0) return target;
+  float k = 1.0f - expf(-dtS / tauS);
+  return now + (target - now) * k;
+}
+#define AIRCORE_SMOOTH_MAX_MS 2000
+static inline float aircore_smooth_default(int isTach) { return isTach ? 120.0f : 300.0f; }

@@ -87,7 +87,7 @@ Hub menu, Displays, **Stock gauges**. One card per board (PWM and coil drive, sh
 | Angle | Holds a coil angle: slider, number, +-0.5 degree buttons (for calibration) |
 | Save as mark | The needle's angle now becomes that dial number |
 | Marks table | Every mark, each with Remove; Clear marks |
-| Strength, needle speed, dial range | Per gauge |
+| Strength, needle speed, smoothing, dial range | Per gauge. Smoothing (ms) takes the jitter of live data off the needle: tach 120, speedo 300 by default, 0 = off |
 | PWM | 100 Hz to 40 kHz (19 steps, or any number); Coil drive: slow or fast decay |
 | Factory settings | That gauge back to defaults, marks removed |
 
@@ -140,6 +140,7 @@ Each line's answer is printed (refused ones in red), then the board's `show`. Af
 | `tach zero 175` / `tach span -260` | Zero and span (used with fewer than 2 marks) |
 | `tach min 0` / `tach max 8000` | Dial range |
 | `tach strength 1` / `tach slew 720` | Drive 0.1-1 / fastest needle speed, degrees a second |
+| `tach smooth 120` | Smoothing of live data, ms (0 = off). More = calmer but slower to follow |
 | `pwm 20000` | PWM frequency, 100-40000 Hz (both gauges) |
 | `decay slow` / `decay fast` | Coil drive between pulses |
 | `sweep` | One sweep end to end and back |
@@ -151,6 +152,7 @@ The same with `speedo` in place of `tach`.
 
 | Symptom | Likely cause |
 |---|---|
+| Needle jitters with the engine running | The ECU's value moves a little every packet: raise smoothing (tach 150-250 ms) |
 | Needle stutters and falls back to zero partway up the dial | A weak DRV8833 channel: swap the board. Check slow decay is on and strength is 1 |
 | Needle holds at some angles but not others | One coil not driven: check its two wires and its DRV8833 inputs (angles 0/180 use coil B, 90/270 coil A) |
 | Needle sits on 0 at some angles | Normal past the bottom of the dial: the gauge's stop pin |

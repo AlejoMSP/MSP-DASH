@@ -939,7 +939,7 @@ table{border-collapse:collapse}td,th{padding:4px 10px;border-bottom:1px solid #2
 <div id="msg"></div><div id="gauges"><p class="note">Looking for the gauge board...</p></div>
 <script>
 const $=id=>document.getElementById(id);
-const OP={live:1,sweep:2,target:3,angle:4,pwm:5,decay:6,strength:7,slew:8,range:9,mark:10,markHere:11,unmark:12,clear:13,defaults:14};
+const OP={live:1,sweep:2,target:3,angle:4,pwm:5,decay:6,strength:7,slew:8,range:9,mark:10,markHere:11,unmark:12,clear:13,defaults:14,zero:15,span:16,smooth:17};
 const MODES=["Live","Sweep","Target","Angle"];
 const PWMS=[100,200,250,500,1000,2000,2500,4000,5000,8000,10000,12500,15000,16000,20000,25000,30000,32000,40000];
 let G=[],built="";
@@ -965,7 +965,8 @@ function card(g){const k=key(g),u=g.name==="tach"?"RPM":"mph",id=k.replace(/[^A-
  '<div class="row">Dial number <input id="mk'+id+'" type="number"> <button onclick="C(\''+k+'\','+OP.markHere+',$(\'mk'+id+'\').value)">Save as mark</button><span class="note">(the needle\'s angle now)</span></div>'+
  '<div id="pt'+id+'"></div>'+
  '<div class="row"><span class="lab">Strength</span><input id="st'+id+'" type="number" min="0.1" max="1" step="0.05" value="'+g.strength+'"><button class="off" onclick="C(\''+k+'\','+OP.strength+',$(\'st'+id+'\').value)">Set</button>'+
- '<span class="lab">Needle speed, deg/s</span><input id="sl'+id+'" type="number" min="10" max="5000" value="'+g.slew+'"><button class="off" onclick="C(\''+k+'\','+OP.slew+',$(\'sl'+id+'\').value)">Set</button></div>'+
+ '<span class="lab">Needle speed, deg/s</span><input id="sl'+id+'" type="number" min="10" max="5000" value="'+g.slew+'"><button class="off" onclick="C(\''+k+'\','+OP.slew+',$(\'sl'+id+'\').value)">Set</button>'+
+ '<span class="lab">Smoothing, ms (live data; 0 = off)</span><input id="sm'+id+'" type="number" min="0" max="2000" step="10" value="'+(g.smooth||0)+'"><button class="off" onclick="C(\''+k+'\','+OP.smooth+',$(\'sm'+id+'\').value)">Set</button></div>'+
  '<div class="row"><span class="lab">Dial range ('+u+')</span><input id="mn'+id+'" type="number" value="'+g.min+'"> to <input id="mx'+id+'" type="number" value="'+g.max+'"><button class="off" onclick="C(\''+k+'\','+OP.range+',$(\'mn'+id+'\').value,$(\'mx'+id+'\').value)">Set</button></div>'+
  '<div class="row"><button class="off" onclick="if(confirm(\'Remove every mark?\'))C(\''+k+'\','+OP.clear+')">Clear marks</button><button class="danger" onclick="if(confirm(\'Factory settings for this gauge (marks too)?\'))C(\''+k+'\','+OP.defaults+')">Factory settings</button></div></div>';}
 function boardCard(g){const m=g.mac,id=m.replace(/:/g,"");

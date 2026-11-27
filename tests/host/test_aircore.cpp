@@ -55,7 +55,13 @@ int main() {
     AirCorePoints bad = p; bad.v[1] = 9000; CHECK(!aircore_points_valid(&bad), "out of order: not valid (cleared on load)");
     AirCorePoints full; aircore_points_clear(&full); for (int i = 0; i < AIRCORE_POINTS; i++) aircore_points_set(&full, i * 100, 180 - i);
     CHECK(!aircore_points_set(&full, 5000, 0), "12 marks: no more"); }
-  printf("7. the hub's packet\n");
+  printf("7. smoothing\n");
+  CHECK(aircore_lowpass(1000, 2000, 0.05f, 0) == 2000, "off: straight to the value");
+  { float v = 1000; for (int i = 0; i < 24; i++) v = aircore_lowpass(v, 2000, 0.005f, 0.12f); CHECK(near(v, 1632, 5), "after one tau (120 ms): 63 % of the way"); }
+  { float v = 3000; float lo = 1e9, hi = -1e9; for (int i = 0; i < 400; i++) { v = aircore_lowpass(v, (i / 10) % 2 ? 3050 : 2950, 0.005f, 0.12f); if (i > 200) { lo = fminf(lo, v); hi = fmaxf(hi, v); } }
+    CHECK(hi - lo < 40, "a +-50 RPM wobble every 50 ms: under 40 RPM left on the needle"); }
+  CHECK(aircore_smooth_default(1) == 120 && aircore_smooth_default(0) == 300, "defaults: tach 120 ms, speedo 300 ms");
+  printf("8. the hub's packet\n");
   CHECK(LINK_PKT_MAGIC == PKT_MAGIC && LINK_PKT_V_OFFSET == offsetof(LinkPacket, v), "magic and where the values start match link_packets.h");
   CHECK(LINK_SIG_RPM == SIG_RPM && LINK_SIG_VSS == SIG_VSS && AC_MASK_SIMULATED == LINK_MASK_SIMULATED, "RPM, speed and the simulator flag match");
   CHECK(sizeof(ac::AcStatus) == sizeof(AcStatus) && sizeof(ac::AcCmd) == sizeof(AcCmd) && sizeof(AcStatus) <= 250, "status and command packets: same size on both sides, one ESP-NOW frame");

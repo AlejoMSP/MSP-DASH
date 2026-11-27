@@ -32,10 +32,12 @@ if ($Save) {
   if ($show -match "pwm (\d+) Hz") { $lines += "pwm $($Matches[1])" }
   $gauge = $null
   foreach ($l in ($show -split "`r?`n")) {
-    if ($l -match "^\s+(tach|speedo)\s+value .*min (\S+) max (\S+) zero (\S+) span (\S+) strength (\S+) slew (\S+)") {
-      $gauge = $Matches[1]
+    if ($l -match "^\s+(tach|speedo)\s+value .*min (\S+) max (\S+) zero (\S+) span (\S+) strength (\S+) slew (\S+)(?: smooth (\S+))?") {
+      $gauge = $Matches[1]; $sm = $Matches[8]
       $lines += "$gauge strength $($Matches[6])", "$gauge slew $($Matches[7])", "$gauge min $($Matches[2])", "$gauge max $($Matches[3])",
-                "$gauge zero $($Matches[4])", "$gauge span $($Matches[5])", "$gauge clearpoints"
+                "$gauge zero $($Matches[4])", "$gauge span $($Matches[5])"
+      if ($sm) { $lines += "$gauge smooth $sm" }
+      $lines += "$gauge clearpoints"
     } elseif ($gauge -and $l -match "points \([^)]*\):\s*(.*)$") {
       foreach ($p in ($Matches[1].Trim() -split "\s+")) { if ($p -match "^(-?[\d.]+)=(-?[\d.]+)$") { $lines += "$gauge point $($Matches[1]) $($Matches[2])" } }
     }

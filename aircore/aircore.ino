@@ -12,7 +12,7 @@
 #include "aircore.h"
 #include "aircore_link.h"
 
-#define AIRCORE_BUILD 11
+#define AIRCORE_BUILD 12
 #define PWM_HZ_DEFAULT 20000  // above hearing, so the coils do not whine (the D1 Mini may need lower: "pwm" command)
 static uint32_t s_pwmHz = PWM_HZ_DEFAULT;
 static uint8_t s_slow = 1;    // 1 = slow decay (brake between pulses, the default), 0 = fast decay: "decay" command
@@ -56,6 +56,7 @@ typedef struct {
   AirCoreCfg cfg;
   AirCorePoints pts;          // multi-point calibration (2+ points: used instead of zero / span)
   float needle;               // where it is now, degrees
+  float smoothMs, filt;       // live value smoothing (ms, 0 = off) and the smoothed value
   float holdDeg; uint32_t holdUntil;   // AC_MODE_ANGLE: the angle, and until when (0 = until told otherwise)
   uint8_t mode;               // AC_MODE_LIVE / SWEEP / TARGET / ANGLE (not saved: every start is live)
   float target, sweepS, shown;   // TARGET: the value; SWEEP: seconds end to end and back; what it shows now
@@ -63,17 +64,17 @@ typedef struct {
 } Gauge;
 #if defined(ESP8266)
 // D1 = GPIO 5, D2 = GPIO 4, D5 = GPIO 14, D6 = GPIO 12 (none of them a boot pin). Its role picks tach or speedo.
-static Gauge G[GAUGES] = { { "tach", { 5, 4, 14, 12 }, LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 } };
+static Gauge G[GAUGES] = { { "tach", { 5, 4, 14, 12 }, LINK_SIG_RPM, {}, {}, 0, 120, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 } };
 #elif defined(CONFIG_IDF_TARGET_ESP32)
 // ESP32 DevKitC: tach IN1-IN4 on GPIO 16, 17, 18, 19; speedo on 21, 22, 23, 25 (none a boot, flash or input-only pin).
 static Gauge G[GAUGES] = {
-  { "tach",   { 16, 17, 18, 19 }, LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
-  { "speedo", { 21, 22, 23, 25 }, LINK_SIG_VSS, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "tach",   { 16, 17, 18, 19 }, LINK_SIG_RPM, {}, {}, 0, 120, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "speedo", { 21, 22, 23, 25 }, LINK_SIG_VSS, {}, {}, 0, 300, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
 };
 #else
 static Gauge G[GAUGES] = {
-  { "tach",   { 3, 5, 7, 9 },     LINK_SIG_RPM, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
-  { "speedo", { 11, 12, 16, 18 }, LINK_SIG_VSS, {}, {}, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "tach",   { 3, 5, 7, 9 },     LINK_SIG_RPM, {}, {}, 0, 120, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
+  { "speedo", { 11, 12, 16, 18 }, LINK_SIG_VSS, {}, {}, 0, 300, 0, 0, 0, AC_MODE_LIVE, 0, 4, 0, 0 },
 };
 #endif
 
@@ -98,20 +99,22 @@ static void defaultsFor(Gauge &g) { if (g.sig == LINK_SIG_RPM) aircore_defaults_
 static void setRole(int speedo) { G[0].name = speedo ? "speedo" : "tach"; G[0].sig = speedo ? LINK_SIG_VSS : LINK_SIG_RPM; }
 static void cfgSave(int) {
   EEPROM.write(0, AIRCORE_VERSION); EEPROM.write(1, G[0].sig == LINK_SIG_VSS ? 1 : 0);
-  EEPROM.put(4, G[0].cfg); EEPROM.put(40, s_pwmHz); EEPROM.write(44, s_slow); EEPROM.put(64, G[0].pts); EEPROM.commit();
+  EEPROM.put(4, G[0].cfg); EEPROM.put(40, s_pwmHz); EEPROM.write(44, s_slow); EEPROM.put(64, G[0].pts); EEPROM.put(200, G[0].smoothMs); EEPROM.commit();
 }
 static void cfgLoad() {
   EEPROM.begin(EE_SIZE);
   bool ok = EEPROM.read(0) == AIRCORE_VERSION;
   setRole(ok && EEPROM.read(1) == 1);
-  if (ok) { EEPROM.get(4, G[0].cfg); EEPROM.get(40, s_pwmHz); s_slow = EEPROM.read(44) != 0; EEPROM.get(64, G[0].pts); }
+  if (ok) { EEPROM.get(4, G[0].cfg); EEPROM.get(40, s_pwmHz); s_slow = EEPROM.read(44) != 0; EEPROM.get(64, G[0].pts); EEPROM.get(200, G[0].smoothMs); }
+  if (!(G[0].smoothMs >= 0 && G[0].smoothMs <= AIRCORE_SMOOTH_MAX_MS)) G[0].smoothMs = aircore_smooth_default(G[0].sig == LINK_SIG_RPM);
   if (!ok || !aircore_points_valid(&G[0].pts)) aircore_points_clear(&G[0].pts);
   if (s_pwmHz < 100 || s_pwmHz > 40000) s_pwmHz = PWM_HZ_DEFAULT;
   if (!ok || !aircore_valid(&G[0].cfg)) defaultsFor(G[0]);
 }
 #else
 static void cfgSave(int g) { Preferences p; p.begin("aircore", false); p.putBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)); p.putUChar("ver", AIRCORE_VERSION); p.putULong("pwm", s_pwmHz); p.putUChar("slow", s_slow);
-  p.putBytes((String(G[g].name) + "p").c_str(), &G[g].pts, sizeof(AirCorePoints)); p.end(); }
+  p.putBytes((String(G[g].name) + "p").c_str(), &G[g].pts, sizeof(AirCorePoints));
+  p.putFloat((String(G[g].name) + "s").c_str(), G[g].smoothMs); p.end(); }
 static void cfgLoad() {
   Preferences p; p.begin("aircore", true);
   bool ok = p.getUChar("ver", 0) == AIRCORE_VERSION;
@@ -120,6 +123,8 @@ static void cfgLoad() {
   for (int g = 0; g < GAUGES; g++) {
     if (!ok || p.getBytes(G[g].name, &G[g].cfg, sizeof(AirCoreCfg)) != sizeof(AirCoreCfg) || !aircore_valid(&G[g].cfg)) defaultsFor(G[g]);
     if (p.getBytes((String(G[g].name) + "p").c_str(), &G[g].pts, sizeof(AirCorePoints)) != sizeof(AirCorePoints) || !aircore_points_valid(&G[g].pts)) aircore_points_clear(&G[g].pts);
+    G[g].smoothMs = p.getFloat((String(G[g].name) + "s").c_str(), aircore_smooth_default(G[g].sig == LINK_SIG_RPM));
+    if (!(G[g].smoothMs >= 0 && G[g].smoothMs <= AIRCORE_SMOOTH_MAX_MS)) G[g].smoothMs = aircore_smooth_default(G[g].sig == LINK_SIG_RPM);
   }
   p.end();
 }
@@ -218,19 +223,19 @@ static void sendStatus(int g) {
   st.pwmHz = s_pwmHz; st.needle = G[g].needle; st.value = s_val[g]; st.target = G[g].shown; st.sweepS = G[g].sweepS;
   st.strength = G[g].cfg.strength; st.slew = G[g].cfg.slewDegS; st.minV = G[g].cfg.minVal; st.maxV = G[g].cfg.maxVal;
   st.zero = G[g].cfg.zeroDeg; st.span = G[g].cfg.spanDeg; st.npts = G[g].pts.n; st.ch = s_ch;
-  st.lastSeq = s_lastSeq; st.upS = millis() / 1000;
+  st.lastSeq = s_lastSeq; st.upS = millis() / 1000; st.smoothMs = G[g].smoothMs;
   for (int i = 0; i < G[g].pts.n && i < AC_POINTS; i++) { st.pv[i] = G[g].pts.v[i]; st.pa[i] = G[g].pts.a[i]; }
   sendRaw((const uint8_t *)&st, sizeof st);
 }
 static void setMode(int g, uint8_t m) { G[g].mode = m; G[g].holdUntil = 0; G[g].sweepT0 = millis(); }
 static const char *const AC_OP_NAMES[] = { "?", "live", "sweep", "target", "angle", "pwm", "decay", "strength", "slew",
-  "range", "mark", "mark here", "remove mark", "clear marks", "factory settings", "zero", "span" };
+  "range", "mark", "mark here", "remove mark", "clear marks", "factory settings", "zero", "span", "smooth" };
 static void applyCmd(const AcCmd &c) {
   if (c.seq && c.seq == s_lastSeq) return;   // the same command again (the hub sends each one 3 times)
   s_lastSeq = c.seq;
   int g = c.gauge < GAUGES ? c.gauge : 0;
   // Every command from the hub's page, on the serial port (build 10): what arrived and for which gauge.
-  Serial.printf("hub page, command %u: %s %s", c.seq, G[g].name, c.op <= AC_OP_SPAN ? AC_OP_NAMES[c.op] : "?");
+  Serial.printf("hub page, command %u: %s %s", c.seq, G[g].name, c.op <= AC_OP_SMOOTH ? AC_OP_NAMES[c.op] : "?");
   if (c.op == AC_OP_RANGE || c.op == AC_OP_MARK) Serial.printf(" %g %g", c.a, c.b);
   else if (c.op != AC_OP_LIVE && c.op != AC_OP_CLEARMARKS && c.op != AC_OP_DEFAULTS) Serial.printf(" %g", c.a);
   Serial.println();
@@ -244,6 +249,7 @@ static void applyCmd(const AcCmd &c) {
     case AC_OP_DECAY: s_slow = c.a != 0; for (int k = 0; k < GAUGES; k++) cfgSave(k); return;
     case AC_OP_STRENGTH: cfg.strength = c.a; break;
     case AC_OP_SLEW: cfg.slewDegS = c.a; break;
+    case AC_OP_SMOOTH: if (c.a >= 0 && c.a <= AIRCORE_SMOOTH_MAX_MS) { G[g].smoothMs = c.a; cfgSave(g); } return;
     case AC_OP_RANGE: cfg.minVal = c.a; cfg.maxVal = c.b; break;
     case AC_OP_ZERO: cfg.zeroDeg = c.a; break;
     case AC_OP_SPAN: cfg.spanDeg = c.a; break;
@@ -257,7 +263,7 @@ static void applyCmd(const AcCmd &c) {
   if (aircore_valid(&cfg)) { G[g].cfg = cfg; cfgSave(g); }
 }
 // The needle angle wanted now, from the gauge's mode.
-static float wantedAngle(int g, uint32_t now, bool heard) {
+static float wantedAngle(int g, uint32_t now, bool heard, float dt) {
   Gauge &G1 = G[g];
   float lo = G1.pts.n >= 2 ? G1.pts.v[0] : G1.cfg.minVal, hi = G1.pts.n >= 2 ? G1.pts.v[G1.pts.n - 1] : G1.cfg.maxVal;
   if (G1.mode == AC_MODE_ANGLE && G1.holdUntil && (int32_t)(now - G1.holdUntil) >= 0) setMode(g, AC_MODE_LIVE);   // a serial hold ran out
@@ -272,7 +278,8 @@ static float wantedAngle(int g, uint32_t now, bool heard) {
     default: {
       float v; bool has;
       LOCK(); v = s_val[g]; has = s_has[g] && heard; UNLOCK();
-      G1.shown = has ? v : lo;
+      G1.filt = aircore_lowpass(G1.filt, has ? v : lo, dt, G1.smoothMs / 1000.0f);   // smoothed (jitter off the needle)
+      G1.shown = G1.filt;
       return aircore_angle_pts(&G1.cfg, &G1.pts, G1.shown);
     }
   }
@@ -286,8 +293,8 @@ static void show() {
   for (int g = 0; g < GAUGES; g++) {
     const AirCoreCfg &c = G[g].cfg;
     char v[16]; if (s_has[g]) snprintf(v, sizeof v, "%.0f", (float)s_val[g]); else strcpy(v, "--");
-    Serial.printf("  %-6s value %s | needle %.1f deg | min %g max %g zero %g span %g strength %g slew %g\n", G[g].name, v, G[g].needle,
-                  c.minVal, c.maxVal, c.zeroDeg, c.spanDeg, c.strength, c.slewDegS);
+    Serial.printf("  %-6s value %s | needle %.1f deg | min %g max %g zero %g span %g strength %g slew %g smooth %g\n", G[g].name, v, G[g].needle,
+                  c.minVal, c.maxVal, c.zeroDeg, c.spanDeg, c.strength, c.slewDegS, G[g].smoothMs);
     if (G[g].pts.n) {
       Serial.printf("         points (%s):", G[g].pts.n >= 2 ? "in use" : "need 2 or more");
       for (int i = 0; i < G[g].pts.n; i++) Serial.printf(" %g=%g", G[g].pts.v[i], G[g].pts.a[i]);
@@ -306,6 +313,7 @@ static void help() {
   Serial.println("  tach zero 12 | span 245       coil angle at the start of the scale | degrees to the end");
   Serial.println("  tach min 0 | max 8000         values at the start and end of the dial");
   Serial.println("  tach strength 0.8 | slew 720  drive (0.1-1) | fastest needle speed, deg/s");
+  Serial.println("  tach smooth 120               smoothing of the live value, ms (0 = off): takes the jitter off the needle");
   Serial.println("  tach target 3000 | sweeping 4   show a fixed value | sweep end to end and back every 4 s (release: live)");
   Serial.println("  tach mark 2000                 the angle the needle is held at now (tach angle ...) becomes the 2000 mark");
   Serial.println("  tach point 2000 118           the 2000 mark at coil angle 118, typed in");
@@ -363,6 +371,10 @@ static void command(String line) {
   }
   AirCoreCfg c = G[g].cfg;
   if (what == "zero") c.zeroDeg = v; else if (what == "span") c.spanDeg = v; else if (what == "min") c.minVal = v; else if (what == "max") c.maxVal = v;
+  else if (what == "smooth") {
+    if (v < 0 || v > AIRCORE_SMOOTH_MAX_MS) { Serial.println("Out of range, not saved"); return; }
+    G[g].smoothMs = v; cfgSave(g); Serial.printf("%s smooth = %g ms, saved\n", G[g].name, v); return;
+  }
   else if (what == "strength") c.strength = v; else if (what == "slew") c.slewDegS = v;
   else { Serial.println("? type help"); return; }
   if (!aircore_valid(&c)) { Serial.println("Out of range, not saved"); return; }
@@ -431,7 +443,7 @@ void loop() {
   if (now - last < STEP_MS) return;
   float dt = (now - last) / 1000.0f; last = now;
   for (int g = 0; g < GAUGES; g++) {
-    float target = wantedAngle(g, now, heard);
+    float target = wantedAngle(g, now, heard, dt);
     G[g].needle = aircore_slew(G[g].needle, target, G[g].cfg.slewDegS, dt);
     drive(g, G[g].needle);
   }
