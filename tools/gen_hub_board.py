@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hub carrier board (rev A): one parts list -> KiCad PCB (placed), schematic, and a DSN for routing.
+"""Hub carrier board (rev B): one parts list -> KiCad PCB (placed), schematic, and a DSN for routing.
 
 The ESP32 DevKitC plugs into two 19-pin sockets; every module plugs into a header socket; car wiring goes to 5.08 mm
 screw terminals. Pins follow docs/HUB_PINS.md (defaults). Run with KiCad's Python (pcbnew), from the repo root:
@@ -14,7 +14,7 @@ import pcbnew
 FPDIR = "/usr/share/kicad/footprints"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hardware", "hub-board")
 OX, OY = 50.0, 50.0          # board's top-left corner on the KiCad page, mm
-W, H = 120.0, 95.0
+W, H = 148.0, 112.0
 
 def mm(v): return pcbnew.FromMM(v)
 def P(x, y): return pcbnew.VECTOR2I(mm(OX + x), mm(OY + y))
@@ -25,9 +25,9 @@ DEVKIT_J3 = ["GND", "IO23", "IO22", "TX0", "RX0", "IO21", "GND", "IO19", "IO18",
 GPIO_NET = {   # docs/HUB_PINS.md defaults
     "3V3": "+3V3", "GND": "GND", "5V": "+5V_ESP",
     "IO36": "FUEL", "IO39": "RF_MISO", "IO34": "KNOB", "IO35": "LIGHTS", "IO32": "DIMMER", "IO33": "RF_GDO0",
-    "IO25": "BTN_NEXT", "IO26": "BTN_PREV", "IO27": "RF_CSN", "IO14": "RF_SCK", "IO12": "SPARE_IO12", "IO13": "RF_MOSI",
+    "IO25": "BTN_NEXT", "IO26": "BTN_PREV", "IO27": "RF_CSN", "IO14": "RF_SCK", "IO13": "RF_MOSI",
     "IO23": "EGT_CS", "IO22": "CAN_RX", "IO21": "CAN_TX", "IO19": "EGT_SO", "IO18": "EGT_SCK", "IO5": "I2C_SDA",
-    "IO17": "GPS_RXD", "IO16": "GPS_TXD", "IO4": "DHT_DATA", "IO0": "SPARE_IO0", "IO2": "SPARE_IO2", "IO15": "I2C_SCL",
+    "IO17": "GPS_RXD", "IO16": "GPS_TXD", "IO4": "DHT_DATA", "IO2": "SPARE_IO2", "IO15": "I2C_SCL",
 }
 
 # ---- parts: ref, value, footprint "Lib:Name", {pad: (pin name, net)}, x, y (mm on the board), rotation (deg)
@@ -41,67 +41,107 @@ RES = "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
 CAP = "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"
 ZEN = "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
 
-# DevKitC, turned so the antenna points left (off a copper-free corner) and the USB port right. Rotating the top view
-# 90 degrees anticlockwise puts J3 on the top row and J2 on the bottom row; pin 1 of each at the left.
-part("J1", "DevKitC J3 (R6-R24)", SOCK % 19, seq([(n, GPIO_NET.get(n)) for n in DEVKIT_J3]), 14, 14, 90)
-part("J2", "DevKitC J2 (L6-L24)", SOCK % 19, seq([(n, GPIO_NET.get(n)) for n in DEVKIT_J2]), 14, 14 + 25.4, 90)
+# ======== rev B parts ========
+# Off the board (wired to terminals): CC1101, OLED, MPU6050, DHT22, buttons, fuel sender, knob, 12 V signals.
+# On the board: DevKitC, power, CAN, MAX6675 (only the thermocouple outside), GPS (SMA antenna hole), MCP23017, ADS1115.
+LBL = {}
+def label(ref, text): LBL[ref] = text
+RV = "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P2.54mm_Vertical"
+ZV = "Diode_THT:D_DO-35_SOD27_P2.54mm_Vertical_KathodeUp"
+CV = "Capacitor_THT:C_Disc_D3.0mm_W1.6mm_P2.50mm"
+MC = "Connector_Phoenix_MC:PhoenixContact_MC_1,5_%d-G-3.5_1x%02d_P3.50mm_Horizontal"
+MINIFIT = "Connector_Molex:Molex_Mini-Fit_Jr_5569-02A2_2x01_P4.20mm_Horizontal"
+_n = {"R": 9, "D": 9, "C": 9}   # auto refs from R10 / D10 / C10 (R1, D1-D3, C1-C2 are named by hand)
+def nref(k): _n[k] += 1; return f"{k}{_n[k]}"
+def R(val, a, b, x, y, rot=90): ref = nref("R"); part(ref, val, RV, {"1": ("1", a), "2": ("2", b)}, x, y, rot); return ref
+def Z(k, x, y, rot=90): ref = nref("D"); part(ref, "BZX79-C3V3", ZV, {"1": ("K", k), "2": ("A", "GND")}, x, y, rot); return ref
+def Cc(a, x, y, rot=90): ref = nref("C"); part(ref, "100nF", CV, {"1": ("1", a), "2": ("2", "GND")}, x, y, rot); return ref
 
-# Power: 12 V in -> PTC fuse -> reverse diode -> TVS + bulk cap -> buck module header -> 5 V; Schottky to the DevKitC 5V pin
-part("J3", "12V IN", TB % (2, 2), seq([("+12V", "12V_IN"), ("GND", "GND")]), 112, 12, 90)
-part("F1", "MF-RG300 PTC", "Fuse:Fuse_Bourns_MF-RG300", {"1": ("1", "12V_IN"), "2": ("2", "12V_F")}, 98, 6, 0)
-part("D1", "1N5822", "Diode_THT:D_DO-201AD_P15.24mm_Horizontal", {"1": ("K", "+12V"), "2": ("A", "12V_F")}, 103, 16, 180)
-part("D2", "P6KE18A TVS", "Diode_THT:D_DO-15_P10.16mm_Horizontal", {"1": ("K", "+12V"), "2": ("A", "GND")}, 90, 24, 0)
-part("C1", "470uF 35V", "Capacitor_THT:CP_Radial_D8.0mm_P3.50mm", {"1": ("+", "+12V"), "2": ("-", "GND")}, 106, 30, 0)
+# DevKitC on sockets (antenna left over a copper-free corner, USB right)
+part("J1", "DevKitC J3 (R6-R24)", SOCK % 19, seq([(n, GPIO_NET.get(n)) for n in DEVKIT_J3]), 14, 14, 90); label("J1", "DevKitC (R6-R24)")
+part("J2", "DevKitC J2 (L6-L24)", SOCK % 19, seq([(n, GPIO_NET.get(n)) for n in DEVKIT_J2]), 14, 14 + 25.4, 90); label("J2", "DevKitC (L6-L24)")
+
+# Power: Mini-Fit Jr in, PTC fuse, reverse diode, TVS, bulk cap, buck header, 5 V out on Mini-Fit Jr
+part("J3", "12V IN Mini-Fit Jr", MINIFIT, seq([("+12V", "12V_IN"), ("GND", "GND")]), 133.5, 14, 270); label("J3", "12V IN")
+part("F1", "MF-RG300 PTC", "Fuse:Fuse_Bourns_MF-RG300", {"1": ("1", "12V_IN"), "2": ("2", "12V_F")}, 106, 6, 0)
+part("D1", "1N5822", "Diode_THT:D_DO-201AD_P15.24mm_Horizontal", {"1": ("K", "+12V"), "2": ("A", "12V_F")}, 116, 18, 180)
+part("D2", "P6KE18A TVS", "Diode_THT:D_DO-15_P10.16mm_Horizontal", {"1": ("K", "+12V"), "2": ("A", "GND")}, 96, 25, 0)
+part("C1", "470uF 35V", "Capacitor_THT:CP_Radial_D8.0mm_P3.50mm", {"1": ("+", "+12V"), "2": ("-", "GND")}, 114, 28, 0)
 part("J4", "Buck module (IN+ IN- OUT+ OUT-)", "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical",
-     seq([("IN+", "+12V"), ("IN-", "GND"), ("OUT+", "+5V"), ("OUT-", "GND")]), 92, 33, 0)
-part("C2", "100uF 10V", "Capacitor_THT:CP_Radial_D6.3mm_P2.50mm", {"1": ("+", "+5V"), "2": ("-", "GND")}, 98, 44, 0)
-part("D3", "1N5819", "Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal", {"1": ("K", "+5V_ESP"), "2": ("A", "+5V")}, 78, 47, 180)
-part("J5", "5V OUT (screens, gauges)", TB % (2, 2), seq([("+5V", "+5V"), ("GND", "GND")]), 112, 52, 90)
+     seq([("IN+", "+12V"), ("IN-", "GND"), ("OUT+", "+5V"), ("OUT-", "GND")]), 98, 31, 0); label("J4", "BUCK IN+ IN- OUT+ OUT-")
+part("C2", "100uF 10V", "Capacitor_THT:CP_Radial_D6.3mm_P2.50mm", {"1": ("+", "+5V"), "2": ("-", "GND")}, 112, 40, 0)
+part("D3", "1N5819", "Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal", {"1": ("K", "+5V_ESP"), "2": ("A", "+5V")}, 80, 47, 180)
+part("J5", "5V OUT Mini-Fit Jr", MINIFIT, seq([("+5V", "+5V"), ("GND", "GND")]), 133.5, 46, 270); label("J5", "5V OUT")
 
-# Modules on sockets
-part("J6", "CC1101 (2x4)", "Connector_PinSocket_2.54mm:PinSocket_2x04_P2.54mm_Vertical",
-     {"1": ("GND", "GND"), "2": ("VCC", "+3V3"), "3": ("GDO0", "RF_GDO0"), "4": ("CSN", "RF_CSN"),
-      "5": ("SCK", "RF_SCK"), "6": ("MOSI", "RF_MOSI"), "7": ("MISO", "RF_MISO"), "8": ("GDO2", None)}, 16, 45, 0)
-part("J7", "SN65HVD230 (3V3 GND CTX CRX)", SOCK % 4, seq([("3V3", "+3V3"), ("GND", "GND"), ("CTX", "CAN_TX"), ("CRX", "CAN_RX")]), 24, 45, 0)
-part("J8", "SN65HVD230 (CANH CANL)", SOCK % 2, seq([("CANH", "CANH"), ("CANL", "CANL")]), 28, 45, 0)
-part("J9", "MAX6675 (GND VCC SCK CS SO)", SOCK % 5, seq([("GND", "GND"), ("VCC", "+3V3"), ("SCK", "EGT_SCK"), ("CS", "EGT_CS"), ("SO", "EGT_SO")]), 33, 45, 0)
-part("J10", "OLED (GND VCC SCL SDA)", SOCK % 4, seq([("GND", "GND"), ("VCC", "+3V3"), ("SCL", "I2C_SCL"), ("SDA", "I2C_SDA")]), 38, 45, 0)
-part("J11", "MPU6050 GY-521", SOCK % 8, seq([("VCC", "+3V3"), ("GND", "GND"), ("SCL", "I2C_SCL"), ("SDA", "I2C_SDA"), ("XDA", None), ("XCL", None), ("AD0", "GND"), ("INT", None)]), 24, 59, 90)
+# GPS on board; SMA bulkhead hole at the top edge for the outside antenna (u.FL-to-SMA pigtail from the module)
+part("J15", "GPS (VCC RX TX GND)", SOCK % 4, seq([("VCC", "+5V"), ("RX", "GPS_RXD"), ("TX", "GPS_TXD"), ("GND", "GND")]), 72, 4, 90); label("J15", "GPS")
+part("H5", "SMA bulkhead (GPS antenna)", "MountingHole:MountingHole_6.4mm_M6", {}, 90, 7, 0); label("H5", "GPS ANT")
+
+# CAN transceiver module + termination
+part("J7", "SN65HVD230 (3V3 GND CTX CRX)", SOCK % 4, seq([("3V3", "+3V3"), ("GND", "GND"), ("CTX", "CAN_TX"), ("CRX", "CAN_RX")]), 76, 53, 0); label("J7", "CAN 3V3 GND TX RX")
+part("J8", "SN65HVD230 (CANH CANL)", SOCK % 2, seq([("CANH", "CANH"), ("CANL", "CANL")]), 82, 53, 0); label("J8", "H L")
+part("R1", "120R", RES, {"1": ("1", "CANH"), "2": ("2", "CAN_T")}, 100, 56, 0)
+part("JP1", "CAN 120R", "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical", {"1": ("1", "CAN_T"), "2": ("2", "CANL")}, 114, 56, 90); label("JP1", "CAN 120R")
+
+# MAX6675 module: its own screw terminal takes the thermocouple
+part("J9", "MAX6675 (GND VCC SCK CS SO)", SOCK % 5, seq([("GND", "GND"), ("VCC", "+3V3"), ("SCK", "EGT_SCK"), ("CS", "EGT_CS"), ("SO", "EGT_SO")]), 88, 53, 0); label("J9", "EGT")
+
+# MCP23017 (DIP-28, address 0x27: A0-A2 high), 16 inputs through 10k
+mcp = {"9": ("VDD", "+3V3"), "10": ("VSS", "GND"), "11": ("NC", None), "12": ("SCL", "I2C_SCL"), "13": ("SDA", "I2C_SDA"), "14": ("NC", None),
+       "15": ("A0", "+3V3"), "16": ("A1", "+3V3"), "17": ("A2", "+3V3"), "18": ("RESET", "+3V3"), "19": ("INTB", None), "20": ("INTA", None)}
+for i in range(8): mcp[str(1 + i)] = (f"GPB{i}", f"MCP_B{i}"); mcp[str(21 + i)] = (f"GPA{i}", f"MCP_A{i}")
+part("U1", "MCP23017 (DIP-28)", "Package_DIP:DIP-28_W7.62mm_Socket", mcp, 22, 62, 90); label("U1", "MCP23017")
+Cc("+3V3", 59, 66)
+for i in range(8):
+    R("10k", f"MCP_A{i}_IN", f"MCP_A{i}", 6 + 3.5 * i, 88)
+    R("10k", f"MCP_B{i}_IN", f"MCP_B{i}", 36 + 3.5 * i, 88)
+
+# ADS1115 module: each channel series (fitted 1k), divider to GND and pull-up to 3.3 V (fit as needed)
 part("J12", "ADS1115", SOCK % 10, seq([("VDD", "+3V3"), ("GND", "GND"), ("SCL", "I2C_SCL"), ("SDA", "I2C_SDA"), ("ADDR", "GND"), ("ALRT", None),
-     ("A0", "ADS_A0"), ("A1", "ADS_A1"), ("A2", "ADS_A2"), ("A3", "ADS_A3")]), 46, 59, 90)
-part("J13", "I2C (MCP23017 ...)", SOCK % 4, seq([("3V3", "+3V3"), ("GND", "GND"), ("SCL", "I2C_SCL"), ("SDA", "I2C_SDA")]), 43, 45, 0)
-part("J14", "I2C (spare)", SOCK % 4, seq([("3V3", "+3V3"), ("GND", "GND"), ("SCL", "I2C_SCL"), ("SDA", "I2C_SDA")]), 48, 45, 0)
-part("J15", "GPS (VCC RX TX GND)", SOCK % 4, seq([("VCC", "+5V"), ("RX", "GPS_RXD"), ("TX", "GPS_TXD"), ("GND", "GND")]), 53, 45, 0)
-part("J16", "DHT22 (+ DATA -)", SOCK % 3, seq([("VCC", "+3V3"), ("DATA", "DHT_DATA"), ("GND", "GND")]), 58, 45, 0)
-part("J17", "Spare GPIO (0 2 12 GND)", "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical",
-     seq([("IO0", "SPARE_IO0"), ("IO2", "SPARE_IO2"), ("IO12", "SPARE_IO12"), ("GND", "GND")]), 84, 4, 0)
+     ("A0", "ADS_A0"), ("A1", "ADS_A1"), ("A2", "ADS_A2"), ("A3", "ADS_A3")]), 70, 70, 90); label("J12", "ADS1115")
+for i in range(4):
+    x, y = 104 + 11 * (i % 2), (80, 88)[i // 2]
+    R("1k", f"ADS_IN{i}", f"ADS_A{i}", x, y)
+    R("DNP", f"ADS_A{i}", "GND", x + 3.5, y)
+    R("DNP", "+3V3", f"ADS_IN{i}", x + 7, y)
 
-# CAN termination (most SN65HVD230 boards already have 120 ohm: fit the jumper only if the bus needs it)
-part("R1", "120R", RES, {"1": ("1", "CANH"), "2": ("2", "CAN_T")}, 3, 62, 0)
-part("JP1", "CAN 120R", "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical", {"1": ("1", "CAN_T"), "2": ("2", "CANL")}, 17, 62, 90)
+# ESP32 inputs: series resistor + 3.3 V clamp (12 V ones with a divider and filter)
+x0, y0 = 66, 88
+def inp(net, rs, rd=None, clamp=True, cap=False):
+    global x0
+    R(rs, f"{net}_IN", net, x0, y0); x0 += 3.5
+    if rd: R(rd, net, "GND", x0, y0); x0 += 3.5
+    if clamp: Z(net, x0, y0); x0 += 3.5
+    if cap: Cc(net, x0, y0); x0 += 4.5
+    x0 += 1.5
+inp("FUEL", "1k"); R("DNP", "+3V3", "FUEL_IN", x0, y0); x0 += 5
+inp("KNOB", "1k")
+inp("LIGHTS", "47k", "10k", cap=True)
+x0, y0 = 66, 80   # second row
+inp("DIMMER", "47k", "10k", cap=True)
+inp("BTN_NEXT", "1k", clamp=False)
+inp("BTN_PREV", "1k", clamp=False)
+inp("SPARE_IO2", "10k")
 
-# 12 V inputs (lights, dimmer): 47k / 10k divider, 3.3 V zener clamp, 100 nF filter. Fuel: 1k series, clamp, filter.
-def divider(n, net, x):
-    part(f"R{10 + 2 * n}", "47k", RES, {"1": ("1", f"{net}_12V"), "2": ("2", net)}, x, 66, 270)
-    part(f"R{11 + 2 * n}", "10k", RES, {"1": ("1", net), "2": ("2", "GND")}, x + 4, 66, 270)
-    part(f"D{10 + n}", "BZX79-C3V3", ZEN, {"1": ("K", net), "2": ("A", "GND")}, x + 8, 66, 270)
-    part(f"C{10 + n}", "100nF", CAP, {"1": ("1", net), "2": ("2", "GND")}, x + 12, 68, 270)
-divider(0, "LIGHTS", 26)
-divider(1, "DIMMER", 44)
-part("R14", "1k", RES, {"1": ("1", "FUEL_IN"), "2": ("2", "FUEL")}, 62, 66, 270)
-part("R15", "DNP (pull-up)", RES, {"1": ("1", "+3V3"), "2": ("2", "FUEL")}, 66, 66, 270)
-part("D12", "BZX79-C3V3", ZEN, {"1": ("K", "FUEL"), "2": ("A", "GND")}, 70, 66, 270)
-part("C12", "100nF", CAP, {"1": ("1", "FUEL"), "2": ("2", "GND")}, 74, 68, 270)
+# External modules: 100 ohm series only (fast buses), I2C pull-ups for the board's own chips, DHT pull-up
+for k, net in enumerate(("RF_SCK", "RF_MOSI", "RF_MISO", "RF_CSN", "RF_GDO0")):
+    R("100R", net, net + "_X", 13, 52 + 3.5 * k, 0)         # next to the SPI terminal (left edge)
+for k, net in enumerate(("I2C_SDA", "I2C_SCL", "DHT_DATA")):
+    R("100R", net, net + "_X", 128, (78, 74.5, 71)[k], 0)    # next to the I2C / DHT terminal (right edge)
+R("4k7", "+3V3", "I2C_SDA", 58, 56); R("4k7", "+3V3", "I2C_SCL", 61.5, 56); R("10k", "+3V3", "DHT_DATA", 65, 56)
 
-# Screw terminals along the bottom edge
-part("J20", "CAN (H L GND)", TB % (3, 3), seq([("CANH", "CANH"), ("CANL", "CANL"), ("GND", "GND")]), 4, 89, 0)
-part("J21", "LIGHTS DIMMER GND", TB % (3, 3), seq([("LIGHTS", "LIGHTS_12V"), ("DIMMER", "DIMMER_12V"), ("GND", "GND")]), 22, 89, 0)
-part("J22", "FUEL GND", TB % (2, 2), seq([("FUEL", "FUEL_IN"), ("GND", "GND")]), 40, 89, 0)
-part("J23", "KNOB (3V3 W GND)", TB % (3, 3), seq([("3V3", "+3V3"), ("W", "KNOB"), ("GND", "GND")]), 53, 89, 0)
-part("J24", "BUTTONS (NEXT PREV GND)", TB % (3, 3), seq([("NEXT", "BTN_NEXT"), ("PREV", "BTN_PREV"), ("GND", "GND")]), 71, 89, 0)
-part("J25", "ADS1115 A0-A3 GND", TB % (5, 5), seq([("A0", "ADS_A0"), ("A1", "ADS_A1"), ("A2", "ADS_A2"), ("A3", "ADS_A3"), ("GND", "GND")]), 89, 89, 0)
+# Terminals (pluggable Phoenix MC 3.5 mm) along the bottom and left edges
+part("J20", "MCP GPA0-7", MC % (8, 8), seq([(f"A{i}", f"MCP_A{i}_IN") for i in range(8)]), 4.5, 101, 0); label("J20", "MCP A0-A7")
+part("J21", "MCP GPB0-7", MC % (8, 8), seq([(f"B{i}", f"MCP_B{i}_IN") for i in range(8)]), 36, 101, 0); label("J21", "MCP B0-B7")
+part("J22", "INPUTS", MC % (8, 8), seq([("FUEL", "FUEL_IN"), ("KNOB", "KNOB_IN"), ("LIGHTS", "LIGHTS_IN"), ("DIMMER", "DIMMER_IN"), ("NEXT", "BTN_NEXT_IN"),
+     ("PREV", "BTN_PREV_IN"), ("IO2", "SPARE_IO2_IN"), ("GND", "GND")]), 67.5, 101, 0); label("J22", "FUEL KNOB LIGHTS DIM NEXT PREV IO2 GND")
+part("J23", "ADS A0-A3, 3V3, GND", MC % (6, 6), seq([("A0", "ADS_IN0"), ("A1", "ADS_IN1"), ("A2", "ADS_IN2"), ("A3", "ADS_IN3"), ("3V3", "+3V3"), ("GND", "GND")]), 99, 101, 0); label("J23", "A0 A1 A2 A3 3V3 GND")
+part("J24", "3V3 GND (sensors)", MC % (4, 4), seq([("3V3", "+3V3"), ("GND", "GND"), ("3V3", "+3V3"), ("GND", "GND")]), 123.5, 101, 0); label("J24", "3V3 GND 3V3 GND")
+part("J25", "CAN (H L GND)", MC % (3, 3), seq([("CANH", "CANH"), ("CANL", "CANL"), ("GND", "GND")]), 137, 60.5, 90); label("J25", "CAN H L GND")
+part("J26", "SPI (CC1101)", MC % (7, 7), seq([("3V3", "+3V3"), ("GND", "GND"), ("SCK", "RF_SCK_X"), ("MOSI", "RF_MOSI_X"), ("MISO", "RF_MISO_X"), ("CSN", "RF_CSN_X"), ("GDO0", "RF_GDO0_X")]), 9, 50, 270); label("J26", "CC1101 3V3 GND SCK MOSI MISO CSN GDO0")
+part("J27", "I2C (OLED, MPU6050) + DHT22", MC % (6, 6), seq([("3V3", "+3V3"), ("GND", "GND"), ("SDA", "I2C_SDA_X"), ("SCL", "I2C_SCL_X"), ("DHT", "DHT_DATA_X"), ("GND", "GND")]), 137, 85, 90); label("J27", "3V3 GND SDA SCL DHT GND")
 
-for i, (x, y) in enumerate(((4, 4), (116, 91), (5, 74), (116, 72))):
+for i, (x, y) in enumerate(((4, 4), (143, 30), (60, 79), (143.5, 104))):
     part(f"H{i + 1}", "M3", "MountingHole:MountingHole_3.2mm_M3", {}, x, y, 0)
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -180,7 +220,7 @@ def write_schematic(path):
     FONT = "(effects (font (size 1.27 1.27)))"
     HIDE = "(effects (font (size 1.27 1.27)) hide)"
     libs, body = [], []
-    col_x, y, col_w, top_margin, bottom = 32, 30, 110, 30, 310   # grid steps; A2 = 467 x 330 steps
+    col_x, y, col_w, top_margin, bottom = 32, 30, 110, 30, 450   # grid steps; A2 = 467 x 330 steps
     for p in PARTS:
         pins = sorted(p["pads"].items(), key=lambda kv: (len(kv[0]), kv[0]))
         half = (len(pins) + 1) // 2
@@ -219,11 +259,11 @@ def write_schematic(path):
                 body.append(f'(label {q(net)} (at {f(ex)} {f(py)} {0 if side > 0 else 180}) (fields_autoplaced) (effects (font (size 1.27 1.27)) (justify {"left" if side > 0 else "right"} bottom)) (uuid {uid()}))')
         y += hgt + 10
     body.append(f'(text "MSP-DASH hub carrier rev A: generated by tools/gen_hub_board.py. Pins with the same label are connected." (at {f(20)} {f(18)} 0) (effects (font (size 2 2)) (justify left bottom)) (uuid {uid()}))')
-    sch = (f'(kicad_sch (version 20230121) (generator eeschema)\n  (uuid {ROOT_UUID})\n  (paper "A2")\n'
-           f'  (title_block (title "MSP-DASH hub carrier") (rev "A") (comment 1 "Generated by tools/gen_hub_board.py"))\n'
+    sch = (f'(kicad_sch (version 20230121) (generator eeschema)\n  (uuid {ROOT_UUID})\n  (paper "A1")\n'
+           f'  (title_block (title "MSP-DASH hub carrier") (rev "B") (comment 1 "Generated by tools/gen_hub_board.py"))\n'
            '  (lib_symbols\n' + "\n".join(libs) + '\n  )\n' + "\n".join(body) + '\n  (sheet_instances (path "/" (page "1")))\n)\n')
     open(path, "w").write(sch)
-    if col_x * G > 594: raise SystemExit("schematic wider than the A2 sheet")
+    if col_x * G > 841: raise SystemExit("schematic wider than the A1 sheet")
 
 # ---- routing in: Freerouting's .ses (coordinates in 0.1 um, y up) -> tracks and vias
 def sexp(text):
@@ -289,15 +329,12 @@ def finish(pcb, ses):
         b.Add(z)
     pcbnew.ZONE_FILLER(b).Fill(b.Zones())
     # labels: what plugs in where, on the silkscreen
-    SHORT = {"J6": "CC1101", "J7": "CAN 3V3 GND TX RX", "J8": "H L", "J9": "EGT", "J10": "OLED", "J11": "MPU6050", "J12": "ADS1115",
-             "J13": "I2C", "J14": "I2C", "J15": "GPS", "J16": "DHT", "J17": "IO0 IO2 IO12 GND", "J4": "BUCK IN+ IN- OUT+ OUT-",
-             "J3": "12V IN", "J5": "5V OUT", "J20": "CAN H L GND", "J21": "LIGHTS DIM GND", "J22": "FUEL GND", "J23": "KNOB 3V3 W GND",
-             "J24": "NEXT PREV GND", "J25": "A0 A1 A2 A3 GND", "J1": "DevKitC (R6-R24)", "J2": "DevKitC (L6-L24)", "JP1": "CAN 120R"}
+    SHORT = LBL
     for f in b.GetFootprints():
         if f.GetReference() in SHORT:   # a short label on the silkscreen: what plugs in where
             v = f.Value(); v.SetText(SHORT[f.GetReference()]); v.SetLayer(pcbnew.F_SilkS); v.SetVisible(True)
             v.SetTextSize(pcbnew.VECTOR2I(mm(0.9), mm(0.9))); v.SetTextThickness(mm(0.15))
-    t = pcbnew.PCB_TEXT(b); t.SetText("MSP-DASH hub carrier rev A"); t.SetLayer(pcbnew.F_SilkS)
+    t = pcbnew.PCB_TEXT(b); t.SetText("MSP-DASH hub carrier rev B"); t.SetLayer(pcbnew.F_SilkS)
     t.SetTextSize(pcbnew.VECTOR2I(mm(1.5), mm(1.5))); t.SetTextThickness(mm(0.25)); t.SetPosition(P(40, 4)); b.Add(t)
     b.SetFileName(pcb); pcbnew.SaveBoard(pcb, b)
     rpt = os.path.join(OUT, "drc.rpt")

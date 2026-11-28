@@ -1,67 +1,62 @@
-# Hub carrier board, rev A
+# Hub carrier board, rev B
 
-The hub's ESP32 DevKitC plugs into two 19-pin sockets; every module plugs into a socket; the car's wiring goes to
-5.08 mm screw terminals. 120 x 95 mm, 2 layers, through-hole only (hand soldering). Pins are the defaults in
-docs/HUB_PINS.md; the board replaces the Freenove terminal board.
+The hub's ESP32 DevKitC plugs into two 19-pin sockets. On the board: the protected 12 V input, the 5 V buck module
+header, CAN (SN65HVD230 module), EGT (MAX6675 module: only the thermocouple is wired outside, to its own terminal),
+GPS (module on a socket, SMA bulkhead hole at the top edge for an outside antenna), an MCP23017 (16 digital inputs)
+and an ADS1115 module (4 analog inputs). Everything else lives off the board and is wired to terminals: CC1101, OLED,
+MPU6050, DHT22, fuel sender, knob, lights, dimmer, buttons. 148 x 112 mm, 2 layers, through-hole only.
 
-**Status: designed and routed, not built.** Design rules pass with no unconnected pads (drc.rpt). What is left in the
-report is cosmetic (silkscreen text overlapping, footprint library links that resolve on a PC with KiCad's standard
-libraries).
+Rev A (all modules on sockets, 5.08 mm screw terminals) is in git history.
 
-Files: `hub-board.kicad_pro` (open this in KiCad 7 or 8: it brings the schematic and the board), `hub-board.kicad_sch`,
-`hub-board.kicad_pcb`, `hub-board-gerbers.zip` (upload to JLCPCB: 2 layers, 1.6 mm, 1 oz, any colour), `gerbers/`.
+Files: `hub-board.kicad_pro` (open in KiCad 7 or 8), `hub-board.kicad_sch`, `hub-board.kicad_pcb`,
+`hub-board-gerbers.zip` (JLCPCB: 2 layers, 1.6 mm, 1 oz), `gerbers/`, `drc.rpt`.
 
-The schematic and the board are linked part by part, so a change in the schematic goes to the board with Tools >
-Update PCB from Schematic. To use a different plug: change that connector's Footprint field in the schematic (for
-example a JST-XH or Molex Micro-Fit footprint with the same number of pins), update the PCB, move the new part into
-place and re-route its tracks. Parts are boxes with every pin named; pins with the same label are connected.
+## Connectors
+
+| Ref | Connector | Pins |
+|---|---|---|
+| J3 | 12 V in: Molex Mini-Fit Jr 5569-02A2 (right angle, PCB pegs). Plug: housing 5557-02R, pins 5556 | 1 +12V, 2 GND |
+| J5 | 5 V out (screens, gauge board): Mini-Fit Jr 5569-02A2 | 1 +5V, 2 GND |
+| J20 | MCP23017 port A: 8 inputs | A0-A7 |
+| J21 | MCP23017 port B: 8 inputs | B0-B7 |
+| J22 | ESP32 inputs | FUEL (IO36), KNOB (IO34), LIGHTS (IO35), DIMMER (IO32), NEXT (IO25), PREV (IO26), IO2, GND |
+| J23 | ADS1115 | A0, A1, A2, A3, 3V3, GND |
+| J24 | Sensor power | 3V3, GND, 3V3, GND |
+| J25 | CAN | CANH, CANL, GND |
+| J26 | CC1101 (outside) | 3V3, GND, SCK (IO14), MOSI (IO13), MISO (IO39), CSN (IO27), GDO0 (IO33) |
+| J27 | I2C (OLED, MPU6050) + DHT22 | 3V3, GND, SDA (IO5), SCL (IO15), DHT (IO4), GND |
+
+Signal terminals: Phoenix MC 1,5/x-G-3.5 headers (3.5 mm, pluggable). Plugs: Phoenix MC 1,5/x-ST-3,5 (same pin count).
+Not on any terminal: IO0 and IO12 (boot pins: a signal on them at power-up stops the ESP32 starting), IO16/IO17 (GPS on
+the board), IO18/IO19/IO23 (MAX6675), IO21/IO22 (CAN).
+
+## Inputs
+
+- **MCP23017 (U1, address 0x27):** each input through 10k. Takes 12 V signals (the chip's clamp limits the current
+  to under 1 mA) and switches to ground (use the internal pull-up on the Inputs page).
+- **ESP32 inputs:** FUEL 1k + 3.3 V clamp (pull-up position not fitted); KNOB 1k + clamp (0-3.3 V pot: use J24 for
+  3V3/GND); LIGHTS and DIMMER 47k/10k dividers + clamp + 100 nF (12 V signals); NEXT and PREV 1k (buttons to
+  ground, internal pull-up); IO2 10k + clamp.
+- **ADS1115:** each channel has a series resistor (1k fitted), a divider resistor to ground and a pull-up to 3.3 V
+  (not fitted). 0-3.3 V sensor: as built. 0-5 V sensor: fit the divider (for example 1k series stays, 2k to ground).
+  Resistive sender (fuel, temperature): fit the pull-up (for example 1k). Values per channel:
+
+| Channel | Series | To ground | Pull-up |
+|---|---|---|---|
+| A0 | R26 (1k) | R27 (not fitted) | R28 (not fitted) |
+| A1 | R29 (1k) | R30 (not fitted) | R31 (not fitted) |
+| A2 | R32 (1k) | R33 (not fitted) | R34 (not fitted) |
+| A3 | R35 (1k) | R36 (not fitted) | R37 (not fitted) |
+- **Outside modules:** 100 ohm in series only (fast buses). 4k7 I2C pull-ups and a 10k DHT pull-up on the board.
 
 ## Check before ordering
 
-1. **DevKitC row spacing:** the board uses 25.4 mm between the two 19-pin rows. Measure yours.
-2. **Module pin order** (each socket's pin 1 has the square pad). Clones differ: check yours against these.
-
-| Socket | Module | Pins from pin 1 |
-|---|---|---|
-| J6 (2x4) | CC1101 | 1 GND, 2 VCC, 3 GDO0, 4 CSN, 5 SCK, 6 MOSI, 7 MISO, 8 GDO2 |
-| J7 + J8 | SN65HVD230 | 3V3, GND, CTX, CRX + CANH, CANL |
-| J9 | MAX6675 | GND, VCC, SCK, CS, SO |
-| J10 | SSD1306 OLED | GND, VCC, SCL, SDA |
-| J11 | MPU6050 GY-521 | VCC, GND, SCL, SDA, XDA, XCL, AD0, INT |
-| J12 | ADS1115 | VDD, GND, SCL, SDA, ADDR, ALRT, A0, A1, A2, A3 |
-| J13, J14 | I2C (MCP23017, spare) | 3V3, GND, SCL, SDA |
-| J15 | GPS (NEO-6M) | VCC (5 V), RX, TX, GND |
-| J16 | DHT22 | +, DATA, - |
-| J4 | Buck module (wired) | IN+, IN-, OUT+, OUT- |
-| J17 | Spare GPIO | IO0, IO2, IO12, GND |
-
-3. **Fuel sender:** J22 goes through 1k with a 3.3 V clamp. R15 (pull-up to 3.3 V) is not fitted; fit it only if your
-   sender wiring needs one.
-4. **CAN termination:** most SN65HVD230 boards have 120 ohm already. JP1 adds R1 (120 ohm): fit the jumper only if the
-   bus needs it.
-
-## Parts (besides the modules)
-
-| Ref | Part |
-|---|---|
-| F1 | Bourns MF-RG300 PTC fuse |
-| D1 | 1N5822 (reverse polarity) |
-| D2 | P6KE18A TVS |
-| D3 | 1N5819 (5 V to the DevKitC, so USB and the car supply cannot feed each other) |
-| C1 | 470 uF 35 V radial, 8 mm |
-| C2 | 100 uF 10 V radial, 6.3 mm |
-| R10, R12 | 47k; R11, R13 | 10k (lights and dimmer dividers) |
-| R14 | 1k; R15 | pull-up, not fitted |
-| D10-D12 | BZX79-C3V3 zener |
-| C10-C12 | 100 nF disc |
-| R1 | 120 ohm; JP1 | 2-pin header + jumper |
-| J1, J2 | 1x19 female header 2.54 mm |
-| J3, J5, J20-J25 | Phoenix MKDS 1,5 5.08 mm terminals (2, 3, 5 way) |
-| Sockets | female headers 2.54 mm: 2x4, 1x2, 1x3, 1x4, 1x5, 1x8, 1x10 |
-| H1-H4 | M3 mounting holes |
-
-Traces are 0.5 mm (power included: the hub, screens and gauge board together draw well under 2 A); ground is poured on
-both sides. The area under the ESP32's antenna (left end) has no copper.
+1. **DevKitC row spacing:** 25.4 mm between the 19-pin rows. Measure yours.
+2. **Module pin order** (square pad = pin 1): SN65HVD230 J7 3V3, GND, CTX, CRX + J8 CANH, CANL; MAX6675 J9 GND,
+   VCC, SCK, CS, SO; ADS1115 J12 VDD, GND, SCL, SDA, ADDR, ALRT, A0-A3; GPS J15 VCC (5 V), RX, TX, GND; buck J4
+   IN+, IN-, OUT+, OUT-.
+3. **GPS antenna:** a u.FL-to-SMA bulkhead pigtail (about 10 cm) from the module to the 6.4 mm hole (H5).
+4. **CAN termination:** fit JP1 only if the bus needs another 120 ohm.
 
 ## Regenerating
 
